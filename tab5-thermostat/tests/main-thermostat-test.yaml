@@ -1,0 +1,36 @@
+# Host build for the scenario tests (tests/run.sh scenarios): the thermostat packages with
+# short timers, fast physics and test-only hooks. Never flashed; the hooks live only here.
+
+substitutions:
+  # Physics 600x real time (one 1 s step = 10 simulated minutes), readings every 250 ms.
+  sim_speed: "600"
+  sim_publish_interval: 250ms
+
+esphome:
+  name: main-thermostat-test
+
+packages:
+  sim: !include ../sim/virtual-house.yaml
+
+host:
+
+logger:
+
+api:
+  port: 6053
+  actions:
+    # Test-only: drive the relays directly, bypassing the logic (e.g. both on, for the
+    # interlock watchdog). There is deliberately no O/B argument.
+    - action: test_force_relays
+      variables:
+        heat: bool
+        cool: bool
+      then:
+        - lambda: |-
+            if (heat) id(relay_heat).turn_on(); else id(relay_heat).turn_off();
+            if (cool) id(relay_cool).turn_on(); else id(relay_cool).turn_off();
+
+time:
+  - platform: host
+    id: host_time
+    timezone: America/New_York
