@@ -159,10 +159,31 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 
 **Offline:** everything above works without Home Assistant or Wi-Fi, except the outside card.
 
+## Entity bindings
+
+The ids come from the milestone 2 spec draft (`mac/thermostat-logic`, `docs/superpowers/specs/2026-10-28-thermostat-logic-design.md`, "Entities the screen and HA can use"). The screen binds to these and never to the climate's low/high setpoints: milestone 2 derives those from `comfort_target`.
+
+| Screen element | Reads | Writes |
+|---|---|---|
+| Room temperature | `room_temperature` (°C, shown °F) | |
+| Status marker and subline | `main_thermostat` action; `call_heat` / `call_cool` / `call_fan`; minutes since the action began, tracked on the device | |
+| Target (Comfort) | `comfort_target` | `comfort_target` ±1 (debounced) |
+| Target (Eco) | Eco temperature = `comfort_target` ∓ `eco_offset` by mode; **held Eco override: id pending in milestone 2** | **held Eco override (pending)** |
+| Comfort / Eco pills | `comfort_level` | `comfort_level` |
+| Mode / Fan pills | `main_thermostat` mode / fan mode | `main_thermostat` mode / fan mode |
+| Schedule status | `schedule_status`, `schedule_hold`. Asked milestone 2 for structured fields (period name, level, end time) so the text matches the screen's wording | |
+| Resume schedule | `schedule_hold` (shown only while holding) | `resume_schedule` |
+| Humidity | `room_humidity` | |
+| Outside | HA weather entity (imported) | |
+| Sensor fault banner | `sensor_fault` | |
+| Interlock fault banner | `interlock_fault` | (cleared from HA or the web page only, not the wall: it's a safety latch, *my call*) |
+
+The interlock banner uses the same Signal Yellow treatment as the sensor fault: "Heating and cooling were both requested, so the system stopped. Check HA." *(my call)*
+
 ## Constraints
 
 - ESPHome 2026.10.x, LVGL, the Tab5 ST7123 panel, landscape via LVGL software rotation. Prefer partial redraws: avoid full-screen invalidation on every tick.
-- The package contract in AGENTS.md: `room_temperature`, `room_humidity`, `main_thermostat` (climate). The UI never touches `relay_*` directly.
+- The package contract in AGENTS.md, extended by the milestone 2 entity table above. The UI never touches `relay_*` (internal in milestone 2) or the climate's low/high setpoints directly.
 - Flash budget: compile fonts with glyph subsets (digits, °, %, the needed letters), especially the 164 px and 105 px sizes.
 - No secrets or location in git.
 
