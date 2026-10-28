@@ -1,6 +1,6 @@
 # Tab5 thermostat firmware
 
-ESPHome config for the middle-floor thermostat. This folder is mounted as `/config` in the `esphome` container.
+ESPHome config for the Main Thermostat. This folder is mounted as `/config` in the `esphome` container.
 
 ## First-time setup
 

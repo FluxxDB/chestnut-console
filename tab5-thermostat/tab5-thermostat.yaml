@@ -1,9 +1,9 @@
-# Chestnut Console: middle-floor thermostat on an M5Stack Tab5.
+# Chestnut Console: the Main Thermostat, on an M5Stack Tab5.
 # Milestone 1: Wi-Fi, Home Assistant API, local web page, display + touch smoke test.
 
 substitutions:
   name: tab5-thermostat
-  friendly_name: Middle Floor Thermostat
+  friendly_name: Main Thermostat
   # Landscape. Use 90° instead if the screen comes out upside down.
   display_rotation: 270°
 

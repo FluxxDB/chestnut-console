@@ -21,7 +21,7 @@ lvgl:
         - label:
             align: TOP_MID
             y: 115
-            text: "Middle floor thermostat"
+            text: "Main Thermostat"
             text_font: montserrat_28
             text_color: 0xB89A80
         - label:

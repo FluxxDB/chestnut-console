@@ -7,7 +7,7 @@ Read this first. Deep background is in [tab5-thermostat/docs/research.md](tab5-t
 Dang is turning an **M5Stack Tab5** (ESP32-P4 + ESP32-C6 Wi-Fi, 5" 720×1280 touchscreen) into a smart thermostat for his family's house, integrated with **Home Assistant** through **ESPHome**.
 
 - The house (Northern Virginia, built 1999) has **two HVAC zones and two thermostats**. Public records suggest gas forced-air heat with central AC, and possibly a heat pump on one zone. Unconfirmed until Dang's site survey.
-- **Scope now: the middle floor only.** Its thermostat is the ~25-year-old one. The top floor keeps its newer thermostat for now. Long term, one main Tab5 should control both floors, with the top floor running its own controller and the Tab5 acting as a remote through HA.
+- **Scope now: the Main Thermostat** (Dang named it, 2026-10-28; don't call it the middle-floor thermostat). It replaces the ~25-year-old thermostat on the middle floor. The top floor keeps its newer thermostat for now. Long term, one main Tab5 should control both floors, with the top floor running its own controller and the Tab5 acting as a remote through HA.
 - Dang lives in an apartment away from the house. **Nothing can be wired yet.** All work is bench work and simulation until his next visit. The house is occupied and has Wi-Fi.
 
 ## Decisions (made with Dang)
@@ -72,7 +72,7 @@ Hardware and simulation packages provide the same ids, so the logic package does
 | `room_temperature` | sensor (°C) | `sim` package now, SHT40 later |
 | `room_humidity` | sensor (%) | `sim` package now, SHT40 later |
 | `relay_heat` (W), `relay_cool` (Y), `relay_fan` (G), `relay_ob` (O/B, unused unless heat pump) | switch, `restore_mode: ALWAYS_OFF` | `sim` template switches now, Unit 4-Relay later |
-| `middle_floor` | climate (thermostat) | logic package |
+| `main_thermostat` | climate (thermostat) | logic package |
 
 ESPHome climate works in °C internally. Show °F in the UI and HA (Dang is in the US).
 
