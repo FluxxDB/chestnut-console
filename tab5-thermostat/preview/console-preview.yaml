@@ -20,6 +20,17 @@ esphome:
   # Test-only: simulate a backlight restored at some other level (50%) after a reboot
   # (the console must bring it back to full brightness on boot).
   on_boot:
+    # Test-only: count LVGL's requests to redraw the status marker (test_review.sh, 13).
+    - priority: -200
+      then:
+        - lambda: |-
+            lv_display_add_event_cb(lv_display_get_default(), [](lv_event_t *e) {
+              auto *a = (const lv_area_t *) lv_event_get_param(e);
+              lv_area_t m;
+              lv_obj_get_coords(id(obj_marker), &m);
+              if (a->x1 >= m.x1 - 4 && a->y1 >= m.y1 - 4 && a->x2 <= m.x2 + 4 && a->y2 <= m.y2 + 4)
+                id(preview_marker_redraws) += 1;
+            }, LV_EVENT_INVALIDATE_AREA, nullptr);
     - priority: 250
       then:
         - light.turn_on:
@@ -75,6 +86,11 @@ light:
     default_transition_length: 0s
 
 
+globals:
+  - id: preview_marker_redraws
+    type: uint32_t
+    initial_value: "0"
+
 # Test-only: what the console's labels and pills say right now, as JSON (read by drive.py).
 text_sensor:
   - platform: template
@@ -117,6 +133,7 @@ text_sensor:
       add("pm_visible", vis(id(btn_minus)));
       add("out_temp", txt(id(lbl_out_temp)));
       add("out_cond", txt(id(lbl_out_cond)));
+      add("marker_redraws", std::to_string(id(preview_marker_redraws)));
       // The outside labels the last time no API client was connected (test_review.sh, 3): the client
       // that reconnects to read this counts as Home Assistant again within one refresh.
       {

@@ -89,7 +89,11 @@ light:
     output: backlight_pwm
     name: "Display Backlight"
     id: backlight
-    restore_mode: RESTORE_DEFAULT_ON
+    # The console sets the level at boot (ui/console-logic.yaml), so don't save it to flash on
+    # every dim and wake. Until then, start low rather than at full brightness.
+    restore_mode: ALWAYS_ON
+    initial_state:
+      brightness: 10%
     default_transition_length: 250ms
 
 time:

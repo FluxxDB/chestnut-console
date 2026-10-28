@@ -19,7 +19,8 @@ for pair in pairs:
         ok = got is (want == "true")
     else:
         try:
-            ok = abs(float(got) - float(want)) < 0.05
+            # Tight enough that a dim level (0.04) can't pass for off (0.0).
+            ok = abs(float(got) - float(want)) < 0.005
         except (TypeError, ValueError):
             ok = str(got) == want
     if not ok:

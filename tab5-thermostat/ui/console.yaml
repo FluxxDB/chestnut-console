@@ -495,10 +495,16 @@ lvgl:
                               pad_right: 6
                           - button:
                               id: btn_mode_off
+                              # Every pill sends only a real change: under M2, a re-sent mode or
+                              # level would start a hold (a kid's poke on the lit pill).
                               on_click:
-                                - climate.control:
-                                    id: main_thermostat
-                                    mode: "OFF"
+                                - if:
+                                    condition:
+                                      lambda: "return id(main_thermostat).mode != climate::CLIMATE_MODE_OFF;"
+                                    then:
+                                      - climate.control:
+                                          id: main_thermostat
+                                          mode: "OFF"
                               height: 55
                               styles: st_pill
                               checked:
@@ -511,9 +517,13 @@ lvgl:
                           - button:
                               id: btn_mode_heat
                               on_click:
-                                - climate.control:
-                                    id: main_thermostat
-                                    mode: HEAT
+                                - if:
+                                    condition:
+                                      lambda: "return id(main_thermostat).mode != climate::CLIMATE_MODE_HEAT;"
+                                    then:
+                                      - climate.control:
+                                          id: main_thermostat
+                                          mode: HEAT
                               height: 55
                               styles: st_pill
                               checked:
@@ -528,9 +538,13 @@ lvgl:
                           - button:
                               id: btn_mode_cool
                               on_click:
-                                - climate.control:
-                                    id: main_thermostat
-                                    mode: COOL
+                                - if:
+                                    condition:
+                                      lambda: "return id(main_thermostat).mode != climate::CLIMATE_MODE_COOL;"
+                                    then:
+                                      - climate.control:
+                                          id: main_thermostat
+                                          mode: COOL
                               height: 55
                               styles: st_pill
                               checked:
@@ -543,9 +557,13 @@ lvgl:
                           - button:
                               id: btn_mode_auto
                               on_click:
-                                - climate.control:
-                                    id: main_thermostat
-                                    mode: HEAT_COOL
+                                - if:
+                                    condition:
+                                      lambda: "return id(main_thermostat).mode != climate::CLIMATE_MODE_HEAT_COOL;"
+                                    then:
+                                      - climate.control:
+                                          id: main_thermostat
+                                          mode: HEAT_COOL
                               height: 55
                               styles: st_pill
                               checked:
@@ -581,9 +599,13 @@ lvgl:
                           - button:
                               id: btn_fan_auto
                               on_click:
-                                - climate.control:
-                                    id: main_thermostat
-                                    fan_mode: AUTO
+                                - if:
+                                    condition:
+                                      lambda: "return id(main_thermostat).fan_mode != climate::CLIMATE_FAN_AUTO;"
+                                    then:
+                                      - climate.control:
+                                          id: main_thermostat
+                                          fan_mode: AUTO
                               height: 55
                               styles: st_pill
                               checked:
@@ -598,9 +620,13 @@ lvgl:
                           - button:
                               id: btn_fan_on
                               on_click:
-                                - climate.control:
-                                    id: main_thermostat
-                                    fan_mode: "ON"
+                                - if:
+                                    condition:
+                                      lambda: "return id(main_thermostat).fan_mode != climate::CLIMATE_FAN_ON;"
+                                    then:
+                                      - climate.control:
+                                          id: main_thermostat
+                                          fan_mode: "ON"
                               height: 55
                               styles: st_pill
                               checked:
@@ -631,9 +657,16 @@ lvgl:
                           - button:
                               id: btn_lvl_comfort
                               on_click:
-                                - select.set:
-                                    id: comfort_level
-                                    option: Comfort
+                                - if:
+                                    condition:
+                                      not:
+                                        select.is:
+                                          id: comfort_level
+                                          options: Comfort
+                                    then:
+                                      - select.set:
+                                          id: comfort_level
+                                          option: Comfort
                               height: 55
                               styles: st_pill
                               checked:
@@ -648,9 +681,16 @@ lvgl:
                           - button:
                               id: btn_lvl_eco
                               on_click:
-                                - select.set:
-                                    id: comfort_level
-                                    option: Eco
+                                - if:
+                                    condition:
+                                      not:
+                                        select.is:
+                                          id: comfort_level
+                                          options: Eco
+                                    then:
+                                      - select.set:
+                                          id: comfort_level
+                                          option: Eco
                               height: 55
                               styles: st_pill
                               checked:

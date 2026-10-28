@@ -51,4 +51,17 @@ check "11 dark at local midnight ($night)" python3 tools/preview/check_states.py
 $dc -e SUBS="-s house_latitude 0 -s house_longitude $day" preview $y /config/preview/shots/review/day --dump --no-theme --pre-wait 3 "Heating" >/dev/null 2>&1
 check "11 light at local noon ($day)" python3 tools/preview/check_states.py $sh/review/day heating dark_theme=false
 
+# 12 (Mac review 1): tapping the lit Heat, fan Auto and Comfort pills sends nothing (under M2 a
+# re-sent option would start a hold); tapping unlit Cool and Eco still sends (the taps land).
+run preview $y /config/preview/shots/review/lit --dump "Heating" --clicks "293,649;758,649;1043,649"
+check "12 lit pills send nothing" python3 tools/preview/check_states.py $sh/review/lit heating _writes.main_thermostat=0 _writes.comfort_level=0
+run preview $y /config/preview/shots/review/unlit --dump "Heating" --clicks "410,649;1177,649"
+check "12 unlit pills still send" python3 tools/preview/check_states.py $sh/review/unlit heating main_thermostat.mode=COOL comfort_level=Eco
+
+# 13 (Mac review 4): an unchanged status marker isn't redrawn on every 250 ms refresh.
+run preview $y /config/preview/shots/review/marker-still --dump "Waiting" --watch marker_redraws --watch-for 2
+check "13 unchanged marker not redrawn" python3 -c "
+import json,sys; w=[int(x) for x in json.load(open('$sh/review/marker-still/waiting-light-states.json'))['_watch.marker_redraws']]
+print('  marker redraw count over 2 s:', w); sys.exit(0 if w and w[-1] == w[0] else 1)"
+
 [ $fails -eq 0 ] && echo "PASS: review fixes" || { echo "FAIL: $fails review checks"; exit 1; }

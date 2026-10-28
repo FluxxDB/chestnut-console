@@ -356,7 +356,9 @@ script:
           }
           set_text(id(lbl_status), word);
           set_text(id(lbl_sub), sub);
-          lv_obj_set_style_bg_color(id(obj_marker), lv_color_hex(color), LV_PART_MAIN);
+          // Only on a change: setting a style redraws the marker, which would keep LVGL busy.
+          if (!lv_color_eq(lv_obj_get_style_bg_color(id(obj_marker), LV_PART_MAIN), lv_color_hex(color)))
+            lv_obj_set_style_bg_color(id(obj_marker), lv_color_hex(color), LV_PART_MAIN);
 
           // Fault banner replaces the history line.
           show(id(obj_banner), sfault || ifault);

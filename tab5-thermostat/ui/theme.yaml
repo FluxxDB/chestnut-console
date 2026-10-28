@@ -156,9 +156,9 @@ esphome:
                                 id(btn_mode_off), id(btn_mode_heat), id(btn_mode_cool), id(btn_mode_auto),
                                 id(btn_fan_auto), id(btn_fan_on), id(btn_lvl_comfort), id(btn_lvl_eco)}) {
               lv_obj_set_style_transition(b, &ease, LV_PART_MAIN);
-              lv_obj_set_style_transition(b, &ease, LV_PART_MAIN | LV_STATE_PRESSED);
-              lv_obj_set_style_transform_width(b, -3, LV_PART_MAIN | LV_STATE_PRESSED);
-              lv_obj_set_style_transform_height(b, -3, LV_PART_MAIN | LV_STATE_PRESSED);
+              lv_obj_set_style_transition(b, &ease, LV_STATE_PRESSED);
+              lv_obj_set_style_transform_width(b, -3, LV_STATE_PRESSED);
+              lv_obj_set_style_transform_height(b, -3, LV_STATE_PRESSED);
             }
         - script.execute: ui_apply_theme
 
