@@ -349,13 +349,13 @@ lvgl:
                         text_font: f_target
                         text_letter_space: -4
                         styles: st_on_emph
-                    # Auto + Eco with no hold shows the band edges ("68–76°"): too wide for 105 px.
+                    # Auto widened by Eco shows the band edges ("67–77°"): too wide for 105 px.
                     - label:
                         id: lbl_target_range
                         align: CENTER
                         y: 22
                         hidden: true
-                        text: "68–76°"
+                        text: "67–77°"
                         text_font: f_range
                         text_letter_space: -2
                         styles: st_on_emph

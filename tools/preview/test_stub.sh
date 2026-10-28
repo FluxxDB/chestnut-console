@@ -9,7 +9,7 @@ out=tab5-thermostat/preview/shots/stub
 c="python3 tools/preview/check_states.py $out"
 $c heating checked_temperature=71 call_heat=true call_cool=false main_thermostat.mode=HEAT main_thermostat.action=HEATING schedule_status="Comfort until 10:30 pm" effective_target=72
 $c sensor-fault sensor_fault=true checked_temperature=nan
-$c eco-auto-band comfort_level=Eco main_thermostat.mode=HEAT_COOL effective_low=68 effective_high=76 call_heat=false
+$c eco-auto-band comfort_level=Eco main_thermostat.mode=HEAT_COOL effective_low=67 effective_high=77 call_heat=false
 # A mode change moves the stand-in's action at once (Dang: "Heating" stayed after tapping Cool).
 # Heating at 71 toward 72: Cool -> idle with the heat call off; back to Heat -> heating again.
 $dc preview preview/console-preview.yaml /config/preview/shots/stub/to-cool --dump "Heating" --clicks "410,649" >/dev/null
