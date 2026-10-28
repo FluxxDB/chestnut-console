@@ -3,6 +3,8 @@
 
 #include <string>
 
+using namespace chestnut;
+
 static void derive_heat_comfort() {
   auto s = derive_setpoints(Mode::Heat, 72, 4, false, false, 0);
   CHECK(s.effective_f == 72 && s.low_f == 72 && s.high_f == 74);

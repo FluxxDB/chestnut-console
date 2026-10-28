@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <string>
 
+namespace chestnut {
+
 enum class Mode { Off, Heat, Cool, Auto };
 
 struct Setpoints {
@@ -12,9 +14,9 @@ struct Setpoints {
   int high_f;
 };
 
-namespace chestnut_detail {
+namespace detail {
 inline int clamp_int(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
-}  // namespace chestnut_detail
+}  // namespace detail
 
 // Derives the climate's setpoints (whole degrees F) from the single Comfort target,
 // the Eco offset and an optional hold. Heat and Off use a 2 degree band above the
@@ -22,7 +24,7 @@ inline int clamp_int(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi 
 // The active heat target is never below 50 and the active cool target never above 90;
 // the companion setpoint may fall outside 50-90 (Heat high up to 92, Cool low down to 48).
 inline Setpoints derive_setpoints(Mode mode, int comfort_f, int eco_offset_f, bool eco, bool hold, int hold_f) {
-  using chestnut_detail::clamp_int;
+  using detail::clamp_int;
   comfort_f = clamp_int(comfort_f, 50, 90);
   hold_f = clamp_int(hold_f, 50, 90);
   const int n = clamp_int(eco_offset_f, 2, 10);
@@ -92,7 +94,7 @@ struct ScheduleState {
   int next_min;
 };
 
-namespace chestnut_detail {
+namespace detail {
 inline const Period *day_periods(const Week &w, int dow) { return dow >= 5 ? w.weekend : w.weekday; }
 
 // The period of the day that starts last (ties: highest index). Always valid for 4 periods.
@@ -102,14 +104,14 @@ inline int last_starting(const Period *p) {
     if (p[i].start_min >= p[best].start_min) best = i;
   return best;
 }
-}  // namespace chestnut_detail
+}  // namespace detail
 
 // dow: 0=Mon..6=Sun. Within a day periods apply in start-time order, not index order.
 // Before the day's first start, the previous day's last-starting period is still in force.
 inline ScheduleState schedule_at(const Week &w, int dow, int minute) {
-  using chestnut_detail::clamp_int;
-  using chestnut_detail::day_periods;
-  using chestnut_detail::last_starting;
+  using detail::clamp_int;
+  using detail::day_periods;
+  using detail::last_starting;
   dow = ((dow % 7) + 7) % 7;
   minute = clamp_int(minute, 0, 1439);
 
@@ -164,10 +166,12 @@ inline const char *period_name(int period) {
 
 // 0 -> "12:00 am", 390 -> "6:30 am", 720 -> "12:00 pm", 1350 -> "10:30 pm".
 inline std::string format_12h(int minute) {
-  minute = chestnut_detail::clamp_int(minute, 0, 1439);
+  minute = detail::clamp_int(minute, 0, 1439);
   const int h = minute / 60;
   const int m = minute % 60;
   char buf[16];
   std::snprintf(buf, sizeof buf, "%d:%02d %s", h % 12 == 0 ? 12 : h % 12, m, h < 12 ? "am" : "pm");
   return std::string(buf);
 }
+
+}  // namespace chestnut
