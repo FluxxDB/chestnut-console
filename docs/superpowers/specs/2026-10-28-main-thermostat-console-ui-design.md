@@ -74,7 +74,7 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 │ ~~~~~~ temperature line ~~~~~~~ - - - │ 48°  Cloudy  │ 42% Comfort.  │
 │ 6 am        Dashed line: target   Now │              │ (cyan card)   │
 ├───────────────────────────────────────┴──────────────┴───────────────┤
-│ Mode (Off)(Heat)(Cool)(Auto) │ Fan (Auto)(On) │ Preset (Home)(Away)(Sleep) │  strip ~90
+│ Mode (Off)(Heat)(Cool)(Auto) │ Fan (Auto)(On) │ (preset group: pending M2) │  strip ~90
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -110,13 +110,10 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
   - axis labels for the start time and "Now".
 
 **Target card**
-- **Heat and Cool modes:** one number ("Target") between the − / + buttons. Each tap moves the target by 1 °F, clamped to the climate's min/max (the setpoint range and step come from the milestone 2 spec).
-- **Auto (heat_cool, two setpoints)** *(Dang: tap a number, then − / +)*:
-  - The card shows two numbers side by side: "Heat to 70°" with an orange marker and "Cool to 74°" with a blue marker.
-  - Tap a number to select it. The selected one gets the emphasis-button background behind it, and the other dims to the on-emphasis sub color.
-  - The single − / + pair adjusts the selected setpoint.
-  - The selection starts on Heat *(my call)*, and the last selection is remembered while the screen stays awake.
-  - Adjusting stops at the minimum heat/cool gap set by milestone 2; it never pushes the other setpoint *(my call)*.
+- **One target in every mode** *(Dang, 2026-10-28: replaces the two-setpoint Auto from mockup v5)*:
+  - One number ("Target") sits between the − / + buttons, in Heat, Cool and Auto alike.
+  - Each tap moves the target by 1 °F, clamped to the climate's min/max (the range and step come from the milestone 2 spec).
+  - In Auto the thermostat decides to heat or cool toward the target. The anti-flip-flop gap is hidden logic in milestone 2, not shown on screen.
 - **Off mode:** the card shows "Off" and the − / + buttons are hidden.
 - The number updates instantly. The new setpoint goes to the climate entity once there's been no tap for ~1.5 s, so a run of taps is one change *(my call)*.
 
@@ -132,10 +129,9 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 - Three pill groups, separated by hairline dividers:
   - **Mode:** Off / Heat / Cool / Auto
   - **Fan:** Auto / On
-  - **Preset:** Home / Away / Sleep *(Dang: pills in the strip)*
+  - **Preset:** *pending*. Dang said the Home / Away / Sleep pills from mockup v5 don't match what he decided in the milestone 2 brainstorm, so this group waits for the milestone 2 spec.
 - One tap selects, and the selected pill shows Mint Wash.
-- When the on-device weekly schedule changes the preset, the pill follows. Whether a manual tap is a temporary override follows the milestone 2 spec.
-- Pills may narrow (padding ~20 px) so all nine fit in 1228 px.
+- If a third group lands, pills may narrow (padding ~20 px) to fit in 1228 px.
 
 **Idle dimming** *(Dang)*
 - After 30 s without a touch, the backlight dims to ~10%.
