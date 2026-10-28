@@ -85,7 +85,8 @@ sensor:
     accuracy_decimals: 2
     update_interval: never
 
-# Knobs (restored across reboots). Entity names are chosen so their object_ids match the ids.
+# Knobs, restored across reboots (all but sim_fault). Entity names are chosen so their
+# object_ids match the ids.
 number:
   - platform: template
     id: sim_outdoor_f
@@ -151,13 +152,14 @@ select:
   # Break the temperature sensor on purpose. Unplugged: nothing is published (temperature or
   # humidity). Frozen: the last temperature repeats with no noise. Out of range: 60.0 °C.
   # Spike: one reading 10 °C high, then back to None.
+  # Not restored: it always boots as None, so a fault left on never survives a reboot.
   - platform: template
     id: sim_fault
     name: "Sim Fault"
     options: ["None", "Unplugged", "Frozen", "Out of range", "Spike"]
     initial_option: "None"
     optimistic: true
-    restore_value: true
+    restore_value: false
 
 interval:
   # Physics: one step per second, advancing 1 × sim_speed seconds of house time.

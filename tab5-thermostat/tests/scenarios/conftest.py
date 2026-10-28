@@ -29,6 +29,7 @@ API_HOST = "127.0.0.1"  # pytest and the program run in the same container
 API_PORT = 6053
 START_TIMEOUT_S = 20
 STOP_TIMEOUT_S = 5
+ALIVE_CHECK_S = 0.2  # how often a wait checks that the program is still running
 SET_WAIT_S = 2  # how long set_number/select/switch wait to see the new state
 
 
@@ -128,25 +129,47 @@ class Dev:
         self._changed.set()
         self._changed = asyncio.Event()
 
-    async def stop(self):
-        """Graceful stop: SIGTERM makes the host program flush its preferences."""
+    def _check_alive(self):
+        """Fail loudly if the program is gone, so a crash never reads as "nothing happened"."""
+        if self._proc is None:
+            raise RuntimeError("device is not running")
+        rc = self._proc.poll()
+        if rc is not None:
+            raise RuntimeError(f"device exited with code {rc}\n{self.log_tail()}")
+
+    async def stop(self, expect_dead=False):
+        """Graceful stop: SIGTERM makes the host program flush its preferences.
+        Fails if the program had already exited (it crashed during the test), unless
+        expect_dead, or if it doesn't exit cleanly on SIGTERM."""
         if self._client is not None:
             try:
-                await self._client.disconnect()
+                await asyncio.wait_for(self._client.disconnect(), 2)
             except Exception:
                 pass
             self._client = None
-        if self._proc is not None and self._proc.poll() is None:
-            self._proc.send_signal(signal.SIGTERM)
-            try:
-                await asyncio.to_thread(self._proc.wait, STOP_TIMEOUT_S)
-            except subprocess.TimeoutExpired:
-                self._proc.kill()
-                await asyncio.to_thread(self._proc.wait)
+        problem = None
+        if self._proc is not None:
+            rc = self._proc.poll()
+            if rc is not None:
+                if not expect_dead:
+                    problem = f"device had already exited with code {rc} before the test stopped it"
+            else:
+                self._proc.send_signal(signal.SIGTERM)
+                try:
+                    rc = await asyncio.to_thread(self._proc.wait, STOP_TIMEOUT_S)
+                except subprocess.TimeoutExpired:
+                    self._proc.kill()
+                    await asyncio.to_thread(self._proc.wait)
+                    problem = f"device did not stop within {STOP_TIMEOUT_S}s of SIGTERM (killed)"
+                else:
+                    if rc != 0:
+                        problem = f"device exited with code {rc} on SIGTERM"
         self._proc = None
         if self._log is not None:
             self._log.close()
             self._log = None
+        if problem:
+            raise RuntimeError(f"{problem}\n{self.log_tail()}")
 
     async def restart(self):
         """Stop and start the program again with the same preferences dir."""
@@ -171,34 +194,50 @@ class Dev:
     async def state(self, object_id):
         """The latest value: float, bool, str, a ClimateState, or None while unknown."""
         self._info(object_id)
+        self._check_alive()
         return self._values.get(object_id)
 
     def updates(self, object_id):
         """How many states have arrived for the entity since connecting."""
         self._info(object_id)
+        self._check_alive()
         return len(self._history.get(object_id, ()))
 
     def history(self, object_id):
         """Every value received for the entity since connecting, oldest first."""
         self._info(object_id)
+        self._check_alive()
         return list(self._history.get(object_id, ()))
 
     async def _wait_change(self, deadline):
+        """Wait for any new state until deadline; False on timeout. Raises if the program
+        exits meanwhile (checked every ALIVE_CHECK_S)."""
         loop = asyncio.get_running_loop()
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            return False
-        try:
-            await asyncio.wait_for(self._changed.wait(), remaining)
-        except asyncio.TimeoutError:
-            return False
-        return True
+        changed = self._changed
+        while True:
+            self._check_alive()
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return False
+            try:
+                await asyncio.wait_for(changed.wait(), min(remaining, ALIVE_CHECK_S))
+            except asyncio.TimeoutError:
+                continue
+            return True
+
+    async def sleep(self, seconds):
+        """asyncio.sleep that fails at once if the program exits meanwhile. Use it for
+        "wait and check nothing happened" steps."""
+        deadline = asyncio.get_running_loop().time() + seconds
+        while await self._wait_change(deadline):
+            pass
 
     async def wait_for(self, object_id, pred, timeout_s):
         """Wait until pred(value) is true; returns the value. Fails the test on timeout."""
         self._info(object_id)
         deadline = asyncio.get_running_loop().time() + timeout_s
         while True:
+            self._check_alive()
             value = self._values.get(object_id)
             try:
                 ok = bool(pred(value))
@@ -217,9 +256,14 @@ class Dev:
 
     # --- commands ---
 
+    def _live_client(self):
+        self._check_alive()
+        return self._client
+
     async def _sync(self):
         # The device handles messages in order, so a reply to a later request means
         # the earlier command has been processed.
+        self._check_alive()
         await self._client.device_info()
 
     async def _settle(self, object_id, matches, n_before):
@@ -234,21 +278,21 @@ class Dev:
 
     async def set_number(self, object_id, value):
         n = self.updates(object_id)
-        self._client.number_command(self._info(object_id).key, float(value))
+        self._live_client().number_command(self._info(object_id).key, float(value))
         return await self._settle(object_id, lambda v: v is not None and abs(v - value) < 1e-3, n)
 
     async def select(self, object_id, option):
         n = self.updates(object_id)
-        self._client.select_command(self._info(object_id).key, option)
+        self._live_client().select_command(self._info(object_id).key, option)
         return await self._settle(object_id, lambda v: v == option, n)
 
     async def switch(self, object_id, on):
         n = self.updates(object_id)
-        self._client.switch_command(self._info(object_id).key, bool(on))
+        self._live_client().switch_command(self._info(object_id).key, bool(on))
         return await self._settle(object_id, lambda v: v == bool(on), n)
 
     async def press(self, object_id):
-        self._client.button_command(self._info(object_id).key)
+        self._live_client().button_command(self._info(object_id).key)
         await self._sync()
 
     async def climate(self, mode=None, fan_mode=None, target_temperature=None,
@@ -257,7 +301,7 @@ class Dev:
         take the aioesphomeapi enums or their names ("HEAT", "HEAT_COOL", "ON", ...)."""
         if self._climate is None:
             raise KeyError("the device has no single climate entity")
-        self._client.climate_command(
+        self._live_client().climate_command(
             self._climate.key,
             mode=_enum(ClimateMode, mode),
             fan_mode=_enum(ClimateFanMode, fan_mode),
@@ -273,7 +317,7 @@ class Dev:
             service = self._services[name]
         except KeyError:
             raise KeyError(f"no API action {name!r}; have {sorted(self._services)}") from None
-        await self._client.execute_service(service, kwargs)
+        await self._live_client().execute_service(service, kwargs)
         await self._sync()
 
 
