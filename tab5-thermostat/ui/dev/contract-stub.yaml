@@ -149,6 +149,7 @@ select:
       - Interlock fault
       - Unknowns
       - Finishing
+      - Interlock while heating
     initial_option: Heating
     on_value:
       - script.execute:
@@ -225,6 +226,7 @@ script:
           else if (name == "Off fan on") { mode = climate::CLIMATE_MODE_OFF; fan = true; action = climate::CLIMATE_ACTION_OFF; }
           else if (name == "Sensor fault") { room = NAN; sfault = true; wait = "Sensor fault"; }
           else if (name == "Interlock fault") { ifault = true; wait = "Interlock fault"; }
+          else if (name == "Interlock while heating") { ifault = true; wait = "Interlock fault"; action = climate::CLIMATE_ACTION_HEATING; }
           else if (name == "Finishing") { mode = climate::CLIMATE_MODE_COOL; heat = true; action = climate::CLIMATE_ACTION_HEATING; }
           else if (name == "Unknowns") { room = NAN; target = NAN; hum = NAN; period = ""; next = ""; status = ""; }
           id(checked_temperature).publish_state(room);
