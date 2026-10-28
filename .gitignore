@@ -16,3 +16,6 @@ tab5-thermostat/.pioenvs/
 tab5-thermostat/.piolibdeps/
 
 .DS_Store
+
+# Windows download markers (copied in from Windows)
+*:Zone.Identifier
