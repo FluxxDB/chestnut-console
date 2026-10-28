@@ -12,6 +12,10 @@ substitutions:
   cool_run_s: "5"
   cool_off_s: "5"
   min_idle_s: "1"
+  # The schedule reads host_time once at boot; after that test_clock drives it (the 24 h tick
+  # never comes during a test).
+  clock_id: host_time
+  schedule_tick: 24h
 
 esphome:
   name: main-thermostat-test
@@ -45,6 +49,15 @@ api:
         ms: int
       then:
         - lambda: id(g_test_latency_ms) = ms;
+    # Test-only: evaluate the schedule at this clock (dow 0=Mon..6=Sun, minute of day), or as
+    # if the clock weren't set (valid false).
+    - action: test_clock
+      variables:
+        dow: int
+        minute: int
+        valid: bool
+      then:
+        - lambda: id(schedule_evaluate).execute(valid, dow, minute);
 
 globals:
   - id: g_test_latency_ms

@@ -7,6 +7,9 @@
 # Its low / high setpoints are never set directly: apply_setpoints derives them from the mode,
 # comfort_target, eco_offset, comfort_level and a hold (chestnut::derive_setpoints). set_target
 # and any setpoint write to the climate (HA, the API, the screen) start a hold.
+# The on-device weekly schedule (Wake / Leave / Return / Sleep, weekdays and weekends) switches
+# comfort_level from the device clock (the clock_id time component); a hold lasts until the
+# next period starts.
 # Runs unchanged on the Tab5 and on the host; test-only hooks live in tests/main-thermostat-test.yaml.
 
 substitutions:
@@ -21,6 +24,12 @@ substitutions:
   # The thermostat's heat / cool deadband (°C): 0.5 °C = 0.9°F. The Auto changeover lockout
   # swaps the locked side's deadband for a huge one while it lasts (see sync_changeover).
   deadband_c: "0.5"
+  # The schedule's clock (a time component; sntp_time on the Tab5) and how often it's read. It
+  # re-evaluates only when the minute changes, so reading it every second costs little, and a
+  # period starts within a second: a hold started just after a period began is then recorded
+  # against the new period, not ended by a late tick. The tests use 24h (test_clock drives them).
+  clock_id: host_time
+  schedule_tick: 1s
 
 esphome:
   includes:
@@ -47,15 +56,19 @@ esphome:
               checker.on_reading(millis(), c);
               id(checked_temperature_c).publish_state(checker.value());
             });
-    # After every component's setup (the numbers and select restored, the climate restored or
-    # given its Default preset): from here on, changes to the target entities apply and holds
-    # can start. A hold never survives a reboot (the hold flags boot false).
+    # After every component's setup (the numbers, selects, schedule settings and switch
+    # restored, the climate restored or given its Default preset): from here on, changes to the
+    # target and schedule entities apply and holds can start. A hold never survives a reboot
+    # (the hold flags boot false). The schedule then evaluates once from the real clock, which
+    # re-applies the current period's level and applies the setpoints.
     - priority: -100
       then:
         - lambda: |-
             id(g_level_eco) = id(comfort_level).current_option() == "Eco";
             id(g_ready) = true;
-        - script.execute: apply_setpoints
+        - script.execute:
+            id: schedule_from_clock
+            force: true
 
 globals:
   # Interlock fault latch (spec, Safety 3). Not restored: a reboot clears it, and relays boot off.
@@ -109,7 +122,8 @@ globals:
     restore_value: false
     initial_value: "false"
   # Manual holds (ruling R12), shown together as schedule_hold. Not restored: a hold doesn't
-  # survive a reboot. Resume / the next period (Task 10) clears both.
+  # survive a reboot. Resume, the next period and turning the schedule off clear both; with the
+  # schedule off none starts.
   # - Level hold: comfort_level was switched by hand. The chosen level applies with its normal
   #   derivation (Eco widens Auto), and the schedule leaves the level alone until the next period.
   # - Temperature hold: set_target (or a setpoint write) at g_hold_f °F, with no Eco widening.
@@ -144,11 +158,49 @@ globals:
     type: bool
     restore_value: false
     initial_value: "false"
-  # Task 10: set while the schedule changes comfort_level, so the change isn't a hold.
+  # Set while the schedule changes comfort_level, so the change isn't a hold.
   - id: g_sched_setting
     type: bool
     restore_value: false
     initial_value: "false"
+
+  # --- Schedule (spec "Schedule") ---
+  # The schedule's last inputs (schedule_evaluate): whether the clock was valid, the day
+  # (0=Mon..6=Sun) and minute of day. Entity edits and Resume re-evaluate with them.
+  - id: g_clock_valid
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  - id: g_last_dow
+    type: int
+    restore_value: false
+    initial_value: "0"
+  - id: g_last_min
+    type: int
+    restore_value: false
+    initial_value: "0"
+  # What the last evaluation found: the active period instance's key (chestnut::schedule_at; -1
+  # when the schedule is off or the clock isn't set), the period (0..3 Wake..Sleep, -1 none) and
+  # the next period's start (minute of day).
+  - id: g_sched_key
+    type: int
+    restore_value: false
+    initial_value: "-1"
+  - id: g_sched_period
+    type: int
+    restore_value: false
+    initial_value: "-1"
+  - id: g_sched_next_min
+    type: int
+    restore_value: false
+    initial_value: "0"
+  # The key of the period a hold started in. The hold ends when an evaluation finds another key
+  # (the next period has started). -1: started while the clock wasn't set, so the first valid
+  # evaluation adopts its key instead of ending the hold.
+  - id: g_hold_key
+    type: int
+    restore_value: false
+    initial_value: "-1"
   # A climate call from outside (HA, the API, the screen) being handled in on_control, and the
   # mode it will leave the climate in. While set, apply_setpoints writes the derived setpoints
   # into that call instead of making its own, so a mode and its setpoints change together.
@@ -438,6 +490,25 @@ text_sensor:
     name: "Call Wait Reason"
     icon: mdi:timer-pause-outline
     update_interval: never
+  # Contract: the schedule, published by schedule_publish. The period (Wake / Leave / Return /
+  # Sleep) and the next period's start ("10:30 pm") are empty with the schedule off or paused.
+  - platform: template
+    id: schedule_period
+    name: "Schedule Period"
+    icon: mdi:calendar-clock
+    update_interval: never
+  - platform: template
+    id: schedule_next_change
+    name: "Schedule Next Change"
+    icon: mdi:clock-end
+    update_interval: never
+  # "Comfort until 5:30 pm", "Eco until 5:30 pm", "Holding 69° until 10:30 pm", "Holding Eco
+  # until 10:30 pm", "Schedule off" or "Schedule paused: clock not set".
+  - platform: template
+    id: schedule_status
+    name: "Schedule Status"
+    icon: mdi:calendar-text
+    update_interval: never
 
 # Interlock layer 3 (spec, Safety 3): an independent watchdog. The actions never turn W and Y
 # on together (each turns the other relay off first), so both on means something else switched
@@ -536,6 +607,15 @@ interval:
           id(g_action_mark_ms) += whole_s * 1000u;
           id(action_elapsed).publish_state(id(g_action_elapsed_s));
 
+  # The schedule's clock. Evaluates only when the clock's minute (or validity) changes; the
+  # first tick waits one period, as on_boot has just evaluated.
+  - interval: ${schedule_tick}
+    startup_delay: ${schedule_tick}
+    then:
+      - script.execute:
+          id: schedule_from_clock
+          force: false
+
 script:
   # The one place the climate's setpoints are set. Derives them from the mode, comfort_target,
   # eco_offset, comfort_level and the hold, publishes the effective target and band (and
@@ -597,6 +677,119 @@ script:
             t->make_call().set_target_temperature_low(lo).set_target_temperature_high(hi).perform();
             id(g_applying) = false;
           }
+      # Every hold or level change ends here, so the schedule's status follows it.
+      - script.execute: schedule_publish
+
+  # --- Schedule (spec "Schedule") ---
+  # Reads the clock and evaluates the schedule with it: always when forced (boot), otherwise
+  # only when the minute or the clock's validity changed. A clock that isn't valid keeps the
+  # last day and minute.
+  - id: schedule_from_clock
+    mode: single
+    parameters:
+      force: bool
+    then:
+      - lambda: |-
+          const auto now = id(${clock_id}).now();
+          const bool valid = now.is_valid();
+          // ESPTime's day_of_week is 1=Sun..7=Sat; the schedule's is 0=Mon..6=Sun.
+          const int dow = valid ? (now.day_of_week + 5) % 7 : id(g_last_dow);
+          const int minute = valid ? now.hour * 60 + now.minute : id(g_last_min);
+          if (force || valid != id(g_clock_valid) || dow != id(g_last_dow) ||
+              minute != id(g_last_min))
+            id(schedule_evaluate).execute(valid, dow, minute);
+
+  # Re-evaluates with the last inputs: after a schedule setting, the switch or Resume changes.
+  - id: schedule_rerun
+    mode: single
+    then:
+      - lambda: id(schedule_evaluate).execute(id(g_clock_valid), id(g_last_dow), id(g_last_min));
+
+  # The schedule (spec "Schedule"). Inputs: whether the clock is valid, the day (0=Mon..6=Sun)
+  # and the minute of day (the clock, or test_clock in the tests).
+  # - Off: ends any hold; nothing switches.
+  # - Clock not valid: paused. Nothing changes (the level and any hold stay); heating and
+  #   cooling carry on.
+  # - Otherwise: a hold ends when the period instance it started in is over (another key); with
+  #   no hold, comfort_level follows the period's level (set with g_sched_setting: not a hold).
+  # Then applies the setpoints, which publishes the status.
+  - id: schedule_evaluate
+    mode: single
+    parameters:
+      valid: bool
+      dow: int
+      minute: int
+    then:
+      - lambda: |-
+          id(g_clock_valid) = valid;
+          id(g_last_dow) = dow;
+          id(g_last_min) = minute;
+          id(g_sched_key) = -1;
+          id(g_sched_period) = -1;
+          if (!id(schedule_enabled).state) {
+            id(g_hold_level) = false;
+            id(g_hold_temp) = false;
+          } else if (valid) {
+            auto period = [](datetime::TimeEntity *t, select::Select *level) {
+              return chestnut::Period{t->hour * 60 + t->minute, level->current_option() == "Eco"};
+            };
+            const chestnut::Week week{
+                {period(id(sched_weekday_wake_time), id(sched_weekday_wake_level)),
+                 period(id(sched_weekday_leave_time), id(sched_weekday_leave_level)),
+                 period(id(sched_weekday_return_time), id(sched_weekday_return_level)),
+                 period(id(sched_weekday_sleep_time), id(sched_weekday_sleep_level))},
+                {period(id(sched_weekend_wake_time), id(sched_weekend_wake_level)),
+                 period(id(sched_weekend_leave_time), id(sched_weekend_leave_level)),
+                 period(id(sched_weekend_return_time), id(sched_weekend_return_level)),
+                 period(id(sched_weekend_sleep_time), id(sched_weekend_sleep_level))}};
+            const chestnut::ScheduleState s = chestnut::schedule_at(week, dow, minute);
+            id(g_sched_key) = s.key;
+            id(g_sched_period) = s.period;
+            id(g_sched_next_min) = s.next_min;
+            if (id(g_hold_level) || id(g_hold_temp)) {
+              if (id(g_hold_key) < 0) {
+                id(g_hold_key) = s.key;  // started while the clock wasn't set
+              } else if (id(g_hold_key) != s.key) {
+                id(g_hold_level) = false;  // the next period has started
+                id(g_hold_temp) = false;
+              }
+            }
+            if (!id(g_hold_level) && !id(g_hold_temp) && s.eco != id(g_level_eco)) {
+              id(g_sched_setting) = true;
+              id(comfort_level).make_call().set_option(s.eco ? "Eco" : "Comfort").perform();
+              id(g_sched_setting) = false;
+            }
+          }
+      - script.execute: apply_setpoints
+
+  # schedule_period, schedule_next_change and schedule_status from the last evaluation and the
+  # holds. Run at the end of every apply_setpoints. Publishes only what changed.
+  - id: schedule_publish
+    mode: single
+    then:
+      - lambda: |-
+          std::string period, next, status;
+          if (!id(schedule_enabled).state) {
+            status = "Schedule off";
+          } else if (!id(g_clock_valid) || id(g_sched_period) < 0) {
+            status = "Schedule paused: clock not set";
+          } else {
+            period = chestnut::period_name(id(g_sched_period));
+            next = chestnut::format_12h(id(g_sched_next_min));
+            const char *level = id(g_level_eco) ? "Eco" : "Comfort";
+            if (id(g_hold_temp))
+              status = "Holding " + std::to_string(id(g_hold_f)) + "° until " + next;
+            else if (id(g_hold_level))
+              status = std::string("Holding ") + level + " until " + next;
+            else
+              status = std::string(level) + " until " + next;
+          }
+          auto publish = [](text_sensor::TextSensor *t, const std::string &v) {
+            if (!t->has_state() || t->state != v) t->publish_state(v);
+          };
+          publish(id(schedule_period), period);
+          publish(id(schedule_next_change), next);
+          publish(id(schedule_status), status);
 
   # Clear button. Never changes the climate mode. The latch (and interlock_fault) stays on until
   # the larger of the two minimum off times has passed since the trip: either relay may have been
@@ -636,6 +829,30 @@ button:
     icon: mdi:alert-remove-outline
     on_press:
       - script.execute: clear_interlock
+  # Contract: end the hold now; the current period's level applies.
+  - platform: template
+    id: resume_schedule
+    name: "Resume Schedule"
+    icon: mdi:calendar-sync
+    on_press:
+      - lambda: |-
+          id(g_hold_level) = false;
+          id(g_hold_temp) = false;
+      - script.execute: schedule_rerun
+
+# Contract: schedule on/off (restored, default on). Off ends any hold; with it off nothing
+# switches and no hold starts: a manual change simply stays.
+switch:
+  - platform: template
+    id: schedule_enabled
+    name: "Schedule Enabled"
+    icon: mdi:calendar-check
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - lambda: if (id(g_ready)) id(schedule_rerun).execute();
+    on_turn_off:
+      - lambda: if (id(g_ready)) id(schedule_rerun).execute();
 
 # Safety timers in minutes (spec, Safety 2). Restored; a value outside the range is refused.
 # Applied at boot (numbers set up before the climate, so the startup delay already uses the
@@ -763,16 +980,25 @@ number:
           if (!id(g_ready)) return;
           const int f = lroundf(x);
           if (f == id(g_effective_f)) return;  // already the target: no hold (spec)
-          // Task 10 hook: with schedule_enabled off there is no hold; set comfort_target to f
-          // here instead (and return).
-          id(g_hold_temp) = true;  // a temperature hold (R12)
+          if (!id(schedule_enabled).state) {
+            // Schedule off: no hold, the target just moves. comfort_target moves by the same
+            // step, so the effective target becomes f in Eco too (Comfort: comfort_target = f).
+            const int c = lroundf(id(comfort_target).state) + f - id(g_effective_f);
+            id(comfort_target).make_call().set_value(std::max(50, std::min(90, c))).perform();
+            id(apply_setpoints).execute();  // also when clamping left comfort_target unchanged
+            return;
+          }
+          id(g_hold_temp) = true;  // a temperature hold (R12), until the next period
           id(g_hold_f) = f;
+          id(g_hold_key) = id(g_sched_key);
           id(apply_setpoints).execute();
 
 select:
   # Contract: Comfort / Eco. A manual change starts a level hold (R12) and ends a temperature
   # hold, but only when the level actually changes (a template select fires on_value again when set
-  # to the same option). The schedule (Task 10) sets it with g_sched_setting: no hold. Restored.
+  # to the same option). The schedule sets it with g_sched_setting: no hold. With the schedule
+  # off a manual change just sets the level. Restored (the schedule re-applies its period's
+  # level at boot when it's on and the clock is set).
   - platform: template
     id: comfort_level
     name: "Comfort Level"
@@ -790,10 +1016,179 @@ select:
           }
           if (eco == id(g_level_eco)) return;
           id(g_level_eco) = eco;
-          if (!id(g_sched_setting)) {
-            // A level hold (R12): the level applies with its normal derivation, and it replaces
-            // any temperature hold.
+          if (!id(g_sched_setting) && id(schedule_enabled).state) {
+            // A level hold (R12) until the next period: the level applies with its normal
+            // derivation, and it replaces any temperature hold.
             id(g_hold_level) = true;
             id(g_hold_temp) = false;
+            id(g_hold_key) = id(g_sched_key);
           }
           id(apply_setpoints).execute();
+
+  # --- Schedule settings (spec "Schedule"): each period's level. Restored. Any change
+  # re-evaluates the schedule at once. ---
+  - platform: template
+    id: sched_weekday_wake_level
+    name: "Sched Weekday Wake Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Comfort"
+    optimistic: true
+    restore_value: true
+    on_value: &sched_changed
+      - lambda: if (id(g_ready)) id(schedule_rerun).execute();
+  - platform: template
+    id: sched_weekday_leave_level
+    name: "Sched Weekday Leave Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Eco"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekday_return_level
+    name: "Sched Weekday Return Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Comfort"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekday_sleep_level
+    name: "Sched Weekday Sleep Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Eco"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_wake_level
+    name: "Sched Weekend Wake Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Comfort"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_leave_level
+    name: "Sched Weekend Leave Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Comfort"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_return_level
+    name: "Sched Weekend Return Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Comfort"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_sleep_level
+    name: "Sched Weekend Sleep Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Eco"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+
+# Schedule settings: each period's start time (weekdays Mon-Fri, weekends Sat-Sun). Restored.
+# Any change re-evaluates the schedule at once.
+datetime:
+  - platform: template
+    id: sched_weekday_wake_time
+    name: "Sched Weekday Wake Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "06:30:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekday_leave_time
+    name: "Sched Weekday Leave Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "08:30:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekday_return_time
+    name: "Sched Weekday Return Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "17:30:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekday_sleep_time
+    name: "Sched Weekday Sleep Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "22:30:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_wake_time
+    name: "Sched Weekend Wake Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "08:00:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_leave_time
+    name: "Sched Weekend Leave Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "10:00:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_return_time
+    name: "Sched Weekend Return Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "17:00:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_sleep_time
+    name: "Sched Weekend Sleep Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "23:00:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed

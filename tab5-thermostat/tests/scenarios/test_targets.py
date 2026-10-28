@@ -19,6 +19,7 @@ from aioesphomeapi import ClimateAction, ClimateMode
 from conftest import f_to_c
 from test_core import (COOL_OFF_S, COOL_RUN_S, EDGE_SLACK_S, HEAT_OFF_S, HEAT_RUN_S, cool_to,
                        fixed_weather, heat_to, is_off, is_on, now)
+from test_schedule import expected_now
 
 LOCKOUT_S = 30  # changeover_lockout default, 30 x timer_unit_s
 DEADBAND_F = 0.9  # 0.5 °C
@@ -146,12 +147,19 @@ async def test_holds_do_not_survive_restart(device_keep_prefs):
     await dev.select("comfort_level", "Eco")
     assert await dev.set_number("set_target", 70) == 70
     await effective(dev, 70, 69, 71)
+    before = expected_now()
     await dev.restart()
     await ready(dev)
-    assert await dev.wait_for("comfort_level", lambda v: v is not None, 3) == "Eco"
+    period = await dev.wait_for("schedule_period", lambda v: v, 3)
+    after = expected_now()
+    assert period in (before[0], after[0]), f"real clock gives {before} / {after}"
+    eco = before[1] if period == before[0] else after[1]
+    # No hold: the schedule re-applies the real clock's period at boot.
     assert await dev.wait_for("schedule_hold", lambda v: v is not None, 3) is False
-    await effective(dev, 72, 67, 77)  # the restored level, no hold
-    await setpoints_f(dev, 67, 77)
+    assert await dev.wait_for("comfort_level", lambda v: v is not None, 3) == ("Eco" if eco else "Comfort")
+    low, high = (67, 77) if eco else (71, 73)
+    await effective(dev, 72, low, high)
+    await setpoints_f(dev, low, high)
 
 
 async def test_eco_offset_and_comfort_target_apply_without_hold(device):

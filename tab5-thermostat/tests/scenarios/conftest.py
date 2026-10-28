@@ -3,6 +3,8 @@ over the native API (aioesphomeapi).
 
 `run.sh scenarios` compiles the test entry once, then runs pytest. Each test gets its own
 device process. Entities are looked up by object_id (the snake_case of the entity name).
+The fixtures pin the schedule's clock at PINNED_CLOCK right after the program starts (boot
+evaluates the schedule from the real clock), so no test depends on the time of day.
 """
 import asyncio
 import os
@@ -31,6 +33,8 @@ START_TIMEOUT_S = 20
 STOP_TIMEOUT_S = 5
 ALIVE_CHECK_S = 0.2  # how often a wait checks that the program is still running
 SET_WAIT_S = 2  # how long set_number/select/switch wait to see the new state
+# Mon 7:00: the weekday Wake period (Comfort), until 8:30 am. As (dow 0=Mon..6=Sun, minute).
+PINNED_CLOCK = (0, 7 * 60)
 
 
 def f_to_c(f):
@@ -319,6 +323,14 @@ class Dev:
         self._live_client().switch_command(self._info(object_id).key, bool(on))
         return await self._settle(object_id, lambda v: v == bool(on), n)
 
+    async def set_time(self, object_id, hour, minute):
+        """Set a time-of-day datetime entity. Its value reads back as an aioesphomeapi
+        TimeState (hour, minute, second)."""
+        n = self.updates(object_id)
+        self._live_client().time_command(self._info(object_id).key, hour, minute, 0)
+        return await self._settle(
+            object_id, lambda v: v is not None and (v.hour, v.minute) == (hour, minute), n)
+
     async def press(self, object_id):
         self._live_client().button_command(self._info(object_id).key)
         await self._sync()
@@ -373,6 +385,7 @@ async def _run_device(request, prefs_dir):
     dev.log_path.unlink(missing_ok=True)
     try:
         await dev.start()
+        await dev.action("test_clock", dow=PINNED_CLOCK[0], minute=PINNED_CLOCK[1], valid=True)
         yield dev
     finally:
         await dev.stop()

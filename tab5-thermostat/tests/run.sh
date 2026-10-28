@@ -25,10 +25,13 @@ esac
 docker build -q -t "$image" "$here" >/dev/null
 
 # run_in_container SCRIPT [ARGS...]: ARGS reach SCRIPT as "$@".
+# ESPHome 2026.10.1 host builds with a datetime entity fail under its precompiled header
+# (logger_host.cpp's unqualified time() finds namespace esphome::time), so build without it.
 run_in_container() {
   local script="$1"; shift
   docker run --rm \
     --entrypoint bash \
+    -e ESPHOME_PCH_ENABLE=0 \
     -v "$config_dir:/config" \
     -v chestnut-console_esphome-cache:/cache \
     -w /config \
