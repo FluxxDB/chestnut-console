@@ -20,7 +20,12 @@ ESPHome config for the middle-floor thermostat. This folder is mounted as `/conf
 **First flash over USB-C.** The factory image is `.esphome/build/tab5-thermostat/build/firmware.factory.bin`. Any of these work:
 
 - **Linux with the Tab5 attached:** `docker compose run --rm --no-deps --device /dev/ttyACM0 esphome run tab5-thermostat.yaml --device /dev/ttyACM0`
-- **WSL:** attach the Tab5 with usbipd-win (`usbipd bind` once as admin, then `usbipd attach --wsl --busid <id>`), then do the Linux step. Or run Windows `esptool` against the COM port directly.
+- **WSL (what the PC uses, no admin needed):** run the official Windows build of esptool ([releases](https://github.com/espressif/esptool/releases), `esptool-vX-windows-amd64.zip`) against the Tab5's COM port (it shows up as `303a:1001 USB JTAG/serial debug unit`):
+  ```bash
+  cp tab5-thermostat/.esphome/build/tab5-thermostat/build/firmware.factory.bin /mnt/c/Users/<you>/AppData/Local/Temp/
+  esptool.exe --chip esp32p4 --port COM6 --baud 921600 write-flash 0x0 C:\\Users\\<you>\\AppData\\Local\\Temp\\firmware.factory.bin
+  ```
+  `esptool.exe --port COM6 chip-id` reads the chip revision. Or attach the Tab5 to WSL with usbipd-win (`usbipd bind` once as admin, then `usbipd attach --wsl --busid <id>`) and do the Linux step.
 - **Browser:** https://web.esphome.io in Chrome or Edge → Connect → Install → choose the factory `.bin`.
 
 **After that, updates go over Wi-Fi:**
