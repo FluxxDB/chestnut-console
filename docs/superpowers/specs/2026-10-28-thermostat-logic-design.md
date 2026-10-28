@@ -145,7 +145,7 @@ Final names are the builder's, but the ids are fixed so the PC can build the scr
 | `set_target` | number (°F, step 1, 50–90) | what − / + and HA writes go to: setting it starts a hold at that value (or just sets it, with the schedule off) |
 | `comfort_target` | number (°F, step 1, 50–90) | the Comfort setting |
 | `eco_offset` | number (°F, 2–10) | how far Eco drifts |
-| `comfort_level` | select: Comfort / Eco | the current level; a manual change starts a hold |
+| `comfort_level` | select: Comfort / Eco | the current level; a manual change starts a hold, **but only when the value actually changes**. A template select fires `on_value` again when it's set to the same option, so re-tapping the lit pill must not start a hold. The same goes for `set_target` set to the current effective target. |
 | `schedule_enabled` | switch | schedule on/off |
 | `schedule_hold` | binary_sensor | a manual hold is active |
 | `schedule_period` | text_sensor | Wake / Leave / Return / Sleep (empty with the schedule off or paused) |
