@@ -55,7 +55,7 @@ The Tab5 can't render Home Assistant's own dashboard (it has no browser). Phones
 | on-emphasis / sub | `#ffffff` / `#a3a6ab` | `#ffffff` / `#9a9ca1` | Text on the target card |
 | emphasis button | `#f5f5f5`, ink glyph | `#3a4050`, white glyph | − / + buttons |
 | pill / edge | `#eef0f3` / `#d3d8de` | `rgba(255,255,255,.07)` / none | Unselected mode and fan pills |
-| selected pill / edge | `#dbffe7` / `#9fd9b4` | `#dbffe7` / none | Selected pill (ink text in both themes) |
+| selected pill / edge / text | `#dbffe7` / `#9fd9b4` / ink | `#1e3b33` / `#2f6a55` / `#dbffe7` | Selected pill. Dark is a deep mint, since bright mint glared on the dark theme (Dang) |
 | humidity card / edge | `#dff9ff` / `#b8e6f2` | `rgba(223,249,255,.10)` / none, text `#dff9ff` | Humidity card |
 | history line | `#4098ff` | `#4098ff` | Temperature line |
 
@@ -65,7 +65,7 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ Main Thermostat  Tuesday, October 28                 7:42 pm   (☾)  │  top bar  ~50
+│ Main Thermostat  Tue, Oct 28     Return · Comfort until 10:30 pm  7:42 pm (☾) │
 ├───────────────────────────────────────┬──────────────────────────────┤
 │ Inside now                 ■ Heating  │  Target  (dark card)         │
 │                      to 72° · 18 min  │   [−]        72°        [+]  │
@@ -96,6 +96,9 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 
 **Top bar**
 - Title, today's date, and a 12-hour clock from the RTC/SNTP time.
+- **Schedule status** on the right, before the clock *(Dang: in the top bar)*:
+  - Following the schedule: the current period and when it ends, for example "Return · Comfort until 10:30 pm".
+  - Holding a manual change (target, Eco temperature, or Comfort/Eco; a hold lasts until the next period starts, per milestone 2): "Holding until 10:30 pm" next to a **Resume schedule** pill. Tapping it ends the hold.
 - Theme toggle: a pill with a moon icon in light mode and a sun icon in dark.
 
 **Room card**
@@ -114,10 +117,10 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
   - One number ("Target") sits between the − / + buttons, in Heat, Cool and Auto alike.
   - Each tap moves the target by 1 °F, clamped to the climate's min/max (the range and step come from the milestone 2 spec).
   - In Auto the thermostat decides to heat or cool toward the target. The anti-flip-flop gap is hidden logic in milestone 2, not shown on screen. ESPHome's single-point heat_cool does this natively, per the milestone 2 spec.
-  - The number shown is always the **Comfort** target, even while Eco is active (milestone 2). The card label says which is in effect: "Comfort target" or "Eco · Comfort 72°".
-- **Schedule line** at the bottom of the target card *(my call)*:
-  - Following the schedule: the current period and when it ends, for example "Return · Comfort until 10:30 pm".
-  - Holding a manual change (target or Comfort/Eco, which holds until the next period starts, per milestone 2): "Holding until 10:30 pm" next to a **Resume schedule** pill in the emphasis-button style. Tapping it ends the hold.
+- **Comfort vs Eco on the card** *(Dang: show the Eco number big)*:
+  - In Comfort, the big number is the Comfort target, labeled "Comfort target".
+  - In Eco, the big number is the **Eco temperature**: Comfort − drift in Heat, Comfort + drift in Cool. In Auto it shows the drifted band edges as "68–76°". It's labeled "Eco target", with "Comfort 72°" in small text.
+  - **− / + in Eco change the shown Eco temperature for now** *(Dang)*. Tapping + on 68° makes it 69°, held until the next schedule period. The Comfort target isn't changed. This needs a held override temperature in the milestone 2 logic.
 - **Off mode:** the card shows "Off" and the − / + buttons are hidden.
 - The number updates instantly. The new setpoint goes to the climate entity once there's been no tap for ~1.5 s, so a run of taps is one change *(my call)*.
 
