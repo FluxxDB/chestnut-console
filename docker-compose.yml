@@ -35,6 +35,21 @@ services:
       # Toolchain and build cache, so rebuilding the container doesn't re-download gigabytes.
       - esphome-cache:/cache
 
+  # Dev only: ESPHome host builds (milestone 2's play sim for HA, and its tests). ESPHome
+  # 2026.10.1's precompiled header breaks host builds that have a datetime entity, so it's off
+  # here. The esphome service keeps it: Tab5 (ESP-IDF) builds are faster with it.
+  #   docker compose --profile dev run --rm esphome-host compile main-thermostat-sim.yaml
+  esphome-host:
+    image: esphome/esphome:2026.10.1
+    profiles: [dev]
+    network_mode: host
+    environment:
+      TZ: America/New_York
+      ESPHOME_PCH_ENABLE: "0"
+    volumes:
+      - ./tab5-thermostat:/config
+      - esphome-cache:/cache
+
   # Dev only: desktop preview of the console (ESPHome host + SDL under Xvfb).
   #   docker compose --profile dev run --rm preview <yaml> <outdir> [scenario ...]
   preview:
