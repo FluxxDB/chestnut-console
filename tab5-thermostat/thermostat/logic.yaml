@@ -2,6 +2,8 @@
 # the package contract (room_temperature, room_humidity, relay_heat / relay_cool / relay_fan from
 # the sim or hardware package), plus the safety timer settings and read-only call sensors.
 # This is the only package that turns a relay on. relay_ob (O/B) is never touched.
+# The thermostat reads a sanity-checked temperature (checked_temperature_c), never
+# room_temperature directly; sensor_fault, call_wait_reason and action_elapsed report on it.
 # Runs unchanged on the Tab5 and on the host; test-only hooks live in tests/main-thermostat-test.yaml.
 
 substitutions:
@@ -19,24 +21,63 @@ esphome:
     # Resolved next to this file. A list, so it merges with the sim package's includes.
     - chestnut_logic.h
   on_boot:
-    # Before anything publishes: feed the thermostat's checked temperature from the contract
-    # sensor. For now a plain mirror; Task 8 puts the sanity checker here.
+    # Before anything publishes: every room_temperature reading goes through the sanity checker,
+    # and the thermostat sees only its verdict (value(), NaN while faulted). A NaN makes the
+    # thermostat ask for OFF: no new call starts, and a running call still ends only when its
+    # minimum run allows (ESPHome's idle_action_ready_). The 1 s interval below catches the
+    # faults that come with no reading (stale, frozen) and the recovery.
     - priority: 800
       then:
         - lambda: |-
+            // Production thresholds with every time scaled by timer_unit_s: stale 2 min,
+            // frozen 30 min, recover after 5 min of good readings; 2-40 °C; a jump over 2 °C
+            // held back for one reading.
+            static chestnut::SanityChecker checker(chestnut::SanityConfig{
+                2000u * ${timer_unit_s}, 30000u * ${timer_unit_s}, 5000u * ${timer_unit_s},
+                2.0f, 40.0f, 2.0f});
+            id(g_sanity) = &checker;
+            id(g_boot_ms) = millis();  // millis() isn't uptime on the host (monotonic clock)
             id(room_temperature).add_on_state_callback([](float c) {
-              id(checked_temperature_c).publish_state(c);
+              checker.on_reading(millis(), c);
+              id(checked_temperature_c).publish_state(checker.value());
             });
 
 globals:
   # Interlock fault latch (spec, Safety 3). Not restored: a reboot clears it, and relays boot off.
-  # Also read by the call-wait reason (Task 8).
+  # Also read by call_wait_reason.
   - id: g_interlock_latched
     type: bool
     restore_value: false
     initial_value: "false"
   # millis() of the latest trip; the Clear button waits the minimum off time from here.
   - id: g_interlock_trip_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  # The sensor sanity checker (spec, Safety 4), a chestnut::SanityChecker created and fed in
+  # on_boot above. A void pointer because ESPHome declares globals before it includes
+  # chestnut_logic.h, so a global can't have the checker's type; lambdas cast it back.
+  - id: g_sanity
+    type: void *
+    restore_value: false
+    initial_value: nullptr
+  # millis() at boot, for call_wait_reason's "Starting up".
+  - id: g_boot_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  # action_elapsed: the last climate action seen by on_state (255 = none yet), whole seconds
+  # counted since it began, and the millis() those seconds run up to. Counted in steps of under
+  # 30 s, so an action longer than millis()'s 49.7-day wrap (Off all summer) still adds up.
+  - id: g_last_action
+    type: uint8_t
+    restore_value: false
+    initial_value: "255"
+  - id: g_action_elapsed_s
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  - id: g_action_mark_ms
     type: uint32_t
     restore_value: false
     initial_value: "0"
@@ -65,6 +106,17 @@ sensor:
     state_class: measurement
     accuracy_decimals: 1
     update_interval: never
+  # Contract: seconds since the current heating / cooling / idle (or off) action began. Published
+  # at once (0) on each action change and every 30 s after. Seconds, not a timestamp.
+  - platform: template
+    id: action_elapsed
+    name: "Action Elapsed"
+    icon: mdi:timer-sand
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: never
 
 climate:
   - platform: thermostat
@@ -91,6 +143,16 @@ climate:
     # First boot (nothing restored yet): Off, fan Auto. Without the fan mode here the thermostat
     # would start in fan mode ON (its fallback for an unset fan mode) and run G at boot.
     default_preset: Default
+    # action_elapsed restarts whenever the action changes. on_state fires on every climate
+    # publish (each reading), so compare with the last action seen.
+    on_state:
+      - lambda: |-
+          if ((uint8_t) x.action != id(g_last_action)) {
+            id(g_last_action) = (uint8_t) x.action;
+            id(g_action_elapsed_s) = 0;
+            id(g_action_mark_ms) = millis();
+            id(action_elapsed).publish_state(0);
+          }
     preset:
       - name: Default
         mode: "OFF"
@@ -169,6 +231,23 @@ binary_sensor:
     name: "Interlock Fault"
     device_class: problem
     lambda: return id(g_interlock_latched);
+  # Contract: the temperature sensor's readings are bad (spec, Safety 4); calls stopped. Clears
+  # by itself after 5 minutes of good readings.
+  - platform: template
+    id: sensor_fault
+    name: "Sensor Fault"
+    device_class: problem
+    lambda: |-
+      auto *s = static_cast<chestnut::SanityChecker *>(id(g_sanity));
+      return s != nullptr && s->fault();
+
+# Contract: why the room is off target but nothing is running. Set by the 1 s interval below.
+text_sensor:
+  - platform: template
+    id: call_wait_reason
+    name: "Call Wait Reason"
+    icon: mdi:timer-pause-outline
+    update_interval: never
 
 # Interlock layer 3 (spec, Safety 3): an independent watchdog. The actions never turn W and Y
 # on together (each turns the other relay off first), so both on means something else switched
@@ -192,6 +271,62 @@ interval:
             if (id(relay_fan).state && id(main_thermostat).fan_mode != climate::CLIMATE_FAN_ON)
               id(relay_fan).turn_off();
           }
+
+  # Sensor sanity tick: stale and frozen faults (no reading needed) and recovery. The thermostat
+  # gets a new checked value only when the verdict changes; readings publish their own.
+  - interval: 1s
+    then:
+      - lambda: |-
+          auto *s = static_cast<chestnut::SanityChecker *>(id(g_sanity));
+          if (s == nullptr) return;  // on_boot hasn't created it yet
+          const bool was = s->fault();
+          s->tick(millis());
+          if (s->fault() != was) id(checked_temperature_c).publish_state(s->value());
+      # call_wait_reason, first match wins. The two faults show whenever they're on (a running
+      # call may still be finishing its minimum run under a sensor fault). The waits show only
+      # when the room is off target (the thermostat wants heat or cool, timers aside) and
+      # nothing is running. "Nothing is running" comes from the relays (W / Y), never from
+      # main_thermostat's action, which can read HEATING while the interlock latch holds the
+      # relays off. Published only when it changes.
+      - lambda: |-
+          static bool started_up = false;  // latched, so millis() wrapping never re-enters it
+          if (!started_up) {
+            const uint32_t delay_ms =
+                (uint32_t) lroundf(fmaxf(id(heat_min_off).state, id(cool_min_off).state) *
+                                   ${timer_unit_s}) * 1000u;
+            started_up = millis() - id(g_boot_ms) >= delay_ms;
+          }
+          const auto *sanity = static_cast<chestnut::SanityChecker *>(id(g_sanity));
+          const bool running = id(call_heat).state || id(call_cool).state;
+          // What the thermostat would do now if no timer held it (OFF on a NaN reading).
+          const auto wanted = id(main_thermostat)->delayed_climate_action();
+          const bool off_target = wanted == climate::CLIMATE_ACTION_HEATING ||
+                                  wanted == climate::CLIMATE_ACTION_COOLING;
+          const bool waiting = off_target && !running;
+          const char *reason = "";
+          if (id(g_interlock_latched)) {
+            reason = "Interlock fault";
+          } else if (sanity != nullptr && sanity->fault()) {
+            reason = "Sensor fault";
+          } else if (waiting && !started_up) {
+            reason = "Starting up";  // the boot-time minimum off timers
+          // 4. "Changeover wait" (Task 9) goes here, before short-cycle: nothing running, the
+          //    Auto changeover lockout active and the room past the other side's threshold.
+          } else if (waiting) {
+            reason = "Short-cycle protection";  // a minimum off / idle timer holds the call
+          }
+          auto *t = id(call_wait_reason);
+          if (!t->has_state() || t->state != reason) t->publish_state(reason);
+
+  # action_elapsed between action changes.
+  - interval: 30s
+    then:
+      - lambda: |-
+          if (id(g_last_action) == 255) return;
+          const uint32_t whole_s = (millis() - id(g_action_mark_ms)) / 1000u;
+          id(g_action_elapsed_s) += whole_s;
+          id(g_action_mark_ms) += whole_s * 1000u;
+          id(action_elapsed).publish_state(id(g_action_elapsed_s));
 
 script:
   # Clear button. Never changes the climate mode. The latch (and interlock_fault) stays on until

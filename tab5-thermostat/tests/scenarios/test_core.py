@@ -119,8 +119,9 @@ async def test_ob_never_on(device):
     ids = device.object_ids()
     # The relays (relay_ob included) are internal: nothing outside the logic can switch them.
     assert not [i for i in ids if i.startswith("relay")], ids
-    # O/B has no call sensor: the call sensors are exactly W, Y and G.
-    assert [i for i in ids if i.startswith("call_")] == ["call_cool", "call_fan", "call_heat"]
+    # O/B has no call sensor: the call sensors are exactly W, Y and G (call_wait_reason is text).
+    calls = [i for i in ids if i.startswith("call_") and i != "call_wait_reason"]
+    assert calls == ["call_cool", "call_fan", "call_heat"]
     # The test hook can't drive O/B either.
     assert device.action_args("test_force_relays") == ["cool", "heat"]
 
