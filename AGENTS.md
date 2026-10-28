@@ -78,6 +78,7 @@ ESPHome climate works in °C internally. Show °F in the UI and HA (Dang is in t
 ## How we develop (Dang's rules)
 
 - **Use `superpowers:brainstorming` before building any new feature or milestone.** Work out the design with Dang first and write it up in `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`. The other agent reads it as the builder check, and nothing gets built until Dang approves it. Then plan it with `superpowers:writing-plans`. The agent that owns the work leads its brainstorm, so Dang isn't asked the same questions twice.
+- **Ask Dang design questions as surveys.** In design stages, use the multiple-choice question tool (AskUserQuestion) with the recommended option first, instead of open-ended text questions. On beacon, where that tool doesn't exist, give a short numbered list of options with your recommendation first.
 - **Don't use the `graphify` skill on this project.** No knowledge graphs or `graphify-out/`; the repo is small enough to read directly.
 
 ## Working together (PC agent + Mac agent)
