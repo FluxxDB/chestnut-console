@@ -210,6 +210,7 @@ Python scenario tests talk to the test build over ESPHome's native API (`aioesph
 - Deadband and overrun values within the behaviour above.
 - How the sim runs in Docker on the Mac, and how the tests get time control.
 - Friendly names, icons and entity categories.
+- **Packaging rule (from the PC's M3 work):** write every `esphome: on_boot:` as a list item (`on_boot: [- priority: X, then: ...]`), never a mapping. ESPHome's package merge folds mapping-form `on_boot` blocks from different packages into one automation, keeping only the last package's priority.
 
 ## Answered by Dang after the builder check
 
