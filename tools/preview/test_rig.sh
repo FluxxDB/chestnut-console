@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 out=tab5-thermostat/preview/shots/rig
-rm -rf "$out"
+docker compose --profile dev run --rm --entrypoint rm preview -rf /config/preview/shots/rig >/dev/null 2>&1
 docker compose --profile dev run --rm preview preview/console-preview.yaml "/config/preview/shots/rig"
 png="$out/default-light.png"
 [ -f "$png" ] || { echo "FAIL: $png missing"; exit 1; }
