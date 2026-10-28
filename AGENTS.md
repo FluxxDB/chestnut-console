@@ -59,7 +59,7 @@ docker compose run --rm --no-deps esphome compile tab5-thermostat.yaml
 
 1. **Bring-up** (PC, needs the Tab5 on USB): hello screen, touch, Wi-Fi, HA connection, web page, identify the screen revision. *In progress.*
 2. **Thermostat logic, simulated.** ESPHome `thermostat` climate driven by a simulated room (a "virtual house" whose temperature drifts toward outdoor and responds to virtual heat/cool/fan relays), plus all the safety requirements above. Develop it on ESPHome's **`host` platform**, which runs natively on Linux/macOS with no hardware, then run the same packages on the Tab5.
-3. **Thermostat UI** in LVGL: big temperature, setpoint, mode, fan, humidity. ESPHome's `sdl` display on `host` lets you iterate on the UI on a desktop.
+3. **Thermostat UI** in LVGL. Dang's call (2026-10-28): **functional first, polish later**. First a clean, simple screen (big temperature, setpoint, mode, fan, humidity) built on the milestone 2 climate entity, then a proper design pass with mockups. The Tab5 can't show HA's own dashboard (it has no browser); phones and PCs get HA's built-in thermostat card meanwhile. The UI lives in `ui/` packages, separate from the logic, so restyling is cheap.
 4. **Bench rig** (when Dang buys the parts): real ENV IV + Unit 4-Relay + 24 VAC lamps, then 24 VAC → DC power.
 5. **House:** site survey, then install.
 
@@ -90,8 +90,8 @@ Co-workers and co-reviewers, not orchestrator and worker. Neither is in charge; 
 - **Talk on beacon** in channel **`#chestnut-console`**. Handles: `pc-chestnut-console`, `mac-chestnut-console`. Claim before starting a task (`--tag claim`), post milestones and `done` with commits.
 - **Branches:** work on `pc/<topic>` or `mac/<topic>`. Before merging to `main`, post a review request with the branch and commit; the other agent reviews (`git diff main...<branch>`) and replies on beacon. The author merges after approval. Keep `main` compiling.
 - **File ownership** to avoid collisions (change it by agreement on beacon):
-  - PC: `docker-compose.yml`, `home-assistant/`, `tab5-thermostat/hardware/`, `ui/hello.yaml`, flashing. The Tab5 is plugged into the PC.
-  - Mac: thermostat logic and simulation packages and the host-sim entry point, then the thermostat UI screens.
+  - PC: `docker-compose.yml`, `home-assistant/`, `tab5-thermostat/hardware/`, everything in `tab5-thermostat/ui/` (the thermostat screens; Dang moved UI ownership to the PC on 2026-10-28), and flashing. The Tab5 is plugged into the PC.
+  - Mac: the thermostat logic and simulation packages and the host-sim entry point.
 - **Third opinion:** the Mac agent can consult **astra** through its CLI when a design call is contested or worth a fresh pair of eyes.
 - **Destructive or outward-facing actions** (force-push, deleting branches, spending money, changing Dang's network or system settings) go to Dang first.
 - Never put secrets on beacon or in the repo.
