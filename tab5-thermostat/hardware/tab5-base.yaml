@@ -3,10 +3,12 @@
 # Audio (ES8388/ES7210) and camera are left out until something needs them.
 
 esphome:
+  # A list item, not a mapping: packages' on_boot mappings merge into one automation
+  # (actions concatenated, last priority wins); list items stay separate.
   on_boot:
-    then:
-      # Read the battery-backed RTC once at boot so the clock is right before Wi-Fi/SNTP.
-      - rx8130.read_time:
+    - then:
+        # Read the battery-backed RTC once at boot so the clock is right before Wi-Fi/SNTP.
+        - rx8130.read_time:
 
 esp32:
   variant: esp32p4
@@ -87,7 +89,11 @@ light:
     output: backlight_pwm
     name: "Display Backlight"
     id: backlight
-    restore_mode: RESTORE_DEFAULT_ON
+    # The console sets the level at boot (ui/console-logic.yaml), so don't save it to flash on
+    # every dim and wake. Until then, start low rather than at full brightness.
+    restore_mode: ALWAYS_ON
+    initial_state:
+      brightness: 10%
     default_transition_length: 250ms
 
 time:
@@ -155,11 +161,15 @@ binary_sensor:
   - platform: gpio
     id: charging
     name: "Charging Status"
-    entity_category: diagnostic
+    # Without a battery (bare Tab5) this pin floats and flapped ~1.4x/s, flooding the log and
+    # HA history. Only report a state that holds for 10 s.
+    internal: true
     pin:
       pi4ioe5v6408: pi4ioe2
       number: 6
       mode: INPUT_PULLDOWN
+    filters:
+      - delayed_on_off: 10s
 
 sensor:
   - platform: ina226
@@ -175,4 +185,10 @@ sensor:
       id: battery_current
       # Positive means discharging, negative means charging
       name: "Battery Current"
+      entity_category: diagnostic
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
       entity_category: diagnostic

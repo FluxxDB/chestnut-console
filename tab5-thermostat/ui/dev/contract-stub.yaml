@@ -1,0 +1,261 @@
+# DEV ONLY: a stand-in for the milestone 2 thermostat logic, with the same entity ids
+# (mac/thermostat-logic, "Entities the screen and HA can use") and fake values.
+# Lets the console be built and previewed before milestone 2 merges; swap this package for
+# milestone 2's packages then. It switches nothing: there are no relays here.
+# The Scenario select sets every value at once (used by the preview tests).
+
+climate:
+  - platform: template
+    id: main_thermostat
+    name: "Main Thermostat"
+    optimistic: true
+    supports_action: true
+    supported_modes: ["OFF", HEAT, COOL, HEAT_COOL]
+    supported_fan_modes: [AUTO, "ON"]
+    set_mode_action:
+      - script.execute: stub_follow
+
+sensor:
+  - platform: template
+    id: checked_temperature
+    name: "Checked Temperature"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    accuracy_decimals: 1
+  - platform: template
+    id: effective_target
+    name: "Effective Target"
+    unit_of_measurement: "°F"
+    accuracy_decimals: 0
+  - platform: template
+    id: effective_low
+    name: "Effective Low"
+    unit_of_measurement: "°F"
+    accuracy_decimals: 0
+  - platform: template
+    id: effective_high
+    name: "Effective High"
+    unit_of_measurement: "°F"
+    accuracy_decimals: 0
+  - platform: template
+    id: room_humidity
+    name: "Room Humidity"
+    unit_of_measurement: "%"
+    device_class: humidity
+    accuracy_decimals: 0
+  - platform: template
+    id: action_since
+    name: "Action Since"
+    device_class: timestamp
+
+binary_sensor:
+  - platform: template
+    id: schedule_hold
+    name: "Schedule Hold"
+  - platform: template
+    id: sensor_fault
+    name: "Sensor Fault"
+    device_class: problem
+  - platform: template
+    id: interlock_fault
+    name: "Interlock Fault"
+    device_class: problem
+  - platform: template
+    id: call_heat
+    name: "Call Heat"
+  - platform: template
+    id: call_cool
+    name: "Call Cool"
+  - platform: template
+    id: call_fan
+    name: "Call Fan"
+
+text_sensor:
+  - platform: template
+    id: schedule_period
+    name: "Schedule Period"
+  - platform: template
+    id: schedule_next_change
+    name: "Schedule Next Change"
+  - platform: template
+    id: schedule_status
+    name: "Schedule Status"
+  - platform: template
+    id: call_wait_reason
+    name: "Call Wait Reason"
+
+number:
+  - platform: template
+    id: set_target
+    name: "Set Target"
+    min_value: 50
+    max_value: 90
+    step: 1
+    unit_of_measurement: "°F"
+    optimistic: true
+    initial_value: 72
+    on_value:
+      # Milestone 2: setting a target starts a hold at that value.
+      - binary_sensor.template.publish:
+          id: schedule_hold
+          state: true
+      - sensor.template.publish:
+          id: effective_target
+          state: !lambda "return x;"
+      - text_sensor.template.publish:
+          id: schedule_status
+          state: !lambda 'return "Holding " + to_string((int) x) + "° until " + id(schedule_next_change).state;'
+      - script.execute: stub_follow
+  - platform: template
+    id: comfort_target
+    name: "Comfort Target"
+    min_value: 50
+    max_value: 90
+    step: 1
+    unit_of_measurement: "°F"
+    optimistic: true
+    initial_value: 72
+  - platform: template
+    id: eco_offset
+    name: "Eco Offset"
+    min_value: 2
+    max_value: 10
+    step: 1
+    unit_of_measurement: "°F"
+    optimistic: true
+    initial_value: 4
+
+select:
+  - platform: template
+    id: comfort_level
+    name: "Comfort Level"
+    options: [Comfort, Eco]
+    optimistic: true
+    initial_option: Comfort
+  - platform: template
+    id: scenario
+    name: "Scenario"
+    optimistic: true
+    options:
+      - Heating
+      - Cooling
+      - Eco auto band
+      - Hold
+      - Schedule off
+      - Clock not set
+      - Waiting
+      - Off fan on
+      - Sensor fault
+      - Interlock fault
+      - Unknowns
+      - Finishing
+    initial_option: Heating
+    on_value:
+      - script.execute:
+          id: stub_apply_scenario
+          name: !lambda "return x;"
+
+switch:
+  - platform: template
+    id: schedule_enabled
+    name: "Schedule Enabled"
+    optimistic: true
+    restore_mode: ALWAYS_ON
+
+button:
+  - platform: template
+    id: resume_schedule
+    name: "Resume Schedule"
+    on_press:
+      - binary_sensor.template.publish:
+          id: schedule_hold
+          state: false
+      - text_sensor.template.publish:
+          id: schedule_status
+          state: !lambda 'return id(comfort_level).current_option() + std::string(" until ") + id(schedule_next_change).state;'
+  - platform: template
+    id: clear_interlock_fault
+    name: "Clear Interlock Fault"
+    on_press:
+      - binary_sensor.template.publish:
+          id: interlock_fault
+          state: false
+
+script:
+  # Heating and cooling follow a mode or target change at once: heat below the target, cool above
+  # it (Auto: outside the band). Milestone 2 also lets a running call finish its minimum run
+  # (scenario "Finishing") and waits out minimum off times. The room temperature never moves here.
+  - id: stub_follow
+    then:
+      - lambda: |-
+          auto *cl = id(main_thermostat);
+          const auto m = cl->mode;
+          const float room = id(checked_temperature).state;
+          float low = id(effective_low).state, high = id(effective_high).state;
+          if (m != climate::CLIMATE_MODE_HEAT_COOL || std::isnan(low) || std::isnan(high))
+            low = high = id(effective_target).state;
+          const bool heat = (m == climate::CLIMATE_MODE_HEAT || m == climate::CLIMATE_MODE_HEAT_COOL) && room < low;
+          const bool cool = (m == climate::CLIMATE_MODE_COOL || m == climate::CLIMATE_MODE_HEAT_COOL) && room > high;
+          cl->action = m == climate::CLIMATE_MODE_OFF ? climate::CLIMATE_ACTION_OFF
+                       : heat ? climate::CLIMATE_ACTION_HEATING
+                       : cool ? climate::CLIMATE_ACTION_COOLING : climate::CLIMATE_ACTION_IDLE;
+          id(call_heat).publish_state(heat);
+          id(call_cool).publish_state(cool);
+          id(call_fan).publish_state(cool || cl->fan_mode == climate::CLIMATE_FAN_ON);
+          cl->publish_state();
+
+  - id: stub_apply_scenario
+    parameters:
+      name: std::string
+    then:
+      - lambda: |-
+          // Baseline: heating at 71 toward 72, Comfort, schedule on, nothing wrong.
+          float room = 71, target = 72, low = NAN, high = NAN, hum = 42;
+          bool heat = false, cool = false, fan = false, hold = false, sfault = false, ifault = false, sched_on = true;
+          std::string level = "Comfort", period = "Return", next = "10:30 pm", status = "Comfort until 10:30 pm", wait = "";
+          auto mode = climate::CLIMATE_MODE_HEAT;
+          auto action = climate::CLIMATE_ACTION_IDLE;
+          if (name == "Heating") { heat = true; action = climate::CLIMATE_ACTION_HEATING; }
+          else if (name == "Cooling") { mode = climate::CLIMATE_MODE_COOL; room = 76; target = 74; cool = true; fan = true; action = climate::CLIMATE_ACTION_COOLING; period = "Wake"; next = "8:00 am"; status = "Comfort until 8:00 am"; }
+          else if (name == "Eco auto band") { mode = climate::CLIMATE_MODE_HEAT_COOL; level = "Eco"; room = 70; low = 68; high = 76; target = 72; period = "Leave"; next = "5:30 pm"; status = "Eco until 5:30 pm"; }
+          else if (name == "Hold") { heat = true; action = climate::CLIMATE_ACTION_HEATING; target = 69; hold = true; status = "Holding 69° until 10:30 pm"; }
+          else if (name == "Schedule off") { sched_on = false; period = ""; next = ""; status = "Schedule off"; heat = true; action = climate::CLIMATE_ACTION_HEATING; }
+          else if (name == "Clock not set") { period = ""; next = ""; status = "Schedule paused: clock not set"; }
+          else if (name == "Waiting") { room = 69; wait = "Short-cycle protection"; }
+          else if (name == "Off fan on") { mode = climate::CLIMATE_MODE_OFF; fan = true; action = climate::CLIMATE_ACTION_OFF; }
+          else if (name == "Sensor fault") { room = NAN; sfault = true; wait = "Sensor fault"; }
+          else if (name == "Interlock fault") { ifault = true; wait = "Interlock fault"; }
+          else if (name == "Finishing") { mode = climate::CLIMATE_MODE_COOL; heat = true; action = climate::CLIMATE_ACTION_HEATING; }
+          else if (name == "Unknowns") { room = NAN; target = NAN; hum = NAN; period = ""; next = ""; status = ""; }
+          id(checked_temperature).publish_state(room);
+          id(effective_target).publish_state(target);
+          id(effective_low).publish_state(low);
+          id(effective_high).publish_state(high);
+          id(room_humidity).publish_state(hum);
+          id(action_since).publish_state(id(sntp_time).now().is_valid() ? id(sntp_time).now().timestamp - 18 * 60 : NAN);
+          id(call_heat).publish_state(heat);
+          id(call_cool).publish_state(cool);
+          id(call_fan).publish_state(fan);
+          id(schedule_hold).publish_state(hold);
+          id(sensor_fault).publish_state(sfault);
+          id(interlock_fault).publish_state(ifault);
+          id(schedule_enabled).publish_state(sched_on);
+          id(schedule_period).publish_state(period);
+          id(schedule_next_change).publish_state(next);
+          id(schedule_status).publish_state(status);
+          id(call_wait_reason).publish_state(wait);
+          auto call = id(comfort_level).make_call();
+          call.set_option(level);
+          call.perform();
+          id(main_thermostat).mode = mode;
+          id(main_thermostat).action = action;
+          id(main_thermostat).fan_mode = climate::CLIMATE_FAN_AUTO;
+          id(main_thermostat).publish_state();
+
+esphome:
+  on_boot:
+    - priority: -100
+      then:
+        - script.execute:
+            id: stub_apply_scenario
+            name: !lambda "return id(scenario).current_option();"

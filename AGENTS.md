@@ -30,12 +30,15 @@ Dang is turning an **M5Stack Tab5** (ESP32-P4 + ESP32-C6 Wi-Fi, 5" 720×1280 tou
 ## Repo layout
 
 ```
-docker-compose.yml           HA 2026.10.4 + ESPHome 2026.10.1 (host networking)
+docker-compose.yml           HA 2026.10.4 + ESPHome 2026.10.1 (host networking); `preview` service (dev profile)
+tools/preview/               desktop preview rig + console tests (test_all.sh, test_device.sh)
 home-assistant/config/       HA config (runtime state gitignored)
 tab5-thermostat/             ESPHome config dir (mounted at /config in the esphome container)
   tab5-thermostat.yaml       device entry point: Wi-Fi, API, OTA, web page, packages
   hardware/                  board support; display-*.yaml = one per Tab5 screen revision
-  ui/                        LVGL screens (hello.yaml = milestone 1 smoke test)
+  ui/                        the console: fonts, theme, console (layout), console-logic (bindings)
+    dev/contract-stub.yaml   DEV ONLY stand-in for milestone 2 (same entity ids, fake values)
+  preview/                   desktop preview entry point (host + SDL); shots/ is gitignored
   secrets.yaml.example       copy to secrets.yaml locally (never commit, never post on beacon)
   docs/                      research.md, shopping-list.md
 ```
@@ -57,7 +60,7 @@ docker compose run --rm --no-deps esphome compile tab5-thermostat.yaml
 
 ## Milestones
 
-1. **Bring-up** (PC, needs the Tab5 on USB): hello screen, touch, Wi-Fi, HA connection, web page, identify the screen revision. *In progress.*
+1. **Bring-up** (PC, needs the Tab5 on USB): hello screen, touch, Wi-Fi, HA connection, web page, identify the screen revision. *Done (merged).*
 2. **Thermostat logic, simulated.** ESPHome `thermostat` climate driven by a simulated room (a "virtual house" whose temperature drifts toward outdoor and responds to virtual heat/cool/fan relays), plus all the safety requirements above. Develop it on ESPHome's **`host` platform**, which runs natively on Linux/macOS with no hardware, then run the same packages on the Tab5.
 3. **Thermostat UI** in LVGL. Dang's call (2026-10-28): **functional first, polish later**. First a clean, simple screen (big temperature, setpoint, mode, fan, humidity) built on the milestone 2 climate entity, then a proper design pass with mockups. The Tab5 can't show HA's own dashboard (it has no browser); phones and PCs get HA's built-in thermostat card meanwhile. The UI lives in `ui/` packages, separate from the logic, so restyling is cheap.
 4. **Bench rig** (when Dang buys the parts): real ENV IV + Unit 4-Relay + 24 VAC lamps, then 24 VAC → DC power.
