@@ -1,6 +1,8 @@
 // Pure thermostat logic: no ESPHome includes, so it compiles on the host for unit tests.
 #pragma once
 
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <string>
 
@@ -173,5 +175,147 @@ inline std::string format_12h(int minute) {
   std::snprintf(buf, sizeof buf, "%d:%02d %s", h % 12 == 0 ? 12 : h % 12, m, h < 12 ? "am" : "pm");
   return std::string(buf);
 }
+
+// ---- Sensor sanity --------------------------------------------------------------------
+
+// Times in ms, temperatures in C.
+struct SanityConfig {
+  uint32_t stale_ms;   // no reading for longer than this is bad
+  uint32_t frozen_ms;  // the identical value for longer than this is bad
+  uint32_t recover_ms; // continuous good readings needed to clear a fault
+  float min_c;
+  float max_c;
+  float spike_c;       // a jump of more than this from the last accepted reading is held back
+};
+
+namespace detail {
+// Wrap-safe time since `then` (uint32 ms, like ESPHome's millis()). A timestamp slightly
+// ahead of `now` counts as zero elapsed rather than ~49 days.
+inline uint32_t elapsed_ms(uint32_t now, uint32_t then) {
+  const uint32_t d = now - then;
+  return d > 0x7FFFFFFFu ? 0 : d;
+}
+}  // namespace detail
+
+// Checks the room temperature before the thermostat sees it. Feed every reading to
+// on_reading() and call tick() at least once a second; publish value() (NaN on a fault)
+// as the thermostat's input and fault() as the problem sensor.
+//
+// Bad: NaN, outside [min, max], no reading for stale_ms, or the identical value for
+// frozen_ms. A fault starts at the first bad condition and clears after recover_ms of
+// continuous good readings; any bad condition restarts that window.
+//
+// Spike: a reading more than spike_c from the last accepted one is held back. If the next
+// reading is within spike_c of the held one, both are accepted (a real change); otherwise
+// the held one is dropped and the new reading is judged on its own. A spike is not a fault
+// by itself, but while a fault is clearing a held-back reading is not a good reading, so
+// it restarts the recovery window. A bad reading drops a held one.
+//
+// Startup: value() is NaN until the first accepted reading, but fault() stays false until
+// stale_ms passes with no reading at all (the clock starts at the first call).
+class SanityChecker {
+ public:
+  explicit SanityChecker(SanityConfig cfg) : cfg_(cfg) {}
+
+  void on_reading(uint32_t now_ms, float c) {
+    start(now_ms);
+    // A gap since the previous reading is caught even if tick() was late.
+    if (time_bad(now_ms)) mark_bad();
+    last_rx_ms_ = now_ms;
+    if (!std::isnan(c)) {
+      if (!have_frozen_ || c != frozen_value_) {
+        frozen_value_ = c;
+        frozen_since_ms_ = now_ms;
+        have_frozen_ = true;
+      }
+    }
+    // Still frozen counts too: the identical value keeps arriving but is not good.
+    if (std::isnan(c) || c < cfg_.min_c || c > cfg_.max_c || time_bad(now_ms)) {
+      mark_bad();
+      return;
+    }
+    const bool accepted = accept(c);
+    if (fault_) {
+      if (!accepted)
+        good_valid_ = false;
+      else if (!good_valid_) {
+        good_since_ms_ = now_ms;
+        good_valid_ = true;
+      }
+    }
+    maybe_clear(now_ms);
+  }
+
+  void tick(uint32_t now_ms) {
+    start(now_ms);
+    if (time_bad(now_ms)) {
+      mark_bad();
+      return;
+    }
+    maybe_clear(now_ms);
+  }
+
+  bool fault() const { return fault_; }
+  float value() const { return (fault_ || !have_value_) ? NAN : value_; }
+
+ private:
+  void start(uint32_t now_ms) {
+    if (started_) return;
+    started_ = true;
+    last_rx_ms_ = now_ms;
+  }
+
+  bool time_bad(uint32_t now_ms) const {
+    if (detail::elapsed_ms(now_ms, last_rx_ms_) > cfg_.stale_ms) return true;
+    return have_frozen_ && detail::elapsed_ms(now_ms, frozen_since_ms_) > cfg_.frozen_ms;
+  }
+
+  void mark_bad() {
+    fault_ = true;
+    good_valid_ = false;
+    held_ = false;
+  }
+
+  // Spike filter for an in-range reading. Returns false if the reading was held back.
+  bool accept(float c) {
+    if (have_value_ && held_ && std::fabs(c - held_value_) <= cfg_.spike_c) {
+      held_ = false;  // a real change: both readings are accepted, c is the newest
+      take(c);
+      return true;
+    }
+    held_ = false;  // not confirmed: the held reading is dropped
+    if (have_value_ && std::fabs(c - value_) > cfg_.spike_c) {
+      held_ = true;
+      held_value_ = c;
+      return false;
+    }
+    take(c);
+    return true;
+  }
+
+  void take(float c) {
+    value_ = c;
+    have_value_ = true;
+  }
+
+  void maybe_clear(uint32_t now_ms) {
+    if (fault_ && good_valid_ && have_value_ && detail::elapsed_ms(now_ms, good_since_ms_) >= cfg_.recover_ms)
+      fault_ = false;
+  }
+
+  SanityConfig cfg_;
+  bool started_ = false;
+  uint32_t last_rx_ms_ = 0;
+  bool have_frozen_ = false;
+  float frozen_value_ = 0;
+  uint32_t frozen_since_ms_ = 0;
+  bool have_value_ = false;
+  float value_ = 0;
+  bool held_ = false;
+  float held_value_ = 0;
+  bool fault_ = false;
+  bool good_valid_ = false;
+  uint32_t good_since_ms_ = 0;
+};
 
 }  // namespace chestnut
