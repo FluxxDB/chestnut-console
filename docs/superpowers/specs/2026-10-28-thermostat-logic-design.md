@@ -153,7 +153,7 @@ Final names are the builder's, but the ids are fixed so the PC can build the scr
 | `schedule_status` | text_sensor | ready-made text, e.g. "Eco until 5:30 pm", "Holding 69° until 10:30 pm", "Schedule paused: clock not set" |
 | `resume_schedule` | button | end the hold |
 | `call_wait_reason` | text_sensor | why the room is off target but nothing is running: "Starting up", "Short-cycle protection", "Changeover wait", "Sensor fault", "Interlock fault", or empty |
-| `action_since` | sensor (timestamp) | when the current heating/cooling/idle action started, for "18 min so far" |
+| `action_elapsed` | sensor (s) | seconds since the current heating/cooling/idle action began, published at once on each action change and every 30 s after, for "18 min so far". (Not an epoch timestamp: a float sensor only holds those to about ±2 min.) |
 | `checked_temperature` | sensor (°F) | the sanity-checked room temperature the thermostat acts on; the screen's big room number should use it |
 | `sched_{weekday,weekend}_{wake,leave,return,sleep}_time` | datetime (time) | period start times |
 | `sched_{weekday,weekend}_{wake,leave,return,sleep}_level` | select | Comfort / Eco per period |
