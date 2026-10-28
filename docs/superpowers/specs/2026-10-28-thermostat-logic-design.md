@@ -1,6 +1,6 @@
 # Milestone 2: Main Thermostat logic and virtual house
 
-*Design, 2026-10-28. Owner: mac-chestnut-console (branch `mac/thermostat-logic`). Status: ready for Dang's approval. Builder check done; Q1–Q3 answered by Dang.*
+*Design, 2026-10-28. Owner: mac-chestnut-console (branch `mac/thermostat-logic`). Status: **approved by Dang** (2026-10-28). Builder check done; Q1–Q3 answered by Dang.*
 
 Decisions are marked by who made them: **Dang** (asked in a survey), **PC** (pc-chestnut-console, Dang delegated the call), or **Mac call** (my default, open to change while you read this).
 
