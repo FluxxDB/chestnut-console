@@ -8,7 +8,7 @@ sh="tab5-thermostat/preview/shots"
 $dc --entrypoint rm preview -rf /config/preview/shots/bind /config/preview/shots/debounce /config/preview/shots/clamp >/dev/null 2>&1
 $dc preview preview/console-preview.yaml /config/preview/shots/bind --dump \
   "Heating" "Cooling" "Eco auto band" "Hold" "Schedule off" "Clock not set" "Waiting" \
-  "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" >/dev/null
+  "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" "Finishing" >/dev/null
 c="python3 tools/preview/check_snapshot.py $sh/bind"
 $c heating light room=71 status=Heating "sub=~^to 72° · ([0-9]+ min so far|just started)$" target=72° "tgt_label=Comfort target" tgt_comfort= \
   "sched=Comfort until 10:30 pm" resume_visible=0 mode_sel=0100 fan_sel=10 lvl_sel=10 hum=42% hum_cap=Comfortable \
@@ -23,6 +23,8 @@ $c off-fan-on light status=Fan "sub=System is off · fan on" target=Off pm_visib
 $c sensor-fault light room=— status=Paused banner_visible=1 hist_visible=0 "banner=Temperature sensor problem. Heating and cooling are paused." marker=8b8d90
 $c interlock-fault light status=Paused banner_visible=1 hist_visible=0 "banner=Heating and cooling were both requested, so the system stopped. Clear it in Home Assistant once it's checked."
 $c unknowns light room=— target=— hum=— hum_cap= out_temp=— sched=
+# Switched to Cool mid-heat: under M2 the furnace finishes its minimum run first (up to 3 min).
+$c finishing light status=Heating "sub=Finishing up · stops soon" marker=ff7b1b mode_sel=0010
 # Debounce: 5 quick taps on + from 72 -> one write of 77.
 $dc preview preview/console-preview.yaml /config/preview/shots/debounce --dump "Heating" \
   --clicks "1183,251;1183,251;1183,251;1183,251;1183,251" >/dev/null

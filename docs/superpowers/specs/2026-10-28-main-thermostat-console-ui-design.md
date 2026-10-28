@@ -107,6 +107,7 @@ All fonts render with **4-bit anti-aliasing** (`bpp: 4`). At ESPHome's default 1
 - "Inside now" with the room temperature in whole °F, from `checked_temperature`.
 - Status, top right: a colored marker, the action word (Heating, Cooling, Fan, Idle, Off) from the climate entity's current action, and a subline:
   - while running: "to 72° · 18 min so far" (minutes since the current action began);
+  - still running after a switch to another mode: "Finishing up · stops soon". Milestone 2 lets the furnace or AC finish its minimum run first (up to a few minutes). *(Dang asked why "Heating" stayed after he tapped Cool. On the dev stand-in, the action now follows the mode at once.)*
   - idle: the held target or range;
   - off: "System is off".
 - **Temperature line** *(my call: Dang kept the line by not objecting; the default from mockup v3)*:
@@ -151,12 +152,11 @@ All fonts render with **4-bit anti-aliasing** (`bpp: 4`). At ESPHome's default 1
 - Both levels are adjustable entities in HA and on the web page: **Screen Brightness** (default 10) and **Dim Brightness** (default 4). They're light brightness values, which ESPHome gamma-corrects (x^2.8): 4% gives about a tenth of the light of 10%, while a literal 1% would be dark.
 - The Tab5's backlight bottoms out not far below the in-use level, so the dim stage also lays a 70% black scrim over the picture.
 
-**Motion** *(Dang asked for subtle animation; the details are the PC agent's call)*
-- **Dim:** the scrim fades in over 1 s (ease out) while the backlight eases down to the dim level.
-- **Sleep:** the scrim darkens to black over 0.8 s while the backlight fades out; then LVGL pauses.
-- **Wake:** the scrim drops at once and the backlight fades up over 0.25 s. Boot and a new Screen Brightness setting apply at once.
-- **Buttons and pills** press in by 3 px and ease back (150 ms, ease out), in place of LVGL's default grow. A pill eases between its selected and unselected colors, border and text included.
-- **Theme changes stay instant.** The Tab5 redraws the whole screen in about 0.23 s, so full-screen fades play at only a few frames per second (the backlight transitions smooth the dim and sleep fades). Small areas like buttons animate smoothly.
+**Motion** *(Dang tried fades on the wall, then asked for none on the idle stages and snappier buttons)*
+- **Dim, sleep and wake switch at once.** No fades: on the Tab5 a full-screen fade plays at only about 4 frames per second (a full redraw takes about 0.23 s).
+- **Buttons and pills** press in by 3 px the moment they're touched, then ease back over 80 ms (ease out). This replaces LVGL's default grow, which also eased in over 80 ms. Colors switch at once (a pill lighting up).
+- **A tap's result shows right away:** the screen refreshes as soon as a button's action runs, without waiting for the 250 ms refresh.
+- **Theme changes stay instant.**
 
 **Theme** *(Dang)*
 - The toggle switches light/dark immediately.
@@ -181,7 +181,7 @@ From the milestone 2 spec (`mac/thermostat-logic` @ cbeebb8, "Entities the scree
 |---|---|---|
 | Room temperature | `checked_temperature` (°F, the value the thermostat acts on); "—" when unknown | |
 | Status marker / word | `main_thermostat` action (heating / cooling / idle) and mode. Fan state from **`call_fan`**, never the climate action | |
-| Status subline | running: "to {target} · {N} min so far" (N timed on the screen from when it saw the action change: exact and offline. A float `action_since` is only ~128 s precise, so the screen doesn't read it); idle and off target: `call_wait_reason` (for example "Waiting · short-cycle protection"); idle and on target: "holding {target}"; mode Off: "System is off", or "System is off · fan on" when `call_fan` | |
+| Status subline | running: "to {target} · {N} min so far", or "Finishing up · stops soon" when the mode no longer calls for it (N timed on the screen from when it saw the action change: exact and offline. A float `action_since` is only ~128 s precise, so the screen doesn't read it); idle and off target: `call_wait_reason` (for example "Waiting · short-cycle protection"); idle and on target: "holding {target}"; mode Off: "System is off", or "System is off · fan on" when `call_fan` | |
 | Big target number | `effective_target`; in Auto with Eco and no hold, "`effective_low`–`effective_high`" | `set_target` ±1, clamped 50–90 (debounced). Milestone 2 makes this a hold. |
 | Target label | `comfort_level`: "Comfort target" or "Eco target", plus "Comfort {comfort_target}°" in small text while Eco | |
 | Comfort / Eco pills | `comfort_level` (select) | `comfort_level` (milestone 2 makes a manual change a hold) |

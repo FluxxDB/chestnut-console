@@ -20,51 +20,50 @@ esphome:
     # the late -100 stage: the screen is bright as soon as it shows anything.
     - priority: 200
       then:
+        - lambda: |-
+            // Taps. LVGL's default theme grows a pressed button and darkens it, easing in over
+            // 80 ms. The console's buttons press in by 3 px instead, at once, and ease back over
+            // 80 ms; colors switch at once (a pill lighting up). Right after a tap the screen
+            // refreshes, so its result shows without waiting for the 250 ms refresh.
+            static const lv_style_prop_t none[] = {LV_STYLE_PROP_INV};
+            static const lv_style_prop_t back[] = {
+                LV_STYLE_TRANSFORM_WIDTH, LV_STYLE_TRANSFORM_HEIGHT, LV_STYLE_RECOLOR_OPA, LV_STYLE_PROP_INV};
+            static lv_style_transition_dsc_t at_once, ease_back;
+            lv_style_transition_dsc_init(&at_once, none, lv_anim_path_linear, 0, 0, nullptr);
+            lv_style_transition_dsc_init(&ease_back, back, lv_anim_path_ease_out, 80, 0, nullptr);
+            for (lv_obj_t *b : {id(btn_minus), id(btn_plus), id(btn_theme), id(btn_resume),
+                                id(btn_mode_off), id(btn_mode_heat), id(btn_mode_cool), id(btn_mode_auto),
+                                id(btn_fan_auto), id(btn_fan_on), id(btn_lvl_comfort), id(btn_lvl_eco)}) {
+              lv_obj_set_style_transition(b, &ease_back, LV_PART_MAIN);
+              lv_obj_set_style_transition(b, &at_once, LV_STATE_PRESSED);
+              lv_obj_set_style_transform_width(b, -3, LV_STATE_PRESSED);
+              lv_obj_set_style_transform_height(b, -3, LV_STATE_PRESSED);
+              // Added after the widget's own on_click, so it runs after the tap's action.
+              lv_obj_add_event_cb(b, [](lv_event_t *) { id(ui_refresh).execute(); }, LV_EVENT_CLICKED, nullptr);
+            }
         # The backlight restores whatever level it had (often dim or off): start at the in-use level.
-        - script.execute:
-            id: ui_wake
-            fade_ms: 0
+        - script.execute: ui_wake
 
 lvgl:
-  # The idle fades darken the wake catcher (a black scrim over the whole screen). The Tab5
-  # redraws the full screen in about 0.23 s, so these play at a few frames per second there;
-  # the backlight's own transition, which runs alongside, is smooth.
-  animations:
-    - id: anim_dim
-      duration: 1s
-      timing: ease_out
-      widgets:
-        - id: obj_wake
-          bg_opa:
-            from: 0%
-            to: 70%
-    - id: anim_sleep
-      duration: 800ms
-      timing: ease_in
-      widgets:
-        - id: obj_wake
-          bg_opa:
-            from: 70%
-            to: 100%
+  # The idle stages switch at once (Dang tried fades and preferred none).
   on_idle:
     - timeout: ${idle_timeout}
       then:
-        # Dim: the backlight bottoms out not far below the in-use level, so a 70% scrim fades
-        # in while the backlight eases down to the dim level.
-        - lvgl.animation.start: anim_dim
-        - lvgl.widget.show: obj_wake
         - light.turn_on:
             id: backlight
             brightness: !lambda "return id(ui_bright_dim).state / 100.0f;"
-            transition_length: 1s
+            transition_length: 0s
+        - lvgl.widget.show: obj_wake
     - timeout: ${sleep_timeout}
       then:
-        - script.execute: ui_sleep
+        - lvgl.widget.show: obj_wake
+        - light.turn_off:
+            id: backlight
+            transition_length: 0s
+        - lvgl.pause:
   # A touch on a paused screen resumes LVGL (resume_on_input); the wake catcher still swallows it.
   on_resume:
-    - script.execute:
-        id: ui_wake
-        fade_ms: 250
+    - script.execute: ui_wake
 
 number:
   # Backlight levels, adjustable from Home Assistant and the web page. These are light
@@ -88,9 +87,7 @@ number:
             # Only apply a new in-use level right away while the screen is awake.
             lambda: "return lv_obj_has_flag(id(obj_wake), LV_OBJ_FLAG_HIDDEN);"
           then:
-            - script.execute:
-                id: ui_wake
-                fade_ms: 0
+            - script.execute: ui_wake
   - platform: template
     id: ui_bright_dim
     name: "Dim Brightness"
@@ -176,15 +173,8 @@ interval:
           id(ui_hist_gen)++;
 
 script:
-  # Wake: drop the scrim and bring the backlight to the in-use level, fading it up over fade_ms
-  # (a touch) or at once (boot, a new brightness setting). Also cuts short a sleep fade.
   - id: ui_wake
-    parameters:
-      fade_ms: int
     then:
-      - script.stop: ui_sleep
-      - lvgl.animation.stop:
-          id: [anim_dim, anim_sleep]
       - lvgl.widget.hide: obj_wake
       - if:
           condition:
@@ -194,22 +184,7 @@ script:
       - light.turn_on:
           id: backlight
           brightness: !lambda "return id(ui_bright_active).state / 100.0f;"
-          transition_length: !lambda "return fade_ms;"
-
-  # Sleep: fade the picture to black and the backlight out, then pause LVGL (no redraws while
-  # the screen is off). The thermostat keeps running.
-  - id: ui_sleep
-    mode: restart
-    then:
-      - lvgl.animation.stop: anim_dim
-      - lvgl.widget.show: obj_wake
-      - lvgl.animation.start: anim_sleep
-      - light.turn_off:
-          id: backlight
-          transition_length: 800ms
-      # Past the fade, and the Tab5's last redraw of it.
-      - delay: 1s
-      - lvgl.pause:
+          transition_length: 0s
 
   # − / +: step the shown target now, send it once the taps stop.
   - id: ui_step_target
@@ -333,12 +308,17 @@ script:
 
           std::string word, sub;
           uint32_t color = 0x8B8D90;
+          // Switched to another mode mid-call: the furnace or AC finishes its minimum run first
+          // (milestone 2, up to a few minutes), so don't say it's still heading for the target.
+          const std::string finishing = "Finishing up · stops soon";
           if (sfault || ifault) {
             word = "Paused";
           } else if (action == climate::CLIMATE_ACTION_HEATING) {
-            word = "Heating"; color = 0xFF7B1B; sub = running(action_target());
+            word = "Heating"; color = 0xFF7B1B;
+            sub = mode == climate::CLIMATE_MODE_HEAT || mode == climate::CLIMATE_MODE_HEAT_COOL ? running(action_target()) : finishing;
           } else if (action == climate::CLIMATE_ACTION_COOLING) {
-            word = "Cooling"; color = 0x4098FF; sub = running(action_target());
+            word = "Cooling"; color = 0x4098FF;
+            sub = mode == climate::CLIMATE_MODE_COOL || mode == climate::CLIMATE_MODE_HEAT_COOL ? running(action_target()) : finishing;
           } else if (off) {
             word = fan ? "Fan" : "Off";
             if (fan) color = 0x00B595;

@@ -26,15 +26,12 @@ lvgl:
           height: 720
           hidden: true
           bg_color: 0x000000
-          # Faded in by the idle animations (ui/console-logic.yaml).
-          bg_opa: 0%
+          bg_opa: 70%
           border_width: 0
           radius: 0
           scrollable: false
           on_press:
-            - script.execute:
-                id: ui_wake
-                fade_ms: 250
+            - script.execute: ui_wake
   pages:
     - id: page_console
       # The console never scrolls (LVGL scrolled the screen at startup when it could).
