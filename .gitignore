@@ -19,3 +19,7 @@ tab5-thermostat/.piolibdeps/
 
 # Windows download markers (copied in from Windows)
 *:Zone.Identifier
+
+# Desktop preview screenshots
+tab5-thermostat/preview/shots/
+tab5-thermostat/preview/.esphome/

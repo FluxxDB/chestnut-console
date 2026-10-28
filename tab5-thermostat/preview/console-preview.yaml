@@ -1,0 +1,60 @@
+# Desktop preview of the Main Thermostat console (dev only).
+# ESPHome host platform + an SDL window, run under Xvfb by tools/preview/shoot.sh.
+# Provides the same ids the Tab5 hardware packages do (tab5_display, touch, sntp_time, backlight),
+# so the ui/ packages compile unchanged.
+
+substitutions:
+  display_rotation: 0°
+
+esphome:
+  name: console-preview
+
+host:
+
+api:
+
+logger:
+
+time:
+  - platform: host
+    id: sntp_time
+    timezone: America/New_York
+
+display:
+  - platform: sdl
+    id: tab5_display
+    dimensions:
+      width: 1280
+      height: 720
+    auto_clear_enabled: false
+    update_interval: never
+
+touchscreen:
+  - platform: sdl
+    id: touch
+
+output:
+  - platform: template
+    id: backlight_out
+    type: float
+    write_action:
+      - logger.log:
+          format: "backlight=%.2f"
+          args: ["state"]
+
+light:
+  - platform: monochromatic
+    id: backlight
+    name: "Display Backlight"
+    output: backlight_out
+    default_transition_length: 0s
+
+lvgl:
+  displays:
+    - tab5_display
+  touchscreens:
+    - touch
+  widgets:
+    - label:
+        align: CENTER
+        text: "preview ok"
