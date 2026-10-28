@@ -28,7 +28,8 @@ run preview $y /config/preview/shots/review/outside --dump "Heating" --disconnec
 check "3 outside from HA" python3 tools/preview/check_snapshot.py $sh/review/outside heating light out_temp=48° out_cond=Cloudy
 check "3 outside blank without HA" python3 -c "
 import json,sys; d=json.load(open('$sh/review/outside/heating-light-reconnect.json'))
-print('  after disconnect:', d.get('out_temp'), repr(d.get('out_cond'))); sys.exit(0 if d.get('out_temp')=='—' and d.get('out_cond')=='' else 1)"
+t,c=d.get('out_temp_offline'),d.get('out_cond_offline')
+print('  while disconnected:', t, repr(c)); sys.exit(0 if t=='—' and c=='' else 1)"
 
 # 4: minutes running are timed on the screen (preview: 1 s per 'minute'), not from the float epoch.
 run preview $y /config/preview/shots/review/minutes --dump --pre-wait 3 "Heating"

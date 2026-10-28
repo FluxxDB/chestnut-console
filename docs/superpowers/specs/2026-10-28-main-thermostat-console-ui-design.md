@@ -149,6 +149,14 @@ All fonts render with **4-bit anti-aliasing** (`bpp: 4`). At ESPHome's default 1
 - **The first tap on a dimmed or sleeping screen only wakes it** (back to the in-use level). The tap is swallowed and doesn't press anything.
 - After a reboot the screen starts at the in-use level.
 - Both levels are adjustable entities in HA and on the web page: **Screen Brightness** (default 10) and **Dim Brightness** (default 4). They're light brightness values, which ESPHome gamma-corrects (x^2.8): 4% gives about a tenth of the light of 10%, while a literal 1% would be dark.
+- The Tab5's backlight bottoms out not far below the in-use level, so the dim stage also lays a 70% black scrim over the picture.
+
+**Motion** *(Dang asked for subtle animation; the details are the PC agent's call)*
+- **Dim:** the scrim fades in over 1 s (ease out) while the backlight eases down to the dim level.
+- **Sleep:** the scrim darkens to black over 0.8 s while the backlight fades out; then LVGL pauses.
+- **Wake:** the scrim drops at once and the backlight fades up over 0.25 s. Boot and a new Screen Brightness setting apply at once.
+- **Buttons and pills** press in by 3 px and ease back (150 ms, ease out), in place of LVGL's default grow. A pill eases between its selected and unselected colors, border and text included.
+- **Theme changes stay instant.** The Tab5 redraws the whole screen in about 0.23 s, so full-screen fades play at only a few frames per second (the backlight transitions smooth the dim and sleep fades). Small areas like buttons animate smoothly.
 
 **Theme** *(Dang)*
 - The toggle switches light/dark immediately.

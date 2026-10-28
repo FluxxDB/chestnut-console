@@ -71,6 +71,8 @@ async def main() -> None:
     ap.add_argument("--pre-wait", type=float, default=0.0, help="seconds of no input before clicking (idle tests)")
     ap.add_argument("--no-wake", action="store_true", help="skip the neutral wake tap")
     ap.add_argument("--no-theme", action="store_true", help="leave the theme switch alone (files still say -light)")
+    ap.add_argument("--watch", default="", help="ui_snapshot fields to sample over time, comma-separated (e.g. scrim_opa,bl_now)")
+    ap.add_argument("--watch-for", type=float, default=0.0, help="seconds to sample --watch before capturing")
     ap.add_argument("--ha-state", action="append", default=[], help="entity:attribute=state to send as Home Assistant")
     ap.add_argument("--disconnect", type=float, default=0.0,
                     help="after each capture: drop the API connection this long, reconnect, save <base>-reconnect.json")
@@ -81,13 +83,26 @@ async def main() -> None:
     await client.connect(login=True)
     entities, _ = await client.list_entities_services()
     by_id = {e.object_id: e for e in entities}
+    snapshot = by_id.get("ui_snapshot")
 
     states: dict[int, object] = {}
     updates: dict[str, int] = {}
     names = {e.key: e.object_id for e in entities}
 
+    # --watch: each value a snapshot field takes, in order (repeats collapsed).
+    watched: dict[str, list] = {f: [] for f in args.watch.split(",") if f}
+
     def on_state(s):
         states[s.key] = s
+        if watched and snapshot is not None and s.key == snapshot.key:
+            try:
+                snap = json.loads(s.state)
+            except json.JSONDecodeError:
+                snap = {}
+            for f, seen in watched.items():
+                v = snap.get(f)
+                if v is not None and (not seen or seen[-1] != v):
+                    seen.append(v)
         oid = names.get(s.key)
         if oid:
             updates[oid] = updates.get(oid, 0) + 1
@@ -123,6 +138,10 @@ async def main() -> None:
             writes = {}
             if not args.clicks and args.pre_wait:
                 await asyncio.sleep(args.pre_wait)
+            if args.watch_for:
+                for seen in watched.values():
+                    seen.clear()
+                await asyncio.sleep(args.watch_for)
             if args.clicks:
                 if args.pre_wait:
                     await asyncio.sleep(args.pre_wait)
@@ -149,6 +168,7 @@ async def main() -> None:
                 with open(f"{base}-states.json", "w") as f:
                     data = dump_states(entities, states)
                     data.update({f"_writes.{k}": v for k, v in writes.items()})
+                    data.update({f"_watch.{f}": list(seen) for f, seen in watched.items()})
                     json.dump(data, f, indent=2)
             if args.disconnect and snapshot:
                 await client.disconnect()

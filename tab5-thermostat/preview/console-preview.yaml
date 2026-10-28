@@ -80,7 +80,8 @@ text_sensor:
   - platform: template
     id: ui_snapshot
     name: "UI Snapshot"
-    update_interval: 500ms
+    # Often enough to catch the dim/sleep fades mid-way (tools/preview/test_anim.sh).
+    update_interval: 200ms
     lambda: |-
       auto txt = [](lv_obj_t *o) -> std::string { const char *s = lv_label_get_text(o); return s ? s : ""; };
       auto child = [&](lv_obj_t *o) -> std::string { return txt(lv_obj_get_child(o, 0)); };
@@ -116,6 +117,17 @@ text_sensor:
       add("pm_visible", vis(id(btn_minus)));
       add("out_temp", txt(id(lbl_out_temp)));
       add("out_cond", txt(id(lbl_out_cond)));
+      // The outside labels the last time no API client was connected (test_review.sh, 3): the client
+      // that reconnects to read this counts as Home Assistant again within one refresh.
+      {
+        static std::string temp_offline, cond_offline;
+        if (!api::global_api_server->is_connected()) {
+          temp_offline = txt(id(lbl_out_temp));
+          cond_offline = txt(id(lbl_out_cond));
+        }
+        add("out_temp_offline", temp_offline);
+        add("out_cond_offline", cond_offline);
+      }
       add("hum", txt(id(lbl_hum)));
       add("hum_cap", txt(id(lbl_hum_desc)));
       add("mode_pills", child(id(btn_mode_off)) + "|" + child(id(btn_mode_heat)) + "|" + child(id(btn_mode_cool)) + "|" + child(id(btn_mode_auto)));
@@ -139,6 +151,35 @@ text_sensor:
         add("uptime_ms", std::to_string(millis()));
         add("paused", id(lvgl_main)->is_paused() ? "1" : "0");
         add("scrim_opa", std::to_string((int) lv_obj_get_style_bg_opa(id(obj_wake), LV_PART_MAIN)));
+        // Press feedback (the console's own, not LVGL's default theme): the transition's length in ms
+        // when it eases the press-in and the text color, and the pressed-state width change.
+        auto local = [](lv_obj_t *o, lv_style_prop_t prop, lv_style_selector_t sel, lv_style_value_t *v) {
+          return lv_obj_get_local_style_prop(o, prop, v, LV_PART_MAIN | sel) == LV_STYLE_RES_FOUND;
+        };
+        auto ease_ms = [&](lv_obj_t *o) -> std::string {
+          lv_style_value_t v;
+          if (!local(o, LV_STYLE_TRANSITION, LV_STATE_PRESSED, &v)) return "0";
+          auto *tr = (const lv_style_transition_dsc_t *) v.ptr;
+          bool press = false, text = false;
+          for (const lv_style_prop_t *p = tr->props; *p; p++) {
+            press |= *p == LV_STYLE_TRANSFORM_WIDTH;
+            text |= *p == LV_STYLE_TEXT_COLOR;
+          }
+          return press && text ? std::to_string(tr->time) : "0";
+        };
+        auto shrink = [&](lv_obj_t *o) -> std::string {
+          lv_style_value_t v;
+          return local(o, LV_STYLE_TRANSFORM_WIDTH, LV_STATE_PRESSED, &v) ? std::to_string((int) v.num) : "";
+        };
+        add("btn_ease_ms", ease_ms(id(btn_plus)));
+        add("pill_ease_ms", ease_ms(id(btn_mode_heat)));
+        add("btn_press", shrink(id(btn_plus)));
+        add("pill_press", shrink(id(btn_mode_heat)));
+        // The backlight's level right now (mid-transition too), in percent.
+        {
+          auto &cv = id(backlight).current_values;
+          add("bl_now", std::to_string((int) roundf(100.0f * cv.get_state() * cv.get_brightness())));
+        }
         auto font_info = [&](const char *k, lv_obj_t *o) {
           const lv_font_t *f = lv_obj_get_style_text_font(o, LV_PART_MAIN);
           lv_font_glyph_dsc_t g;

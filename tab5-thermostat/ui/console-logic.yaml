@@ -21,27 +21,50 @@ esphome:
     - priority: 200
       then:
         # The backlight restores whatever level it had (often dim or off): start at the in-use level.
-        - script.execute: ui_wake
+        - script.execute:
+            id: ui_wake
+            fade_ms: 0
 
 lvgl:
+  # The idle fades darken the wake catcher (a black scrim over the whole screen). The Tab5
+  # redraws the full screen in about 0.23 s, so these play at a few frames per second there;
+  # the backlight's own transition, which runs alongside, is smooth.
+  animations:
+    - id: anim_dim
+      duration: 1s
+      timing: ease_out
+      widgets:
+        - id: obj_wake
+          bg_opa:
+            from: 0%
+            to: 70%
+    - id: anim_sleep
+      duration: 800ms
+      timing: ease_in
+      widgets:
+        - id: obj_wake
+          bg_opa:
+            from: 70%
+            to: 100%
   on_idle:
     - timeout: ${idle_timeout}
       then:
+        # Dim: the backlight bottoms out not far below the in-use level, so a 70% scrim fades
+        # in while the backlight eases down to the dim level.
+        - lvgl.animation.start: anim_dim
+        - lvgl.widget.show: obj_wake
         - light.turn_on:
             id: backlight
             brightness: !lambda "return id(ui_bright_dim).state / 100.0f;"
-            transition_length: 0s
-        - lvgl.widget.show: obj_wake
+            transition_length: 1s
     - timeout: ${sleep_timeout}
       then:
-        - lvgl.widget.show: obj_wake
-        - light.turn_off:
-            id: backlight
-            transition_length: 0s
-        - lvgl.pause:
+        - script.execute: ui_sleep
   # A touch on a paused screen resumes LVGL (resume_on_input); the wake catcher still swallows it.
   on_resume:
-    - script.execute: ui_wake
+    - script.execute:
+        id: ui_wake
+        fade_ms: 250
 
 number:
   # Backlight levels, adjustable from Home Assistant and the web page. These are light
@@ -65,7 +88,9 @@ number:
             # Only apply a new in-use level right away while the screen is awake.
             lambda: "return lv_obj_has_flag(id(obj_wake), LV_OBJ_FLAG_HIDDEN);"
           then:
-            - script.execute: ui_wake
+            - script.execute:
+                id: ui_wake
+                fade_ms: 0
   - platform: template
     id: ui_bright_dim
     name: "Dim Brightness"
@@ -151,8 +176,15 @@ interval:
           id(ui_hist_gen)++;
 
 script:
+  # Wake: drop the scrim and bring the backlight to the in-use level, fading it up over fade_ms
+  # (a touch) or at once (boot, a new brightness setting). Also cuts short a sleep fade.
   - id: ui_wake
+    parameters:
+      fade_ms: int
     then:
+      - script.stop: ui_sleep
+      - lvgl.animation.stop:
+          id: [anim_dim, anim_sleep]
       - lvgl.widget.hide: obj_wake
       - if:
           condition:
@@ -162,7 +194,22 @@ script:
       - light.turn_on:
           id: backlight
           brightness: !lambda "return id(ui_bright_active).state / 100.0f;"
-          transition_length: 0s
+          transition_length: !lambda "return fade_ms;"
+
+  # Sleep: fade the picture to black and the backlight out, then pause LVGL (no redraws while
+  # the screen is off). The thermostat keeps running.
+  - id: ui_sleep
+    mode: restart
+    then:
+      - lvgl.animation.stop: anim_dim
+      - lvgl.widget.show: obj_wake
+      - lvgl.animation.start: anim_sleep
+      - light.turn_off:
+          id: backlight
+          transition_length: 800ms
+      # Past the fade, and the Tab5's last redraw of it.
+      - delay: 1s
+      - lvgl.pause:
 
   # − / +: step the shown target now, send it once the taps stop.
   - id: ui_step_target
