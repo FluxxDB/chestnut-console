@@ -4,6 +4,7 @@
 # until ui/console-logic.yaml binds it.
 
 lvgl:
+  id: lvgl_main
   # Panel is natively portrait; the Tab5 sits landscape. Set in tab5-thermostat.yaml.
   rotation: ${display_rotation}
   displays:
@@ -67,7 +68,7 @@ lvgl:
                         styles: st_ink
                     - label:
                         id: lbl_date
-                        text: "Tue, Oct 28"
+                        text: "Oct 28"
                         text_font: f_small
                         styles: st_sub
               - obj:
@@ -93,6 +94,8 @@ lvgl:
                         styles: st_sub
                     - button:
                         id: btn_resume
+                        pad_left: 16
+                        pad_right: 16
                         on_click:
                           - button.press: resume_schedule
                         height: 44
@@ -105,7 +108,7 @@ lvgl:
                         widgets:
                           - label:
                               align: CENTER
-                              text: "Resume schedule"
+                              text: "Resume"
                               text_font: f_small
                     - label:
                         id: lbl_clock
@@ -210,7 +213,11 @@ lvgl:
                         id: lbl_sub
                         align: TOP_RIGHT
                         x: -32
-                        y: 64
+                        y: 72
+                        # Stays right of the big number; long reasons wrap onto a second line.
+                        width: 310
+                        long_mode: WRAP
+                        text_align: RIGHT
                         text: "to 72° · 18 min so far"
                         text_font: f_small
                         styles: st_sub
@@ -287,7 +294,7 @@ lvgl:
                               align: LEFT_MID
                               long_mode: WRAP
                               text: "Temperature sensor problem. Heating and cooling are paused."
-                              text_font: f_label
+                              text_font: f_small
 
               # ── Target card ──────────────────────────────────────────
               - obj:

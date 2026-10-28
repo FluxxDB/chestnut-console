@@ -10,20 +10,21 @@ substitutions:
   hist_sample_seconds: "1"
   # Short idle timeout so the dim/wake test runs fast.
   idle_timeout: 3s
+  sleep_timeout: 6s
   # Small history ring and fast 'minutes' so the review tests run in seconds.
   hist_points: "8"
   action_minute_ms: "1000"
 
 esphome:
   name: console-preview
-  # Test-only: simulate a backlight restored at 10% after a reboot while dimmed
+  # Test-only: simulate a backlight restored at some other level (50%) after a reboot
   # (the console must bring it back to full brightness on boot).
   on_boot:
     - priority: 250
       then:
         - light.turn_on:
             id: backlight
-            brightness: 10%
+            brightness: 50%
             transition_length: 0s
 
 packages:
@@ -136,6 +137,26 @@ text_sensor:
         add("sun_elev", std::to_string((int) id(house_sun).elevation()));
         add("wake_visible", lv_obj_has_flag(id(obj_wake), LV_OBJ_FLAG_HIDDEN) ? "0" : "1");
         add("uptime_ms", std::to_string(millis()));
+        add("paused", id(lvgl_main)->is_paused() ? "1" : "0");
+        auto font_info = [&](const char *k, lv_obj_t *o) {
+          const lv_font_t *f = lv_obj_get_style_text_font(o, LV_PART_MAIN);
+          lv_font_glyph_dsc_t g;
+          bool ok = lv_font_get_glyph_dsc(f, &g, 'a', 0);
+          add((std::string(k) + "_h").c_str(), std::to_string((int) lv_font_get_line_height(f)));
+          add((std::string(k) + "_bpp").c_str(), ok ? std::to_string((int) g.format) : std::string(""));
+        };
+        font_info("f_sched", id(lbl_sched));
+        font_info("f_hist", id(lbl_hist_mid));
+        font_info("f_status", id(lbl_status));
+        font_info("f_title", id(lbl_title));
+        lv_area_t r1, r2;
+        lv_obj_get_coords(id(lbl_sub), &r1); lv_obj_get_coords(id(obj_room_row), &r2);
+        bool ov = r1.x1 < r2.x2 && r2.x1 < r1.x2 && r1.y1 < r2.y2 && r2.y1 < r1.y2;
+        add("sub_room_overlap", ov ? "1" : "0");
+        lv_obj_get_coords(id(card_strip), &r1); lv_obj_get_coords(id(btn_lvl_eco), &r2);
+        add("strip_slack", std::to_string((int) (r1.x2 - r2.x2)));
+        lv_obj_get_coords(id(obj_banner), &r1); lv_obj_get_coords(id(lbl_banner), &r2);
+        add("banner_fits", (r2.y1 >= r1.y1 && r2.y2 <= r1.y2) ? "1" : "0");
         add("theme_synced", id(ui_theme_synced) ? "1" : "0");
         add("hist_last_y", (np > 0 && lp) ? std::to_string((int) lp[np - 1].y) : std::string(""));
       }

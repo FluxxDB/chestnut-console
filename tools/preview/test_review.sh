@@ -40,7 +40,7 @@ check "5 no-op burst writes nothing" python3 tools/preview/check_states.py $sh/r
 
 # 10: a backlight restored dim comes back to full brightness at boot.
 run preview $y /config/preview/shots/review/boot --dump --settle 1.5 "Heating"
-check "10 full brightness after boot" python3 tools/preview/check_states.py $sh/review/boot heating display_backlight.brightness=1
+check "10 in-use brightness after boot" python3 tools/preview/check_states.py $sh/review/boot heating display_backlight.brightness=0.1
 
 # 11: on boot the theme follows the sun (equator, longitude where it's now local midnight / noon).
 night=$(python3 -c "import datetime as d; h=d.datetime.now(d.timezone.utc); u=h.hour+h.minute/60; print(round(((-u*15+180)%360)-180,1))")

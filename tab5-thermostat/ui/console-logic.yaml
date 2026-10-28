@@ -8,8 +8,10 @@ substitutions:
   hist_points: "72"
   # One 'minute' of the running counter, in ms (the preview shortens it for tests).
   action_minute_ms: "60000"
-  # Dim the backlight after this long without a touch.
+  # Idle stages: dim after idle_timeout without a touch, backlight off and LVGL paused after
+  # sleep_timeout. The thermostat logic keeps running either way.
   idle_timeout: 30s
+  sleep_timeout: 60s
   hist_sample_seconds: "600"
 
 esphome:
@@ -18,11 +20,8 @@ esphome:
     # the late -100 stage: the screen is bright as soon as it shows anything.
     - priority: 200
       then:
-        # The backlight restores its last level, which is usually the idle 10%: start bright.
-        - light.turn_on:
-            id: backlight
-            brightness: 100%
-            transition_length: 0s
+        # The backlight restores whatever level it had (often dim or off): start at the in-use level.
+        - script.execute: ui_wake
 
 lvgl:
   on_idle:
@@ -30,9 +29,55 @@ lvgl:
       then:
         - light.turn_on:
             id: backlight
-            brightness: 10%
+            brightness: !lambda "return id(ui_bright_dim).state / 100.0f;"
             transition_length: 0s
         - lvgl.widget.show: obj_wake
+    - timeout: ${sleep_timeout}
+      then:
+        - lvgl.widget.show: obj_wake
+        - light.turn_off:
+            id: backlight
+            transition_length: 0s
+        - lvgl.pause:
+  # A touch on a paused screen resumes LVGL (resume_on_input); the wake catcher still swallows it.
+  on_resume:
+    - script.execute: ui_wake
+
+number:
+  # Backlight levels, adjustable from Home Assistant and the web page. These are light
+  # brightness values, which ESPHome gamma-corrects (x^2.8): 4% is about a tenth of the
+  # light of 10%, and a literal 1% would be dark.
+  - platform: template
+    id: ui_bright_active
+    name: "Screen Brightness"
+    icon: mdi:brightness-6
+    entity_category: config
+    unit_of_measurement: "%"
+    min_value: 1
+    max_value: 100
+    step: 1
+    initial_value: 10
+    optimistic: true
+    restore_value: true
+    on_value:
+      - if:
+          condition:
+            # Only apply a new in-use level right away while the screen is awake.
+            lambda: "return lv_obj_has_flag(id(obj_wake), LV_OBJ_FLAG_HIDDEN);"
+          then:
+            - script.execute: ui_wake
+  - platform: template
+    id: ui_bright_dim
+    name: "Dim Brightness"
+    icon: mdi:brightness-4
+    entity_category: config
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 1
+    initial_value: 4
+    optimistic: true
+    restore_value: true
 
 globals:
   # A − / + value not yet sent to set_target (debounced), or -1.
@@ -100,9 +145,14 @@ script:
   - id: ui_wake
     then:
       - lvgl.widget.hide: obj_wake
+      - if:
+          condition:
+            lvgl.is_paused:
+          then:
+            - lvgl.resume:
       - light.turn_on:
           id: backlight
-          brightness: 100%
+          brightness: !lambda "return id(ui_bright_active).state / 100.0f;"
           transition_length: 0s
 
   # − / +: step the shown target now, send it once the taps stop.
@@ -188,7 +238,7 @@ script:
             char buf[16];
             snprintf(buf, sizeof(buf), "%d:%02d %s", h12, now.minute, now.hour < 12 ? "am" : "pm");
             set_text(id(lbl_clock), buf);
-            set_text(id(lbl_date), now.strftime("%a, %b ") + std::to_string(now.day_of_month));
+            set_text(id(lbl_date), now.strftime("%b ") + std::to_string(now.day_of_month));
           } else {
             set_text(id(lbl_clock), "—");
             set_text(id(lbl_date), "");

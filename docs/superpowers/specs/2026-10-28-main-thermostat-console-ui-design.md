@@ -81,15 +81,17 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 - Outer padding ~26 px, gaps ~18 px, card radius ~24 px.
 - Main area: two columns at ~1.32 : 1. The right column is the target card (~57%) over two small cards (~43%).
 
+All fonts render with **4-bit anti-aliasing** (`bpp: 4`). At ESPHome's default 1 bit, thin strokes broke up on the Tab5 (Dang). Sizes were raised after seeing it on the wall.
+
 | Element | Font / size (device px) |
 |---|---|
-| Title | Space Grotesk 500, ~39 |
-| Date, clock | Inter 400, ~21 / ~25 |
-| Labels ("Inside now", "Target", card captions) | Inter 400, ~21–23 |
-| Room temperature | Inter 400, ~164, tight tracking (≈ −0.045 em); the ° sign smaller and raised |
-| Target | Inter 400, ~105 |
-| Small-card values | Inter 400, ~50 |
-| Pills | Inter 400, ~23, height ~55, fully rounded |
+| Title | Space Grotesk 500, 40 |
+| Date, clock | Inter 400, 27 / 30 |
+| Labels ("Inside now", "Target", card captions) | Inter 400, 27–30 (all grey text 27) |
+| Room temperature | Inter 400, 172, tight tracking (≈ −0.045 em); the ° sign smaller and raised |
+| Target | Inter 400, 112 (a range like "68–76°": 78) |
+| Small-card values | Inter 400, 56 |
+| Pills | Inter 400, 28, height ~55, fully rounded |
 | − / + buttons | ~82×82, radius ~16, glyph ~46 |
 
 ## Components and behavior
@@ -98,7 +100,7 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 - Title, today's date, and a 12-hour clock from the RTC/SNTP time.
 - **Schedule status** on the right, before the clock *(Dang: in the top bar)*:
   - Following the schedule: the current period and when it ends, for example "Return · Comfort until 10:30 pm".
-  - Holding a manual change (target, Eco temperature, or Comfort/Eco; a hold lasts until the next period starts, per milestone 2): "Holding until 10:30 pm" next to a **Resume schedule** pill. Tapping it ends the hold.
+  - Holding a manual change (target, Eco temperature, or Comfort/Eco; a hold lasts until the next period starts, per milestone 2): "Holding until 10:30 pm" next to a **Resume** pill. Tapping it ends the hold. It was shortened from "Resume schedule" so the larger text fits.
 - Theme toggle: a pill with a moon icon in light mode and a sun icon in dark.
 
 **Room card**
@@ -140,10 +142,13 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 - One tap selects, and the selected pill shows Mint Wash.
 - Eight pills in three groups fit in 1228 px at ~20 px horizontal padding.
 
-**Idle dimming** *(Dang)*
-- After 30 s without a touch, the backlight dims to ~10%.
-- **The first tap on a dimmed screen only wakes it**: the tap is swallowed and doesn't press anything. The screen returns to full brightness.
-- After a reboot the screen starts at full brightness. The backlight would otherwise restore its last level, usually the idle 10%.
+**Idle stages** *(Dang, after seeing it on the wall)*
+- **In use: 10%** backlight. Full brightness was too bright on the wall.
+- After **30 s** without a touch: **dim**, to about a tenth of the in-use light.
+- After another **30 s**: **backlight off and LVGL paused**. The thermostat keeps running, holding the temperature and following the schedule.
+- **The first tap on a dimmed or sleeping screen only wakes it** (back to the in-use level). The tap is swallowed and doesn't press anything.
+- After a reboot the screen starts at the in-use level.
+- Both levels are adjustable entities in HA and on the web page: **Screen Brightness** (default 10) and **Dim Brightness** (default 4). They're light brightness values, which ESPHome gamma-corrects (x^2.8): 4% gives about a tenth of the light of 10%, while a literal 1% would be dark.
 
 **Theme** *(Dang)*
 - The toggle switches light/dark immediately.
