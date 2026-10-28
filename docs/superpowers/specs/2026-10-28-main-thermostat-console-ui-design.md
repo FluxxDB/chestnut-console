@@ -11,13 +11,13 @@ The Tab5 can't render Home Assistant's own dashboard (it has no browser). Phones
 ## Goals
 
 - At a glance: room temperature, target, what the system is doing right now, humidity, outdoor temperature, time.
-- Change the target with big − / + buttons. Change mode and fan with one tap.
+- Change the target with big − / + buttons. Change mode, fan and preset with one tap.
 - Readable in light and dark, with a theme toggle that also follows sunset and sunrise.
 - Works fully when Home Assistant or Wi-Fi is down (only the outdoor reading goes blank).
 
 ## Non-goals (for this version)
 
-- Schedules, settings pages, top-floor control, voice, animations, a drag dial.
+- Editing the weekly schedule on the screen (milestone 2 runs the schedule on the device; how it's edited is still open), settings pages, top-floor control, voice, animations, a drag dial.
 - Home Assistant's dashboard on the Tab5.
 
 ## Anti-goals
@@ -74,7 +74,7 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 │ ~~~~~~ temperature line ~~~~~~~ - - - │ 48°  Cloudy  │ 42% Comfort.  │
 │ 6 am        Dashed line: target   Now │              │ (cyan card)   │
 ├───────────────────────────────────────┴──────────────┴───────────────┤
-│ Mode  (Off)(Heat)(Cool)(Auto)      │      Fan  (Auto)(On)            │  strip  ~90
+│ Mode (Off)(Heat)(Cool)(Auto) │ Fan (Auto)(On) │ Preset (Home)(Away)(Sleep) │  strip ~90
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -110,9 +110,15 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
   - axis labels for the start time and "Now".
 
 **Target card**
-- − / + change the target by 1 °F, clamped to the climate's min/max.
-- The number updates instantly. The new target goes to the climate entity once there's been no tap for ~1.5 s, so a run of taps is one change *(my call)*.
-- How the card shows and adjusts the heat/cool range in Auto follows the milestone 2 climate spec.
+- **Heat and Cool modes:** one number ("Target") between the − / + buttons. Each tap moves the target by 1 °F, clamped to the climate's min/max (the setpoint range and step come from the milestone 2 spec).
+- **Auto (heat_cool, two setpoints)** *(Dang: tap a number, then − / +)*:
+  - The card shows two numbers side by side: "Heat to 70°" with an orange marker and "Cool to 74°" with a blue marker.
+  - Tap a number to select it. The selected one gets the emphasis-button background behind it, and the other dims to the on-emphasis sub color.
+  - The single − / + pair adjusts the selected setpoint.
+  - The selection starts on Heat *(my call)*, and the last selection is remembered while the screen stays awake.
+  - Adjusting stops at the minimum heat/cool gap set by milestone 2; it never pushes the other setpoint *(my call)*.
+- **Off mode:** the card shows "Off" and the − / + buttons are hidden.
+- The number updates instantly. The new setpoint goes to the climate entity once there's been no tap for ~1.5 s, so a run of taps is one change *(my call)*.
 
 **Outside card**
 - Temperature and condition from a Home Assistant weather entity (the builder picks the onboarding default, likely `weather.forecast_home`).
@@ -123,9 +129,13 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 - Caption *(my call)*: "Dry" below 30%, "Comfortable" 30–60%, "Humid" above 60%.
 
 **Controls strip**
-- Mode pills and fan pills, generated from the climate entity's supported modes and fan modes, which the milestone 2 spec settles.
-- Today's placeholders: Off / Heat / Cool / Auto and Auto / On.
+- Three pill groups, separated by hairline dividers:
+  - **Mode:** Off / Heat / Cool / Auto
+  - **Fan:** Auto / On
+  - **Preset:** Home / Away / Sleep *(Dang: pills in the strip)*
 - One tap selects, and the selected pill shows Mint Wash.
+- When the on-device weekly schedule changes the preset, the pill follows. Whether a manual tap is a temporary override follows the milestone 2 spec.
+- Pills may narrow (padding ~20 px) so all nine fit in 1228 px.
 
 **Idle dimming** *(Dang)*
 - After 30 s without a touch, the backlight dims to ~10%.
@@ -137,6 +147,12 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 - The house's latitude/longitude go in `secrets.yaml`. Never commit them: the repo is public.
 - A manual tap overrides the automatic choice until the next sunrise or sunset.
 - The current theme survives reboots.
+
+**Sensor fault** *(milestone 2: a bad sensor stops heating/cooling and raises an alert)*
+- The room temperature shows "—".
+- The status marker turns Muted Steel with "Paused".
+- A Signal Yellow `#f8e645` banner with ink text replaces the temperature line: "Temperature sensor problem. Heating and cooling are paused." The docs reserve Signal Yellow for a single high-attention grouping *(my call)*.
+- The banner clears by itself when milestone 2 resumes.
 
 **Offline:** everything above works without Home Assistant or Wi-Fi, except the outside card.
 
