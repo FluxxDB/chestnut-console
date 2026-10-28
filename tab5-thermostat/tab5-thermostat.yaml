@@ -22,6 +22,7 @@ packages:
   ui_fonts: !include ui/fonts.yaml
   ui_theme: !include ui/theme.yaml
   ui_console: !include ui/console.yaml
+  ui_logic: !include ui/console-logic.yaml
   # DEV ONLY until milestone 2 merges: stand-in for the thermostat logic (same entity ids).
   contract: !include ui/dev/contract-stub.yaml
 

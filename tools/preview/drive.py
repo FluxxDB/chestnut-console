@@ -40,6 +40,13 @@ def dump_states(entities, states) -> dict:
     return out
 
 
+def tap(xy: str) -> None:
+    x, y = xy.split(",")
+    # Hold the press for 100 ms: the SDL touchscreen polls the button state, so an instant
+    # click (down and up within microseconds) falls between polls and is never seen.
+    subprocess.run(["xdotool", "mousemove", x, y, "mousedown", "1", "sleep", "0.1", "mouseup", "1"], check=True)
+
+
 async def maybe_await(value):
     if inspect.isawaitable(value):
         return await value
@@ -52,6 +59,11 @@ async def main() -> None:
     ap.add_argument("--themes", default="light")
     ap.add_argument("--settle", type=float, default=1.5)
     ap.add_argument("--dump", action="store_true", help="also write <base>-states.json")
+    ap.add_argument("--number", action="append", default=[], help="object_id=value to set before clicking")
+    ap.add_argument("--clicks", default="", help="'x,y;x,y' taps after the scenario is applied")
+    ap.add_argument("--click-gap", type=float, default=0.15)
+    ap.add_argument("--wake", default="200,50", help="neutral tap first, so a dimmed screen is awake")
+    ap.add_argument("--post-wait", type=float, default=2.5, help="seconds after the clicks (debounce)")
     ap.add_argument("scenarios", nargs="*")
     args = ap.parse_intermixed_args()
 
@@ -61,7 +73,16 @@ async def main() -> None:
     by_id = {e.object_id: e for e in entities}
 
     states: dict[int, object] = {}
-    await maybe_await(client.subscribe_states(lambda s: states.__setitem__(s.key, s)))
+    updates: dict[str, int] = {}
+    names = {e.key: e.object_id for e in entities}
+
+    def on_state(s):
+        states[s.key] = s
+        oid = names.get(s.key)
+        if oid:
+            updates[oid] = updates.get(oid, 0) + 1
+
+    await maybe_await(client.subscribe_states(on_state))
 
     scenario = by_id.get("scenario")
     theme = by_id.get("ui_dark_theme")
@@ -75,6 +96,21 @@ async def main() -> None:
             if theme:
                 client.switch_command(theme.key, th == "dark")
             await asyncio.sleep(args.settle)
+            for spec in args.number:
+                oid, val = spec.split("=", 1)
+                client.number_command(by_id[oid].key, float(val))
+            if args.number:
+                await asyncio.sleep(args.settle)
+            writes = {}
+            if args.clicks:
+                tap(args.wake)
+                await asyncio.sleep(0.5)
+                before = dict(updates)
+                for xy in args.clicks.split(";"):
+                    tap(xy)
+                    await asyncio.sleep(args.click_gap)
+                await asyncio.sleep(args.post_wait)
+                writes = {k: updates.get(k, 0) - before.get(k, 0) for k in updates}
             base = f"{args.out}/{slug(name)}-{th}"
             subprocess.run(["import", "-window", "root", f"{base}.png"], check=True)
             if snapshot and snapshot.key in states:
@@ -87,7 +123,9 @@ async def main() -> None:
                     json.dump(data, f, indent=2)
             if args.dump:
                 with open(f"{base}-states.json", "w") as f:
-                    json.dump(dump_states(entities, states), f, indent=2)
+                    data = dump_states(entities, states)
+                    data.update({f"_writes.{k}": v for k, v in writes.items()})
+                    json.dump(data, f, indent=2)
             print(f"captured {base}.png")
 
     await client.disconnect()

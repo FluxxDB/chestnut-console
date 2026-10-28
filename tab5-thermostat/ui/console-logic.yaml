@@ -1,0 +1,279 @@
+# Console behavior: binds ui/console.yaml widgets to the milestone 2 contract entities
+# (UI spec, "Entity bindings"). The screen only reads entities and writes set_target,
+# comfort_level, the climate's mode / fan mode, and resume_schedule.
+# A short refresh timer re-reads everything; labels are only redrawn when their text changes.
+
+substitutions:
+  hist_sample_interval: 10min
+  hist_sample_seconds: "600"
+
+globals:
+  # A − / + value not yet sent to set_target (debounced), or -1.
+  - id: ui_pending_target
+    type: int
+    initial_value: "-1"
+  # Room temperature samples for the history line: 72 x 10 min = 12 h, oldest first.
+  - id: ui_hist
+    type: std::array<float, 72>
+  - id: ui_hist_n
+    type: int
+    initial_value: "0"
+  - id: ui_hist_start
+    type: time_t
+    initial_value: "0"
+
+sensor:
+  - platform: homeassistant
+    id: out_temp
+    entity_id: weather.forecast_home
+    attribute: temperature
+    internal: true
+
+text_sensor:
+  - platform: homeassistant
+    id: out_cond
+    entity_id: weather.forecast_home
+    internal: true
+
+interval:
+  - interval: 250ms
+    then:
+      - script.execute: ui_refresh
+  - interval: ${hist_sample_interval}
+    then:
+      - lambda: |-
+          float t = id(checked_temperature).state;
+          if (std::isnan(t)) return;
+          auto &h = id(ui_hist);
+          int &n = id(ui_hist_n);
+          if (n == (int) h.size()) {
+            std::rotate(h.begin(), h.begin() + 1, h.end());
+            n--;
+            id(ui_hist_start) += ${hist_sample_seconds};
+          }
+          if (n == 0) {
+            auto now = id(sntp_time).now();
+            id(ui_hist_start) = now.is_valid() ? now.timestamp : 0;
+          }
+          h[n++] = t;
+
+script:
+  # − / +: step the shown target now, send it once the taps stop.
+  - id: ui_step_target
+    parameters:
+      delta: int
+    then:
+      - lambda: |-
+          if (id(main_thermostat).mode == climate::CLIMATE_MODE_OFF) return;
+          int base = id(ui_pending_target);
+          if (base < 0) {
+            float e = id(effective_target).state;
+            if (std::isnan(e)) e = id(comfort_target).state;
+            if (std::isnan(e)) return;
+            base = (int) lroundf(e);
+          }
+          id(ui_pending_target) = std::max(50, std::min(90, base + delta));
+      - script.execute: ui_refresh
+      - script.execute: ui_push_target
+
+  - id: ui_push_target
+    mode: restart
+    then:
+      - delay: 1.5s
+      - number.set:
+          id: set_target
+          value: !lambda "return id(ui_pending_target);"
+      # Keep showing the sent value until milestone 2's effective_target catches up.
+      - delay: 1s
+      - lambda: "id(ui_pending_target) = -1;"
+
+  - id: ui_refresh
+    mode: single
+    then:
+      - lambda: |-
+          // ── helpers ──
+          auto set_text = [](lv_obj_t *o, const std::string &t) {
+            const char *cur = lv_label_get_text(o);
+            if (cur == nullptr || t != cur) lv_label_set_text(o, t.c_str());
+          };
+          auto show = [](lv_obj_t *o, bool on) {
+            bool hidden = lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN);
+            if (on && hidden) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+            if (!on && !hidden) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+          };
+          auto check = [](lv_obj_t *o, bool on) {
+            bool cur = lv_obj_has_state(o, LV_STATE_CHECKED);
+            if (on && !cur) lv_obj_add_state(o, LV_STATE_CHECKED);
+            if (!on && cur) lv_obj_remove_state(o, LV_STATE_CHECKED);
+          };
+          auto num = [](float v) -> std::string { return std::isnan(v) ? "—" : std::to_string((int) lroundf(v)); };
+          auto deg = [&](float v) -> std::string { return std::isnan(v) ? "—" : num(v) + "°"; };
+
+          // ── state ──
+          auto *cl = id(main_thermostat);
+          const auto mode = cl->mode;
+          const auto action = cl->action;
+          const bool off = mode == climate::CLIMATE_MODE_OFF;
+          const bool fan = id(call_fan).state;
+          const bool sfault = id(sensor_fault).state;
+          const bool ifault = id(interlock_fault).state;
+          const bool eco = std::string(id(comfort_level).current_option()) == "Eco";
+          const bool hold = id(schedule_hold).state;
+          const bool sched_on = id(schedule_enabled).state;
+          const float eff = id(effective_target).state;
+          const float lo = id(effective_low).state;
+          const float hi = id(effective_high).state;
+          const int pending = id(ui_pending_target);
+          const bool band = mode == climate::CLIMATE_MODE_HEAT_COOL && eco && !hold && pending < 0 &&
+                            !std::isnan(lo) && !std::isnan(hi);
+          auto now = id(sntp_time).now();
+
+          // ── top bar ──
+          if (now.is_valid()) {
+            int h12 = now.hour % 12 == 0 ? 12 : now.hour % 12;
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d:%02d %s", h12, now.minute, now.hour < 12 ? "am" : "pm");
+            set_text(id(lbl_clock), buf);
+            set_text(id(lbl_date), now.strftime("%a, %b ") + std::to_string(now.day_of_month));
+          } else {
+            set_text(id(lbl_clock), "—");
+            set_text(id(lbl_date), "");
+          }
+          set_text(id(lbl_sched), sched_on ? id(schedule_status).state : std::string("Schedule off"));
+          show(id(btn_resume), sched_on && hold);
+
+          // ── room card ──
+          const float room = id(checked_temperature).state;
+          set_text(id(lbl_room), num(room));
+          show(id(lbl_room_deg), !std::isnan(room));
+
+          std::string target_txt;
+          if (pending >= 0) target_txt = std::to_string(pending) + "°";
+          else if (band) target_txt = num(lo) + "–" + num(hi) + "°";
+          else target_txt = deg(eff);
+          auto action_target = [&]() -> std::string {
+            if (band && action == climate::CLIMATE_ACTION_HEATING) return deg(lo);
+            if (band && action == climate::CLIMATE_ACTION_COOLING) return deg(hi);
+            return target_txt;
+          };
+
+          std::string mins;
+          const float since = id(action_since).state;
+          if (now.is_valid() && !std::isnan(since)) {
+            long m = (long) ((now.timestamp - (time_t) since) / 60);
+            if (m < 1) mins = "just started";
+            else if (m < 60) mins = std::to_string(m) + " min so far";
+            else mins = std::to_string(m / 60) + " h " + std::to_string(m % 60) + " min so far";
+          }
+          auto running = [&](const std::string &t) { return mins.empty() ? "to " + t : "to " + t + " · " + mins; };
+
+          std::string word, sub;
+          uint32_t color = 0x8B8D90;
+          if (sfault || ifault) {
+            word = "Paused";
+          } else if (action == climate::CLIMATE_ACTION_HEATING) {
+            word = "Heating"; color = 0xFF7B1B; sub = running(action_target());
+          } else if (action == climate::CLIMATE_ACTION_COOLING) {
+            word = "Cooling"; color = 0x4098FF; sub = running(action_target());
+          } else if (off) {
+            word = fan ? "Fan" : "Off";
+            if (fan) color = 0x00B595;
+            sub = fan ? "System is off · fan on" : "System is off";
+          } else {
+            word = fan ? "Fan" : "Idle";
+            if (fan) color = 0x00B595;
+            std::string wait = id(call_wait_reason).state;
+            if (!wait.empty()) {
+              wait[0] = (char) tolower((unsigned char) wait[0]);
+              sub = "Waiting · " + wait;
+            } else {
+              sub = "holding " + target_txt;
+            }
+          }
+          set_text(id(lbl_status), word);
+          set_text(id(lbl_sub), sub);
+          lv_obj_set_style_bg_color(id(obj_marker), lv_color_hex(color), LV_PART_MAIN);
+
+          // Fault banner replaces the history line.
+          show(id(obj_banner), sfault || ifault);
+          show(id(obj_hist), !(sfault || ifault));
+          if (ifault) set_text(id(lbl_banner), "Heating and cooling were both requested, so the system stopped. Clear it in Home Assistant once it's checked.");
+          else if (sfault) set_text(id(lbl_banner), "Temperature sensor problem. Heating and cooling are paused.");
+
+          // History line, redrawn only when the samples or the target change.
+          static int drawn_n = -1;
+          static float drawn_tgt = -1000;
+          const float line_tgt = band ? (lo + hi) / 2 : eff;
+          const int n = id(ui_hist_n);
+          if (n != drawn_n || !(line_tgt == drawn_tgt || (std::isnan(line_tgt) && std::isnan(drawn_tgt)))) {
+            drawn_n = n;
+            drawn_tgt = line_tgt;
+            const auto &hs = id(ui_hist);
+            float vmin = 1e9, vmax = -1e9;
+            for (int i = 0; i < n; i++) { vmin = std::min(vmin, hs[i]); vmax = std::max(vmax, hs[i]); }
+            if (!std::isnan(line_tgt)) { vmin = std::min(vmin, line_tgt); vmax = std::max(vmax, line_tgt); }
+            vmin -= 1; vmax += 1;
+            if (vmax - vmin < 4) { float mid = (vmax + vmin) / 2; vmin = mid - 2; vmax = mid + 2; }
+            auto ypos = [&](float t) -> lv_value_precise_t { return 6 + (vmax - t) / (vmax - vmin) * 110; };
+            static lv_point_precise_t pts[72];
+            static lv_point_precise_t tpts[2];
+            for (int i = 0; i < n; i++) {
+              pts[i].x = n > 1 ? (lv_value_precise_t) (i * 624.0f / (n - 1)) : 0;
+              pts[i].y = ypos(hs[i]);
+            }
+            show(id(line_hist)->obj, n > 1);
+            if (n > 1) lv_line_set_points(id(line_hist)->obj, pts, n);
+            show(id(line_target)->obj, !std::isnan(line_tgt));
+            if (!std::isnan(line_tgt)) {
+              tpts[0] = {0, ypos(line_tgt)};
+              tpts[1] = {624, ypos(line_tgt)};
+              lv_line_set_points(id(line_target)->obj, tpts, 2);
+            }
+            std::string start;
+            if (n > 0 && id(ui_hist_start) > 0) {
+              ESPTime st = ESPTime::from_epoch_local(id(ui_hist_start));
+              int sh = st.hour % 12 == 0 ? 12 : st.hour % 12;
+              start = std::to_string(sh) + (st.hour < 12 ? " am" : " pm");
+            }
+            set_text(id(lbl_hist_start), start);
+          }
+
+          // ── target card ──
+          set_text(id(lbl_tgt_label), off ? "Target" : (eco ? "Eco target" : "Comfort target"));
+          set_text(id(lbl_tgt_comfort), (eco && !off) ? "Comfort " + deg(id(comfort_target).state) : std::string(""));
+          show(id(lbl_target), off || !band);
+          show(id(lbl_target_range), !off && band);
+          set_text(id(lbl_target), off ? std::string("Off") : target_txt);
+          if (band) set_text(id(lbl_target_range), target_txt);
+          show(id(btn_minus), !off);
+          show(id(btn_plus), !off);
+
+          // ── outside and humidity ──
+          set_text(id(lbl_out_temp), deg(id(out_temp).state));
+          {
+            std::string c = id(out_cond).state;
+            static const std::map<std::string, std::string> names = {
+                {"clear-night", "Clear"}, {"sunny", "Sunny"}, {"partlycloudy", "Partly cloudy"},
+                {"cloudy", "Cloudy"}, {"fog", "Fog"}, {"rainy", "Rain"}, {"pouring", "Heavy rain"},
+                {"snowy", "Snow"}, {"snowy-rainy", "Sleet"}, {"hail", "Hail"}, {"lightning", "Thunder"},
+                {"lightning-rainy", "Storms"}, {"windy", "Windy"}, {"windy-variant", "Windy"},
+                {"exceptional", "Unusual"}, {"unavailable", ""}, {"unknown", ""}};
+            auto it = names.find(c);
+            if (it != names.end()) c = it->second;
+            else if (!c.empty()) { std::replace(c.begin(), c.end(), '-', ' '); c[0] = (char) toupper((unsigned char) c[0]); }
+            set_text(id(lbl_out_cond), c);
+          }
+          const float hum = id(room_humidity).state;
+          set_text(id(lbl_hum), std::isnan(hum) ? std::string("—") : num(hum) + "%");
+          set_text(id(lbl_hum_desc), std::isnan(hum) ? "" : (hum < 30 ? "Dry" : (hum > 60 ? "Humid" : "Comfortable")));
+
+          // ── pills ──
+          check(id(btn_mode_off), off);
+          check(id(btn_mode_heat), mode == climate::CLIMATE_MODE_HEAT);
+          check(id(btn_mode_cool), mode == climate::CLIMATE_MODE_COOL);
+          check(id(btn_mode_auto), mode == climate::CLIMATE_MODE_HEAT_COOL);
+          const bool fan_on = cl->fan_mode.has_value() && *cl->fan_mode == climate::CLIMATE_FAN_ON;
+          check(id(btn_fan_auto), !fan_on);
+          check(id(btn_fan_on), fan_on);
+          check(id(btn_lvl_comfort), !eco);
+          check(id(btn_lvl_eco), eco);

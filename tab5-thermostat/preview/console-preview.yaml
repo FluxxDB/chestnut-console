@@ -5,6 +5,9 @@
 
 substitutions:
   display_rotation: 0°
+  # Fast history sampling so screenshots show a line.
+  hist_sample_interval: 1s
+  hist_sample_seconds: "1"
 
 esphome:
   name: console-preview
@@ -14,6 +17,7 @@ packages:
   fonts: !include ../ui/fonts.yaml
   theme: !include ../ui/theme.yaml
   console: !include ../ui/console.yaml
+  console_logic: !include ../ui/console-logic.yaml
 
 host:
 
@@ -88,7 +92,12 @@ text_sensor:
       add("banner", txt(id(lbl_banner)));
       add("tgt_label", txt(id(lbl_tgt_label)));
       add("tgt_comfort", txt(id(lbl_tgt_comfort)));
-      add("target", txt(id(lbl_target)));
+      add("target", lv_obj_has_flag(id(lbl_target), LV_OBJ_FLAG_HIDDEN) ? txt(id(lbl_target_range)) : txt(id(lbl_target)));
+      {
+        char hex[8];
+        snprintf(hex, sizeof(hex), "%06x", (unsigned) (lv_color_to_u32(lv_obj_get_style_bg_color(id(obj_marker), LV_PART_MAIN)) & 0xFFFFFF));
+        add("marker", hex);
+      }
       add("pm_visible", vis(id(btn_minus)));
       add("out_temp", txt(id(lbl_out_temp)));
       add("out_cond", txt(id(lbl_out_cond)));
@@ -100,5 +109,12 @@ text_sensor:
       add("fan_sel", sel(id(btn_fan_auto)) + sel(id(btn_fan_on)));
       add("lvl_pills", child(id(btn_lvl_comfort)) + "|" + child(id(btn_lvl_eco)));
       add("lvl_sel", sel(id(btn_lvl_comfort)) + sel(id(btn_lvl_eco)));
+      {
+        lv_area_t a, b;
+        lv_obj_get_coords(id(lbl_date), &a); lv_obj_get_coords(id(lbl_sched), &b);
+        add("topbar_gap", std::to_string((int) (b.x1 - a.x2)));
+        lv_obj_get_coords(id(lbl_room), &a); lv_obj_get_coords(id(lbl_room_deg), &b);
+        add("room_deg_gap", std::to_string((int) (b.x1 - a.x2)));
+      }
       j.back() = '}';
       return j;

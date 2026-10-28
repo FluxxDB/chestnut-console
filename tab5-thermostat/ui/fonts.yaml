@@ -32,6 +32,10 @@ font:
     size: 105
     glyphs: "0123456789°—–-Of"
   - file: "gfonts://Inter@400"
+    id: f_range
+    size: 72
+    glyphs: "0123456789°—–-"
+  - file: "gfonts://Inter@400"
     id: f_room
     size: 164
     glyphs: "0123456789—-"

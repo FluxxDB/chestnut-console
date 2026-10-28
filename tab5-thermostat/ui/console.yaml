@@ -50,7 +50,7 @@ lvgl:
                         styles: st_ink
                     - label:
                         id: lbl_date
-                        text: "Tuesday, October 28"
+                        text: "Tue, Oct 28"
                         text_font: f_small
                         styles: st_sub
               - obj:
@@ -76,6 +76,8 @@ lvgl:
                         styles: st_sub
                     - button:
                         id: btn_resume
+                        on_click:
+                          - button.press: resume_schedule
                         height: 44
                         hidden: true
                         styles: st_pill
@@ -124,24 +126,34 @@ lvgl:
                         y: 28
                         text: "Inside now"
                         styles: st_sub
-                    - label:
-                        id: lbl_room
+                    # Number and degree sign in a row, so the ° follows the number's width.
+                    - obj:
+                        id: obj_room_row
                         x: 26
                         y: 62
-                        text: "71"
-                        text_font: f_room
-                        text_letter_space: -7
-                        styles: st_ink
-                    - label:
-                        id: lbl_room_deg
-                        align_to:
-                          id: lbl_room
-                          align: OUT_RIGHT_TOP
-                          x: 2
-                          y: 14
-                        text: "°"
-                        text_font: f_deg
-                        styles: st_ink
+                        width: SIZE_CONTENT
+                        height: SIZE_CONTENT
+                        styles: st_bare
+                        scrollable: false
+                        clickable: false
+                        layout:
+                          type: flex
+                          flex_flow: ROW
+                          flex_align_cross: START
+                          pad_column: 2
+                        widgets:
+                          - label:
+                              id: lbl_room
+                              text: "71"
+                              text_font: f_room
+                              text_letter_space: -7
+                              styles: st_ink
+                          - label:
+                              id: lbl_room_deg
+                              text: "°"
+                              text_font: f_deg
+                              styles: st_ink
+                              pad_top: 14
                     - label:
                         id: lbl_status
                         align: TOP_RIGHT
@@ -274,6 +286,10 @@ lvgl:
                         styles: st_on_emph_sub
                     - button:
                         id: btn_minus
+                        on_click:
+                          - script.execute:
+                              id: ui_step_target
+                              delta: -1
                         align: LEFT_MID
                         x: 30
                         y: 22
@@ -293,8 +309,22 @@ lvgl:
                         text_font: f_target
                         text_letter_space: -4
                         styles: st_on_emph
+                    # Auto + Eco with no hold shows the band edges ("68–76°"): too wide for 105 px.
+                    - label:
+                        id: lbl_target_range
+                        align: CENTER
+                        y: 22
+                        hidden: true
+                        text: "68–76°"
+                        text_font: f_range
+                        text_letter_space: -2
+                        styles: st_on_emph
                     - button:
                         id: btn_plus
+                        on_click:
+                          - script.execute:
+                              id: ui_step_target
+                              delta: 1
                         align: RIGHT_MID
                         x: -30
                         y: 22
@@ -422,6 +452,10 @@ lvgl:
                               pad_right: 6
                           - button:
                               id: btn_mode_off
+                              on_click:
+                                - climate.control:
+                                    id: main_thermostat
+                                    mode: "OFF"
                               height: 55
                               styles: st_pill
                               checked:
@@ -433,6 +467,10 @@ lvgl:
                                     text_font: f_pill
                           - button:
                               id: btn_mode_heat
+                              on_click:
+                                - climate.control:
+                                    id: main_thermostat
+                                    mode: HEAT
                               height: 55
                               styles: st_pill
                               checked:
@@ -446,6 +484,10 @@ lvgl:
                                     text_font: f_pill
                           - button:
                               id: btn_mode_cool
+                              on_click:
+                                - climate.control:
+                                    id: main_thermostat
+                                    mode: COOL
                               height: 55
                               styles: st_pill
                               checked:
@@ -457,6 +499,10 @@ lvgl:
                                     text_font: f_pill
                           - button:
                               id: btn_mode_auto
+                              on_click:
+                                - climate.control:
+                                    id: main_thermostat
+                                    mode: HEAT_COOL
                               height: 55
                               styles: st_pill
                               checked:
@@ -491,6 +537,10 @@ lvgl:
                               pad_right: 6
                           - button:
                               id: btn_fan_auto
+                              on_click:
+                                - climate.control:
+                                    id: main_thermostat
+                                    fan_mode: AUTO
                               height: 55
                               styles: st_pill
                               checked:
@@ -504,6 +554,10 @@ lvgl:
                                     text_font: f_pill
                           - button:
                               id: btn_fan_on
+                              on_click:
+                                - climate.control:
+                                    id: main_thermostat
+                                    fan_mode: "ON"
                               height: 55
                               styles: st_pill
                               checked:
@@ -533,6 +587,10 @@ lvgl:
                         widgets:
                           - button:
                               id: btn_lvl_comfort
+                              on_click:
+                                - select.set:
+                                    id: comfort_level
+                                    option: Comfort
                               height: 55
                               styles: st_pill
                               checked:
@@ -546,6 +604,10 @@ lvgl:
                                     text_font: f_pill
                           - button:
                               id: btn_lvl_eco
+                              on_click:
+                                - select.set:
+                                    id: comfort_level
+                                    option: Eco
                               height: 55
                               styles: st_pill
                               checked:
