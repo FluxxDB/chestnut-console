@@ -4,7 +4,8 @@ times, and the timer settings.
 The test entry runs the timers with one "minute" = 1 s (timer_unit_s), so the defaults are:
 furnace minimum run / off 3 s, AC minimum run / off 5 s, min_idle_time 1 s. Physics runs at
 600x (furnace about +1.7°F per real second with no losses), with Fixed weather in every test.
-Targets go straight to the climate's low/high (°C) for now; Task 9 moves them to set_target.
+Targets go through set_target (°F), as the screen's − / + do: the climate's low / high are
+derived from it (a Heat target of T is low T / high T+2, a Cool target low T-2 / high T).
 """
 import asyncio
 
@@ -34,14 +35,21 @@ async def fixed_weather(dev, outdoor_f):
     await dev.set_number("sim_outdoor_f", outdoor_f)
 
 
+async def set_target(dev, target_f):
+    """set_target, as the screen's − / + do: a hold at target_f (or nothing if it's already the
+    effective target). Fails if the device refused it."""
+    got = await dev.set_number("set_target", target_f)
+    assert got == target_f, f"set_target {target_f} read back {got}"
+
+
 async def heat_to(dev, target_f):
-    await dev.climate(mode="HEAT", target_temperature_low=f_to_c(target_f),
-                      target_temperature_high=f_to_c(target_f + 2))
+    await dev.climate(mode="HEAT")
+    await set_target(dev, target_f)
 
 
 async def cool_to(dev, target_f):
-    await dev.climate(mode="COOL", target_temperature_low=f_to_c(target_f - 2),
-                      target_temperature_high=f_to_c(target_f))
+    await dev.climate(mode="COOL")
+    await set_target(dev, target_f)
 
 
 def is_on(v):

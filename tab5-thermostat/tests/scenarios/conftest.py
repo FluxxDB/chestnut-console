@@ -315,7 +315,8 @@ class Dev:
         await self._sync()
 
     async def climate(self, mode=None, fan_mode=None, target_temperature=None,
-                      target_temperature_low=None, target_temperature_high=None):
+                      target_temperature_low=None, target_temperature_high=None,
+                      custom_preset=None):
         """A climate call on the device's climate (temperatures in °C). Modes and fan modes
         take the aioesphomeapi enums or their names ("HEAT", "HEAT_COOL", "ON", ...)."""
         if self._climate is None:
@@ -327,6 +328,7 @@ class Dev:
             target_temperature=target_temperature,
             target_temperature_low=target_temperature_low,
             target_temperature_high=target_temperature_high,
+            custom_preset=custom_preset,
         )
         await self._sync()
 
