@@ -31,6 +31,10 @@ def dump_states(entities, states) -> dict:
             out[f"{e.object_id}.action"] = s.action.name
             out[f"{e.object_id}.fan_mode"] = s.fan_mode.name if s.fan_mode is not None else None
             continue
+        if hasattr(s, "brightness") and hasattr(s, "state"):
+            out[e.object_id] = s.state
+            out[f"{e.object_id}.brightness"] = round(s.brightness, 2)
+            continue
         if not hasattr(s, "state"):
             continue
         v = s.state
@@ -64,6 +68,8 @@ async def main() -> None:
     ap.add_argument("--click-gap", type=float, default=0.15)
     ap.add_argument("--wake", default="200,50", help="neutral tap first, so a dimmed screen is awake")
     ap.add_argument("--post-wait", type=float, default=2.5, help="seconds after the clicks (debounce)")
+    ap.add_argument("--pre-wait", type=float, default=0.0, help="seconds of no input before clicking (idle tests)")
+    ap.add_argument("--no-wake", action="store_true", help="skip the neutral wake tap")
     ap.add_argument("scenarios", nargs="*")
     args = ap.parse_intermixed_args()
 
@@ -102,9 +108,14 @@ async def main() -> None:
             if args.number:
                 await asyncio.sleep(args.settle)
             writes = {}
+            if not args.clicks and args.pre_wait:
+                await asyncio.sleep(args.pre_wait)
             if args.clicks:
-                tap(args.wake)
-                await asyncio.sleep(0.5)
+                if args.pre_wait:
+                    await asyncio.sleep(args.pre_wait)
+                elif not args.no_wake:
+                    tap(args.wake)
+                    await asyncio.sleep(0.5)
                 before = dict(updates)
                 for xy in args.clicks.split(";"):
                     tap(xy)

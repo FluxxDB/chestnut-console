@@ -11,6 +11,23 @@ lvgl:
   touchscreens:
     - touch
   default_font: f_label
+  # While the screen is dimmed, this transparent layer covers everything, so the first tap
+  # only wakes the screen and never presses what's underneath (UI spec, idle dimming).
+  top_layer:
+    widgets:
+      - obj:
+          id: obj_wake
+          x: 0
+          y: 0
+          width: 1280
+          height: 720
+          hidden: true
+          bg_opa: TRANSP
+          border_width: 0
+          radius: 0
+          scrollable: false
+          on_press:
+            - script.execute: ui_wake
   pages:
     - id: page_console
       # The console never scrolls (LVGL scrolled the screen at startup when it could).

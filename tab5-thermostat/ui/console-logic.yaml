@@ -5,7 +5,19 @@
 
 substitutions:
   hist_sample_interval: 10min
+  # Dim the backlight after this long without a touch.
+  idle_timeout: 30s
   hist_sample_seconds: "600"
+
+lvgl:
+  on_idle:
+    - timeout: ${idle_timeout}
+      then:
+        - light.turn_on:
+            id: backlight
+            brightness: 10%
+            transition_length: 0s
+        - lvgl.widget.show: obj_wake
 
 globals:
   # A − / + value not yet sent to set_target (debounced), or -1.
@@ -58,6 +70,14 @@ interval:
           h[n++] = t;
 
 script:
+  - id: ui_wake
+    then:
+      - lvgl.widget.hide: obj_wake
+      - light.turn_on:
+          id: backlight
+          brightness: 100%
+          transition_length: 0s
+
   # − / +: step the shown target now, send it once the taps stop.
   - id: ui_step_target
     parameters:

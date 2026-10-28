@@ -8,6 +8,8 @@ substitutions:
   # Fast history sampling so screenshots show a line.
   hist_sample_interval: 1s
   hist_sample_seconds: "1"
+  # Short idle timeout so the dim/wake test runs fast.
+  idle_timeout: 3s
 
 esphome:
   name: console-preview
