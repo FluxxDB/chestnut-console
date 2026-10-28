@@ -16,9 +16,13 @@ HEAT_RUN_S = 3
 HEAT_OFF_S = 3
 COOL_RUN_S = 5
 COOL_OFF_S = 5
-# How much earlier than the device's own timer the test may see an edge: both edges are
-# observed over the API, so the error is a few ms either way.
-EDGE_SLACK_S = 0.1
+# How much shorter than the device's own timer a measured gap may look. Both edges are seen
+# over the API, which batches states (batch_delay 100 ms, counted from the first item queued
+# in a batch; the sim's 250 ms publishes often leave a batch already open), so each edge
+# arrives 0 to ~120 ms late. A late start edge plus an early end edge can shave up to that
+# much off a gap. Without the timer the gap would be ~0-1 s against 3-5 s thresholds, so
+# 0.3 s still catches a broken timer.
+EDGE_SLACK_S = 0.3
 
 
 def now():
