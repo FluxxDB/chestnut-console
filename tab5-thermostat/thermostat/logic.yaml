@@ -29,6 +29,17 @@ esphome:
             });
 
 globals:
+  # Interlock fault latch (spec, Safety 3). Not restored: a reboot clears it, and relays boot off.
+  # Also read by the call-wait reason (Task 8).
+  - id: g_interlock_latched
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  # The user's climate mode, held while the Clear button walks the thermostat through Off.
+  - id: g_clear_saved_mode
+    type: int
+    restore_value: false
+    initial_value: "0"
   # Auto changeover lockout in seconds (changeover_lockout x timer_unit_s), for Task 9.
   - id: g_changeover_lockout_s
     type: uint32_t
@@ -89,20 +100,30 @@ climate:
 
     # Equipment calls (spec): heating W only, cooling Y + G, Fan On G in any mode, O/B never.
     # Heat and cool turn the opposite relay off before turning theirs on (interlock layer 2).
+    # While the interlock is latched the relays are not turned on (layer 3 guards the actions
+    # as well as cutting the relays); turning them off is always allowed.
     heat_action:
       - switch.turn_off: relay_cool
-      - switch.turn_on: relay_heat
       - if:
           condition:
-            lambda: return id(main_thermostat).fan_mode == climate::CLIMATE_FAN_ON;
+            lambda: return !id(g_interlock_latched);
           then:
-            - switch.turn_on: relay_fan
-          else:
-            - switch.turn_off: relay_fan  # the furnace runs its own blower
+            - switch.turn_on: relay_heat
+            - if:
+                condition:
+                  lambda: return id(main_thermostat).fan_mode == climate::CLIMATE_FAN_ON;
+                then:
+                  - switch.turn_on: relay_fan
+                else:
+                  - switch.turn_off: relay_fan  # the furnace runs its own blower
     cool_action:
       - switch.turn_off: relay_heat
-      - switch.turn_on: relay_cool
-      - switch.turn_on: relay_fan  # the air handler needs G for the blower
+      - if:
+          condition:
+            lambda: return !id(g_interlock_latched);
+          then:
+            - switch.turn_on: relay_cool
+            - switch.turn_on: relay_fan  # the air handler needs G for the blower
     idle_action:
       - switch.turn_off: relay_heat
       - switch.turn_off: relay_cool
@@ -141,6 +162,64 @@ binary_sensor:
     name: "Call Fan"
     device_class: running
     lambda: return id(relay_fan).state;
+  # Contract: the interlock watchdog tripped (W and Y were both on). Stays on until the Clear
+  # button is pressed or the device reboots.
+  - platform: template
+    id: interlock_fault
+    name: "Interlock Fault"
+    device_class: problem
+    lambda: return id(g_interlock_latched);
+
+# Interlock layer 3 (spec, Safety 3): an independent watchdog. The actions never turn W and Y
+# on together (each turns the other relay off first), so both on means something else switched
+# a relay. Cut both at once, ignoring minimum run times, and latch.
+interval:
+  - interval: 100ms
+    then:
+      - if:
+          condition:
+            lambda: return id(relay_heat).state && id(relay_cool).state;
+          then:
+            - switch.turn_off: relay_heat
+            - switch.turn_off: relay_cool
+            - lambda: |-
+                id(g_interlock_latched) = true;
+                ESP_LOGE("interlock", "W and Y both on: both relays cut, interlock fault latched");
+
+script:
+  # Clear button: the thermostat still believes it is heating or cooling (the watchdog cut the
+  # relays behind its back) and would not run its action again. Walk it through Off, which
+  # respects its minimum run time and restarts its off timers, then put the user's mode back.
+  - id: clear_interlock
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: return id(g_interlock_latched);
+          then:
+            - lambda: |-
+                id(g_clear_saved_mode) = (int) id(main_thermostat).mode;
+                id(main_thermostat).make_call().set_mode(climate::CLIMATE_MODE_OFF).perform();
+                id(g_interlock_latched) = false;
+            - wait_until:
+                condition:
+                  lambda: |-
+                    return id(main_thermostat).action == climate::CLIMATE_ACTION_OFF ||
+                           id(main_thermostat).action == climate::CLIMATE_ACTION_IDLE;
+                timeout: 30min
+            - lambda: |-
+                if (id(main_thermostat).mode == climate::CLIMATE_MODE_OFF) {
+                  id(main_thermostat).make_call()
+                      .set_mode((climate::ClimateMode) id(g_clear_saved_mode)).perform();
+                }
+
+button:
+  - platform: template
+    id: clear_interlock_fault
+    name: "Clear Interlock Fault"
+    icon: mdi:alert-remove-outline
+    on_press:
+      - script.execute: clear_interlock
 
 # Safety timers in minutes (spec, Safety 2). Restored; a value outside the range is refused.
 # Applied at boot (numbers set up before the climate, so the startup delay already uses the
