@@ -102,7 +102,7 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 - Theme toggle: a pill with a moon icon in light mode and a sun icon in dark.
 
 **Room card**
-- "Inside now" with the room temperature in whole °F. It comes from `room_temperature` (°C, converted for display).
+- "Inside now" with the room temperature in whole °F, from `checked_temperature`.
 - Status, top right: a colored marker, the action word (Heating, Cooling, Fan, Idle, Off) from the climate entity's current action, and a subline:
   - while running: "to 72° · 18 min so far" (minutes since the current action began);
   - idle: the held target or range;
@@ -116,11 +116,11 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 - **One target in every mode** *(Dang, 2026-10-28: replaces the two-setpoint Auto from mockup v5)*:
   - One number ("Target") sits between the − / + buttons, in Heat, Cool and Auto alike.
   - Each tap moves the target by 1 °F, clamped to the climate's min/max (the range and step come from the milestone 2 spec).
-  - In Auto the thermostat decides to heat or cool toward the target. The anti-flip-flop gap is hidden logic in milestone 2, not shown on screen. ESPHome's single-point heat_cool does this natively, per the milestone 2 spec.
+  - In Auto the thermostat decides to heat or cool toward the target. The anti-flip-flop gap is hidden in milestone 2: ESPHome's thermostat is two-point under the hood, and milestone 2 derives both points from the single target.
 - **Comfort vs Eco on the card** *(Dang: show the Eco number big)*:
   - In Comfort, the big number is the Comfort target, labeled "Comfort target".
-  - In Eco, the big number is the **Eco temperature**: Comfort − drift in Heat, Comfort + drift in Cool. In Auto it shows the drifted band edges as "68–76°". It's labeled "Eco target", with "Comfort 72°" in small text.
-  - **− / + in Eco change the shown Eco temperature for now** *(Dang)*. Tapping + on 68° makes it 69°, held until the next schedule period. The Comfort target isn't changed. This needs a held override temperature in the milestone 2 logic.
+  - In Eco, the big number is the **Eco temperature** (`effective_target`). In Auto with Eco and no hold, it shows the band edges as "68–76°". It's labeled "Eco target", with "Comfort 72°" in small text.
+  - **− / + in Eco change the shown Eco temperature for now** *(Dang)*. Tapping + on 68° writes 69 to `set_target`, which milestone 2 holds until the next period. Comfort isn't changed.
 - **Off mode:** the card shows "Off" and the − / + buttons are hidden.
 - The number updates instantly. The new setpoint goes to the climate entity once there's been no tap for ~1.5 s, so a run of taps is one change *(my call)*.
 
@@ -161,24 +161,30 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 
 ## Entity bindings
 
-The ids come from the milestone 2 spec draft (`mac/thermostat-logic`, `docs/superpowers/specs/2026-10-28-thermostat-logic-design.md`, "Entities the screen and HA can use"). The screen binds to these and never to the climate's low/high setpoints: milestone 2 derives those from `comfort_target`.
+From the milestone 2 spec (`mac/thermostat-logic` @ cbeebb8, "Entities the screen and HA can use"). The screen **never** writes the climate's setpoints and never touches `relay_*`. Until milestone 2 merges, the UI builds against a stand-in package with the same ids (`ui/dev/contract-stub.yaml`, dev only). The ids are fixed, so the swap is a one-line package change. *(builder check Q1, my call)*
 
 | Screen element | Reads | Writes |
 |---|---|---|
-| Room temperature | `room_temperature` (°C, shown °F) | |
-| Status marker and subline | `main_thermostat` action; `call_heat` / `call_cool` / `call_fan`; minutes since the action began, tracked on the device | |
-| Target (Comfort) | `comfort_target` | `comfort_target` ±1 (debounced) |
-| Target (Eco) | Eco temperature = `comfort_target` ∓ `eco_offset` by mode; **held Eco override: id pending in milestone 2** | **held Eco override (pending)** |
-| Comfort / Eco pills | `comfort_level` | `comfort_level` |
-| Mode / Fan pills | `main_thermostat` mode / fan mode | `main_thermostat` mode / fan mode |
-| Schedule status | `schedule_status`, `schedule_hold`. Asked milestone 2 for structured fields (period name, level, end time) so the text matches the screen's wording | |
-| Resume schedule | `schedule_hold` (shown only while holding) | `resume_schedule` |
-| Humidity | `room_humidity` | |
-| Outside | HA weather entity (imported) | |
+| Room temperature | `checked_temperature` (°F, the value the thermostat acts on); "—" when unknown | |
+| Status marker / word | `main_thermostat` action (heating / cooling / idle) and mode. Fan state from **`call_fan`**, never the climate action | |
+| Status subline | running: "to {target} · {N} min so far" (N from `action_since`); idle and off target: `call_wait_reason` (for example "Waiting · short-cycle protection"); idle and on target: "holding {target}"; mode Off: "System is off", or "System is off · fan on" when `call_fan` | |
+| Big target number | `effective_target`; in Auto with Eco and no hold, "`effective_low`–`effective_high`" | `set_target` ±1, clamped 50–90 (debounced). Milestone 2 makes this a hold. |
+| Target label | `comfort_level`: "Comfort target" or "Eco target", plus "Comfort {comfort_target}°" in small text while Eco | |
+| Comfort / Eco pills | `comfort_level` (select) | `comfort_level` (milestone 2 makes a manual change a hold) |
+| Mode pills | `main_thermostat` mode: Off / Heat / Cool / Auto = OFF / HEAT / COOL / HEAT_COOL | `main_thermostat` mode |
+| Fan pills | `main_thermostat` fan mode: AUTO / ON | `main_thermostat` fan mode |
+| Schedule status (top bar) | `schedule_status` (the ready-made text, used as is); `schedule_hold` controls the Resume pill; `schedule_enabled` off: "Schedule off" with no pill | `resume_schedule` |
+| Temperature line | samples of `checked_temperature`; the dashed line is `effective_target` (the band centre in Auto) | |
+| Humidity | `room_humidity`; "—" when unknown | |
+| Outside | HA weather entity, imported; "—" when HA is unreachable | |
 | Sensor fault banner | `sensor_fault` | |
-| Interlock fault banner | `interlock_fault` | (cleared from HA or the web page only, not the wall: it's a safety latch, *my call*) |
+| Interlock fault banner | `interlock_fault` | none on the wall *(my call: it's a latched safety fault; clear it from HA or the web page with `clear_interlock_fault`)* |
 
-The interlock banner uses the same Signal Yellow treatment as the sensor fault: "Heating and cooling were both requested, so the system stopped. Check HA." *(my call)*
+**Extra states** *(from the builder check; wording is my call)*:
+- **Interlock fault:** a Signal Yellow banner: "Heating and cooling were both requested, so the system stopped. Clear it in Home Assistant once it's checked."
+- **Clock not set:** the top bar shows the `schedule_status` text ("Schedule paused: clock not set") in sub color.
+- **Schedule off:** "Schedule off" in sub color, with no Resume pill.
+- **Fan running with nothing else:** a teal marker with "Fan".
 
 ## Constraints
 
