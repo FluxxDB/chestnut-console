@@ -11,6 +11,9 @@ $dc --entrypoint rm preview -rf /config/preview/shots/idle-dim /config/preview/s
 # ESPHome gamma-corrects by 2.8: 4% is about a tenth of the in-use light output; a literal 1% is dark).
 $dc preview preview/console-preview.yaml /config/preview/shots/idle-dim --dump "Heating" --pre-wait 4 >/dev/null
 python3 tools/preview/check_states.py $sh/idle-dim heating display_backlight.brightness=0.04 screen_brightness=10 dim_brightness=4
+# The Tab5's backlight bottoms out above the in-use level, so the dim stage also darkens the
+# picture: the wake catcher becomes a 70% black scrim (bg_opa 178 of 255).
+python3 tools/preview/check_snapshot.py $sh/idle-dim heating light wake_visible=1 scrim_opa=178
 # Left alone 7 s: backlight off and LVGL paused.
 $dc preview preview/console-preview.yaml /config/preview/shots/idle-sleep --dump "Heating" --pre-wait 7 >/dev/null
 python3 tools/preview/check_states.py $sh/idle-sleep heating display_backlight=false

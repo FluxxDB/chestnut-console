@@ -106,6 +106,15 @@ globals:
     initial_value: "0"
 
 sensor:
+  # How long since the screen was last touched (drives dim/sleep): handy for diagnosing.
+  - platform: template
+    id: ui_idle_s
+    name: "Screen Idle Time"
+    entity_category: diagnostic
+    unit_of_measurement: s
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: "return lv_display_get_inactive_time(nullptr) / 1000.0f;"
   - platform: homeassistant
     id: out_temp
     entity_id: weather.forecast_home

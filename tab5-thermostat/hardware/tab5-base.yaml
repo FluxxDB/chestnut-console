@@ -157,11 +157,15 @@ binary_sensor:
   - platform: gpio
     id: charging
     name: "Charging Status"
-    entity_category: diagnostic
+    # Without a battery (bare Tab5) this pin floats and flapped ~1.4x/s, flooding the log and
+    # HA history. Only report a state that holds for 10 s.
+    internal: true
     pin:
       pi4ioe5v6408: pi4ioe2
       number: 6
       mode: INPUT_PULLDOWN
+    filters:
+      - delayed_on_off: 10s
 
 sensor:
   - platform: ina226

@@ -138,6 +138,7 @@ text_sensor:
         add("wake_visible", lv_obj_has_flag(id(obj_wake), LV_OBJ_FLAG_HIDDEN) ? "0" : "1");
         add("uptime_ms", std::to_string(millis()));
         add("paused", id(lvgl_main)->is_paused() ? "1" : "0");
+        add("scrim_opa", std::to_string((int) lv_obj_get_style_bg_opa(id(obj_wake), LV_PART_MAIN)));
         auto font_info = [&](const char *k, lv_obj_t *o) {
           const lv_font_t *f = lv_obj_get_style_text_font(o, LV_PART_MAIN);
           lv_font_glyph_dsc_t g;

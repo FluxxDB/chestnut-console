@@ -12,8 +12,10 @@ lvgl:
   touchscreens:
     - touch
   default_font: f_label
-  # While the screen is dimmed, this transparent layer covers everything, so the first tap
-  # only wakes the screen and never presses what's underneath (UI spec, idle dimming).
+  # While the screen is dimmed or asleep, this layer covers everything, so the first tap only
+  # wakes the screen and never presses what's underneath (UI spec, idle stages). It is a 70%
+  # black scrim: the Tab5's backlight bottoms out above the in-use level, so dimming the
+  # backlight alone isn't visible.
   top_layer:
     widgets:
       - obj:
@@ -23,7 +25,8 @@ lvgl:
           width: 1280
           height: 720
           hidden: true
-          bg_opa: TRANSP
+          bg_color: 0x000000
+          bg_opa: 70%
           border_width: 0
           radius: 0
           scrollable: false
