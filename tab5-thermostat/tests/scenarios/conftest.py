@@ -73,6 +73,7 @@ class Dev:
         self._values = {}  # object_id -> latest plain value
         self._history = {}  # object_id -> every value received, in order
         self._changed = asyncio.Event()
+        self.started_at = None  # event-loop time just before the program was launched
 
     # --- process lifecycle ---
 
@@ -81,6 +82,7 @@ class Dev:
             raise RuntimeError(f"{BINARY} not found; run `tests/run.sh build` (run.sh scenarios builds it)")
         self.prefs_dir.mkdir(parents=True, exist_ok=True)
         self._log = open(self.log_path, "ab")
+        self.started_at = asyncio.get_running_loop().time()
         self._proc = subprocess.Popen(
             [str(BINARY)],
             env={**os.environ, PREFS_ENV: str(self.prefs_dir)},
@@ -190,6 +192,23 @@ class Dev:
             return self._entities[object_id]
         except KeyError:
             raise KeyError(f"no entity with object_id {object_id!r}; have {sorted(self._entities)}") from None
+
+    def info(self, object_id):
+        """The entity's API description (e.g. a ClimateInfo with its supported modes)."""
+        return self._info(object_id)
+
+    def object_ids(self):
+        """The object_ids of every entity the device exposes over the API."""
+        self._check_alive()
+        return sorted(self._entities)
+
+    def action_args(self, name):
+        """The argument names of an API action (`api: actions:`)."""
+        try:
+            service = self._services[name]
+        except KeyError:
+            raise KeyError(f"no API action {name!r}; have {sorted(self._services)}") from None
+        return sorted(arg.name for arg in service.args)
 
     async def state(self, object_id):
         """The latest value: float, bool, str, a ClimateState, or None while unknown."""

@@ -5,12 +5,20 @@ substitutions:
   # Physics 600x real time (one 1 s step = 10 simulated minutes), readings every 250 ms.
   sim_speed: "600"
   sim_publish_interval: 250ms
+  # Timers: one "minute" = 1 s, so the defaults are 3 / 3 / 5 / 5 s and min_idle_time 1 s.
+  timer_unit_s: "1"
+  heat_run_s: "3"
+  heat_off_s: "3"
+  cool_run_s: "5"
+  cool_off_s: "5"
+  min_idle_s: "1"
 
 esphome:
   name: main-thermostat-test
 
 packages:
   sim: !include ../sim/virtual-house.yaml
+  logic: !include ../thermostat/logic.yaml
 
 host:
 

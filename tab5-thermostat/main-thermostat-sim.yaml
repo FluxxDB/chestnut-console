@@ -8,6 +8,7 @@ esphome:
 
 packages:
   sim: !include sim/virtual-house.yaml
+  logic: !include thermostat/logic.yaml
 
 host:
 

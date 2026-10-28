@@ -1,0 +1,218 @@
+# Thermostat logic (milestone 2): ESPHome's stock thermostat climate `main_thermostat`, wired to
+# the package contract (room_temperature, room_humidity, relay_heat / relay_cool / relay_fan from
+# the sim or hardware package), plus the safety timer settings and read-only call sensors.
+# This is the only package that turns a relay on. relay_ob (O/B) is never touched.
+# Runs unchanged on the Tab5 and on the host; test-only hooks live in tests/main-thermostat-test.yaml.
+
+substitutions:
+  timer_unit_s: "60"  # seconds per "minute" for every user-facing timer (1 in the tests)
+  # Compile-time minimum timers (= the timer numbers' defaults x timer_unit_s). The numbers
+  # below set them again at boot from their restored values.
+  heat_run_s: "180"
+  heat_off_s: "180"
+  cool_run_s: "300"
+  cool_off_s: "300"
+  min_idle_s: "30"
+
+esphome:
+  includes:
+    # Resolved next to this file. A list, so it merges with the sim package's includes.
+    - chestnut_logic.h
+  on_boot:
+    # Before anything publishes: feed the thermostat's checked temperature from the contract
+    # sensor. For now a plain mirror; Task 8 puts the sanity checker here.
+    - priority: 800
+      then:
+        - lambda: |-
+            id(room_temperature).add_on_state_callback([](float c) {
+              id(checked_temperature_c).publish_state(c);
+            });
+
+globals:
+  # Auto changeover lockout in seconds (changeover_lockout x timer_unit_s), for Task 9.
+  - id: g_changeover_lockout_s
+    type: uint32_t
+    initial_value: "30 * ${timer_unit_s}"
+
+sensor:
+  # What the thermostat acts on (°C). NaN means "no usable reading".
+  - platform: template
+    id: checked_temperature_c
+    internal: true
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 2
+    update_interval: never
+    on_value:
+      - lambda: id(checked_temperature).publish_state(chestnut::c_to_f(x));
+  # Contract: the checked room temperature in °F, for the screen and HA.
+  - platform: template
+    id: checked_temperature
+    name: "Checked Temperature"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: never
+
+climate:
+  - platform: thermostat
+    id: main_thermostat
+    name: "Main Thermostat"
+    sensor: checked_temperature_c
+    humidity_sensor: room_humidity
+    # After any boot, heat and cool wait out their minimum off times before the first call.
+    startup_delay: true
+    min_idle_time: ${min_idle_s}s
+    min_heating_run_time: ${heat_run_s}s
+    min_heating_off_time: ${heat_off_s}s
+    min_cooling_run_time: ${cool_run_s}s
+    min_cooling_off_time: ${cool_off_s}s
+    # Required with fan mode actions. ESPHome never goes below 1 s for any of its timers.
+    min_fan_mode_switching_time: 1s
+    # Modes: OFF, HEAT, COOL (from the actions) and HEAT_COOL (our "Auto"). No AUTO, no FAN_ONLY.
+    heat_cool_mode: true
+    # Covers 48–92°F: the derived companion setpoint can sit just outside 50–90°F.
+    visual:
+      min_temperature: 8.5
+      max_temperature: 33.5
+      temperature_step: 0.5
+    # First boot (nothing restored yet): Off, fan Auto. Without the fan mode here the thermostat
+    # would start in fan mode ON (its fallback for an unset fan mode) and run G at boot.
+    default_preset: Default
+    preset:
+      - name: Default
+        mode: "OFF"
+        fan_mode: AUTO
+        default_target_temperature_low: 22.2
+        default_target_temperature_high: 23.3
+
+    # Equipment calls (spec): heating W only, cooling Y + G, Fan On G in any mode, O/B never.
+    # Heat and cool turn the opposite relay off before turning theirs on (interlock layer 2).
+    heat_action:
+      - switch.turn_off: relay_cool
+      - switch.turn_on: relay_heat
+      - if:
+          condition:
+            lambda: return id(main_thermostat).fan_mode == climate::CLIMATE_FAN_ON;
+          then:
+            - switch.turn_on: relay_fan
+          else:
+            - switch.turn_off: relay_fan  # the furnace runs its own blower
+    cool_action:
+      - switch.turn_off: relay_heat
+      - switch.turn_on: relay_cool
+      - switch.turn_on: relay_fan  # the air handler needs G for the blower
+    idle_action:
+      - switch.turn_off: relay_heat
+      - switch.turn_off: relay_cool
+      - if:
+          condition:
+            lambda: return id(main_thermostat).fan_mode == climate::CLIMATE_FAN_ON;
+          then:
+            - switch.turn_on: relay_fan
+          else:
+            - switch.turn_off: relay_fan
+    fan_mode_on_action:
+      - switch.turn_on: relay_fan
+    fan_mode_auto_action:
+      # A running AC keeps its blower; otherwise G is off.
+      - if:
+          condition:
+            lambda: return id(main_thermostat).action != climate::CLIMATE_ACTION_COOLING;
+          then:
+            - switch.turn_off: relay_fan
+
+# Read-only W / Y / G state for the screen, HA and history. Polled every loop from the relay
+# switches, so they work the same with any relay package.
+binary_sensor:
+  - platform: template
+    id: call_heat
+    name: "Call Heat"
+    device_class: running
+    lambda: return id(relay_heat).state;
+  - platform: template
+    id: call_cool
+    name: "Call Cool"
+    device_class: running
+    lambda: return id(relay_cool).state;
+  - platform: template
+    id: call_fan
+    name: "Call Fan"
+    device_class: running
+    lambda: return id(relay_fan).state;
+
+# Safety timers in minutes (spec, Safety 2). Restored; a value outside the range is refused.
+# Applied at boot (numbers set up before the climate, so the startup delay already uses the
+# restored values) and on every change (ESPHome stretches or ends a running timer to match).
+number:
+  - platform: template
+    id: heat_min_run
+    name: "Heat Min Run"
+    icon: mdi:timer-outline
+    entity_category: config
+    unit_of_measurement: "min"
+    min_value: 2
+    max_value: 20
+    step: 1
+    initial_value: 3
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: id(main_thermostat).set_heating_minimum_run_time_in_sec(lroundf(x * ${timer_unit_s}));
+  - platform: template
+    id: heat_min_off
+    name: "Heat Min Off"
+    icon: mdi:timer-off-outline
+    entity_category: config
+    unit_of_measurement: "min"
+    min_value: 2
+    max_value: 20
+    step: 1
+    initial_value: 3
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: id(main_thermostat).set_heating_minimum_off_time_in_sec(lroundf(x * ${timer_unit_s}));
+  - platform: template
+    id: cool_min_run
+    name: "Cool Min Run"
+    icon: mdi:timer-outline
+    entity_category: config
+    unit_of_measurement: "min"
+    min_value: 3
+    max_value: 20
+    step: 1
+    initial_value: 5
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: id(main_thermostat).set_cooling_minimum_run_time_in_sec(lroundf(x * ${timer_unit_s}));
+  - platform: template
+    id: cool_min_off
+    name: "Cool Min Off"
+    icon: mdi:timer-off-outline
+    entity_category: config
+    unit_of_measurement: "min"
+    min_value: 5
+    max_value: 20
+    step: 1
+    initial_value: 5
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: id(main_thermostat).set_cooling_minimum_off_time_in_sec(lroundf(x * ${timer_unit_s}));
+  - platform: template
+    id: changeover_lockout
+    name: "Changeover Lockout"
+    icon: mdi:swap-horizontal
+    entity_category: config
+    unit_of_measurement: "min"
+    min_value: 10
+    max_value: 120
+    step: 1
+    initial_value: 30
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: id(g_changeover_lockout_s) = lroundf(x * ${timer_unit_s});
