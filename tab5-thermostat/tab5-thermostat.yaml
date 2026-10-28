@@ -4,6 +4,8 @@
 substitutions:
   name: tab5-thermostat
   friendly_name: Middle Floor Thermostat
+  # Landscape. Use 90° instead if the screen comes out upside down.
+  display_rotation: 270°
 
 esphome:
   name: ${name}
@@ -35,8 +37,9 @@ api:
     key: !secret api_encryption_key
 
 ota:
-  # Over-the-air updates reuse the API encryption key above.
+  # The empty encryption block makes OTA reuse the API key above. Without it, OTA has no auth.
   - platform: esphome
+    encryption: {}
 
 # Phone-friendly control page served by the Tab5 itself: http://<tab5-ip>/
 web_server:

@@ -12,6 +12,7 @@ Dang is turning an **M5Stack Tab5** (ESP32-P4 + ESP32-C6 Wi-Fi, 5" 720×1280 tou
 
 ## Decisions (made with Dang)
 
+- **Firmware is ESPHome**, with C++ only for custom bits. Rust was considered and rejected on 2026-10-28: P4 support in esp-hal is basic, early (v1.3) silicon support is shaky, and there are no Rust drivers for the ST7123 panel or the C6 hosted Wi-Fi. A rewrite would rebuild what ESPHome already provides.
 - **The thermostat logic runs on the Tab5 itself** (ESPHome `thermostat` climate). HA is for the phone app, remote access, history, alerts and automations. HA or Wi-Fi going down must never stop heating or cooling.
 - **The electrical interface is standard relays** with dry, normally-open contacts switching R→W/Y/G (24 VAC). No power-stealing, no triacs, no hacks. Relays default OFF on boot.
 - **Phone control:** the Tab5 serves its own web page (ESPHome `web_server` v3, digest auth). HA's app is the nicer option when HA is up.
@@ -79,6 +80,7 @@ ESPHome climate works in °C internally. Show °F in the UI and HA (Dang is in t
 
 - **Use `superpowers:brainstorming` before building any new feature or milestone.** Work out the design with Dang first and write it up in `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`. The other agent reads it as the builder check, and nothing gets built until Dang approves it. Then plan it with `superpowers:writing-plans`. The agent that owns the work leads its brainstorm, so Dang isn't asked the same questions twice.
 - **Ask Dang design questions as surveys.** In design stages, use the multiple-choice question tool (AskUserQuestion) with the recommended option first, instead of open-ended text questions. On beacon, where that tool doesn't exist, give a short numbered list of options with your recommendation first.
+- **No AI co-author trailers.** Never add `Co-Authored-By: Claude ...` (or any agent attribution) to commit messages.
 - **Don't use the `graphify` skill on this project.** No knowledge graphs or `graphify-out/`; the repo is small enough to read directly.
 
 ## Working together (PC agent + Mac agent)

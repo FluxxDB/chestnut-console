@@ -104,11 +104,13 @@ time:
         # Keep the RTC accurate for boots without network.
         - rx8130.write_time:
 
+# Board power and charging toggles are internal: flipping one from a phone could cut
+# Wi-Fi or power with no remote way back.
 switch:
   - platform: gpio
     id: wifi_power
     name: "WiFi Power"
-    entity_category: config
+    internal: true
     pin:
       pi4ioe5v6408: pi4ioe2
       number: 0
@@ -116,14 +118,14 @@ switch:
   - platform: gpio
     id: usb_5v_power
     name: "USB Power"
-    entity_category: config
+    internal: true
     pin:
       pi4ioe5v6408: pi4ioe2
       number: 3
   - platform: gpio
     id: quick_charge
     name: "Quick Charge"
-    entity_category: config
+    internal: true
     pin:
       pi4ioe5v6408: pi4ioe2
       number: 5
@@ -131,7 +133,7 @@ switch:
   - platform: gpio
     id: charge_enable
     name: "Charge Enable"
-    entity_category: config
+    internal: true
     pin:
       pi4ioe5v6408: pi4ioe2
       number: 7
@@ -144,7 +146,7 @@ switch:
   - platform: gpio
     id: external_5v_power
     name: "External 5V Power"
-    entity_category: config
+    internal: true
     pin:
       pi4ioe5v6408: pi4ioe1
       number: 2
