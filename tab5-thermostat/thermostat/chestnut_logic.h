@@ -222,11 +222,13 @@ class SanityChecker {
     // A gap since the previous reading is caught even if tick() was late.
     if (time_bad(now_ms)) mark_bad();
     last_rx_ms_ = now_ms;
+    stale_ = false;
     if (!std::isnan(c)) {
       if (!have_frozen_ || c != frozen_value_) {
         frozen_value_ = c;
         frozen_since_ms_ = now_ms;
         have_frozen_ = true;
+        frozen_ = false;  // only a changed value ends a frozen condition
       }
     }
     // Still frozen counts too: the identical value keeps arriving but is not good.
@@ -265,9 +267,13 @@ class SanityChecker {
     last_rx_ms_ = now_ms;
   }
 
-  bool time_bad(uint32_t now_ms) const {
-    if (detail::elapsed_ms(now_ms, last_rx_ms_) > cfg_.stale_ms) return true;
-    return have_frozen_ && detail::elapsed_ms(now_ms, frozen_since_ms_) > cfg_.frozen_ms;
+  // Stale and frozen are latched as state the moment they are seen, so they stay true however
+  // long they last (elapsed_ms saturates to 0 past 2^31 ms, about 24.8 days). stale_ ends with
+  // the next reading, frozen_ only when the value changes.
+  bool time_bad(uint32_t now_ms) {
+    if (detail::elapsed_ms(now_ms, last_rx_ms_) > cfg_.stale_ms) stale_ = true;
+    if (have_frozen_ && detail::elapsed_ms(now_ms, frozen_since_ms_) > cfg_.frozen_ms) frozen_ = true;
+    return stale_ || frozen_;
   }
 
   void mark_bad() {
@@ -306,6 +312,8 @@ class SanityChecker {
   SanityConfig cfg_;
   bool started_ = false;
   uint32_t last_rx_ms_ = 0;
+  bool stale_ = false;
+  bool frozen_ = false;
   bool have_frozen_ = false;
   float frozen_value_ = 0;
   uint32_t frozen_since_ms_ = 0;

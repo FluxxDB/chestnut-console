@@ -466,6 +466,69 @@ static void sanity_bad_drops_held_spike() {
   CHECK_NEAR(s.value(), 31.3, 1e-6);
 }
 
+// ---- Sanity checker: conditions that outlast 2^31 ms (24.8 days) ------------------------
+
+static SanityConfig sanity_prod_cfg() { return SanityConfig{120000, 1800000, 300000, 2.0f, 40.0f, 2.0f}; }
+
+// A dead sensor repeating one value must stay faulted past 2^31 ms, and recover only
+// after the value changes and recover_ms of good readings.
+static void sanity_frozen_stays_faulted_past_25_days() {
+  SanityChecker s(sanity_prod_cfg());
+  const uint32_t t0 = 12345;
+  const uint32_t step = 10000;
+  const uint32_t days26 = 26u * 86400u * 1000u;
+  for (uint32_t d = 0; d <= days26; d += step) {
+    s.on_reading(t0 + d, 21.5f);
+    s.tick(t0 + d + 1000);
+    if (d > 1800000u && !s.fault()) {
+      CHECK(false);
+      break;
+    }
+  }
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+  // The value moves: the window starts at the first changed reading.
+  const uint32_t t1 = t0 + days26 + step;
+  for (uint32_t d = 0; d < 300000; d += step) {
+    s.on_reading(t1 + d, 21.6f + ((d / step) % 2 ? 0.05f : 0.0f));
+    s.tick(t1 + d + 1000);
+  }
+  s.tick(t1 + 299999);
+  CHECK(s.fault());
+  s.on_reading(t1 + 300000, 21.6f);
+  s.tick(t1 + 300001);
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), 21.6, 1e-6);
+}
+
+// No readings at all for more than 2^31 ms: still faulted, and a returning sensor recovers normally.
+static void sanity_stale_stays_faulted_past_25_days() {
+  SanityChecker s(sanity_prod_cfg());
+  s.on_reading(0, 21.0f);
+  const uint32_t days26 = 26u * 86400u * 1000u;
+  bool ok = true;
+  for (uint32_t t = 1000; t <= days26; t += 1000) {
+    s.tick(t);
+    if (t > 120000u && !s.fault()) ok = false;
+  }
+  CHECK(ok);
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+  for (uint32_t d = 0; d < 300000; d += 10000) {
+    s.on_reading(days26 + 10000 + d, 21.0f + ((d / 10000) % 2 ? 0.05f : 0.0f));
+    s.tick(days26 + 10000 + d + 1000);
+  }
+  CHECK(s.fault());
+  // The first returning reading repeats 21.0, so the sensor still counts as frozen until the
+  // next one differs (+10 s); the window then runs from there.
+  s.on_reading(days26 + 310000, 21.0f);
+  s.tick(days26 + 319999);
+  CHECK(s.fault());
+  s.on_reading(days26 + 320000, 21.0f);
+  s.tick(days26 + 320001);
+  CHECK(!s.fault());
+}
+
 int main() {
   derive_heat_comfort();
   derive_heat_eco();
@@ -501,5 +564,7 @@ int main() {
   sanity_late_reading_after_gap();
   sanity_stale_during_recovery();
   sanity_bad_drops_held_spike();
+  sanity_frozen_stays_faulted_past_25_days();
+  sanity_stale_stays_faulted_past_25_days();
   return CHECK_SUMMARY("test_logic");
 }
