@@ -9,6 +9,9 @@ substitutions:
 esphome:
   name: console-preview
 
+packages:
+  contract: !include ../ui/dev/contract-stub.yaml
+
 host:
 
 api:

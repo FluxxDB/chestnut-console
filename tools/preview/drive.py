@@ -19,6 +19,27 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
 
+def dump_states(entities, states) -> dict:
+    """object_id -> plain state; climates also get <id>.mode / .action / .fan_mode."""
+    out = {}
+    for e in entities:
+        s = states.get(e.key)
+        if s is None:
+            continue
+        if hasattr(s, "mode") and hasattr(s, "action"):
+            out[f"{e.object_id}.mode"] = s.mode.name
+            out[f"{e.object_id}.action"] = s.action.name
+            out[f"{e.object_id}.fan_mode"] = s.fan_mode.name if s.fan_mode is not None else None
+            continue
+        if not hasattr(s, "state"):
+            continue
+        v = s.state
+        if getattr(s, "missing_state", False):
+            v = None
+        out[e.object_id] = v.name if hasattr(v, "name") else v
+    return out
+
+
 async def maybe_await(value):
     if inspect.isawaitable(value):
         return await value
@@ -30,8 +51,9 @@ async def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--themes", default="light")
     ap.add_argument("--settle", type=float, default=1.5)
+    ap.add_argument("--dump", action="store_true", help="also write <base>-states.json")
     ap.add_argument("scenarios", nargs="*")
-    args = ap.parse_args()
+    args = ap.parse_intermixed_args()
 
     client = APIClient("127.0.0.1", 6053, None)
     await client.connect(login=True)
@@ -63,6 +85,9 @@ async def main() -> None:
                     data = {"raw": text}
                 with open(f"{base}.json", "w") as f:
                     json.dump(data, f, indent=2)
+            if args.dump:
+                with open(f"{base}-states.json", "w") as f:
+                    json.dump(dump_states(entities, states), f, indent=2)
             print(f"captured {base}.png")
 
     await client.disconnect()
