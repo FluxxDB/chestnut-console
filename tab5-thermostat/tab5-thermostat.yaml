@@ -1,5 +1,6 @@
 # Chestnut Console: the Main Thermostat, on an M5Stack Tab5.
-# Milestone 1: Wi-Fi, Home Assistant API, local web page, display + touch smoke test.
+# Wi-Fi, Home Assistant API, local web page, the console screen, and (milestone 2) the
+# thermostat logic running against the virtual house until the bench relays arrive (M4).
 
 substitutions:
   name: tab5-thermostat
@@ -9,6 +10,8 @@ substitutions:
   # Sunset/sunrise theme switching (house location stays in secrets.yaml, not git).
   house_latitude: !secret house_latitude
   house_longitude: !secret house_longitude
+  # The schedule's and the virtual house's clock: SNTP, seeded from the RTC at boot.
+  clock_id: sntp_time
 
 esphome:
   name: ${name}
@@ -26,8 +29,10 @@ packages:
   ui_theme: !include ui/theme.yaml
   ui_console: !include ui/console.yaml
   ui_logic: !include ui/console-logic.yaml
-  # DEV ONLY until milestone 2 merges: stand-in for the thermostat logic (same entity ids).
-  contract: !include ui/dev/contract-stub.yaml
+  # Milestone 2: the thermostat logic, against the virtual house (the sim package stands in
+  # for the ENV IV sensor and the Unit 4-Relay until M4; its knobs are on the web page).
+  logic: !include thermostat/logic.yaml
+  sim: !include sim/virtual-house.yaml
 
 wifi:
   # The Tab5's radio is 2.4 GHz only.

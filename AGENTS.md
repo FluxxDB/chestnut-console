@@ -30,14 +30,18 @@ Dang is turning an **M5Stack Tab5** (ESP32-P4 + ESP32-C6 Wi-Fi, 5" 720×1280 tou
 ## Repo layout
 
 ```
-docker-compose.yml           HA 2026.10.4 + ESPHome 2026.10.1 (host networking); `preview` service (dev profile)
+docker-compose.yml           HA 2026.10.4 + ESPHome 2026.10.1 (host networking); `esphome-host` and `preview` services (dev profile)
 tools/preview/               desktop preview rig + console tests (test_all.sh, test_device.sh)
 home-assistant/config/       HA config (runtime state gitignored)
 tab5-thermostat/             ESPHome config dir (mounted at /config in the esphome container)
   tab5-thermostat.yaml       device entry point: Wi-Fi, API, OTA, web page, packages
+  main-thermostat-sim.yaml   host entry point: the thermostat logic + virtual house, for HA (API on 6053)
+  thermostat/                milestone 2 logic package: logic.yaml (climate, safety, schedule) + chestnut_logic.h
+  sim/                       the virtual house: virtual-house.yaml + house_model.h (contract ids, knobs, faults)
+  tests/                     run.sh (unit | build | scenarios | all, Docker only), test entry, unit + scenario tests
   hardware/                  board support; display-*.yaml = one per Tab5 screen revision
   ui/                        the console: fonts, theme, console (layout), console-logic (bindings)
-    dev/contract-stub.yaml   DEV ONLY stand-in for milestone 2 (same entity ids, fake values)
+    dev/contract-stub.yaml   DEV ONLY stand-in for milestone 2 (same entity ids, fake values); the preview's fixture
   preview/                   desktop preview entry point (host + SDL); shots/ is gitignored
   secrets.yaml.example       copy to secrets.yaml locally (never commit, never post on beacon)
   docs/                      research.md, shopping-list.md
@@ -47,6 +51,7 @@ Validate and compile:
 ```bash
 docker compose run --rm --no-deps esphome config tab5-thermostat.yaml
 docker compose run --rm --no-deps esphome compile tab5-thermostat.yaml
+tab5-thermostat/tests/run.sh all     # milestone 2 tests
 ```
 
 ## Hardware facts that bite
@@ -61,7 +66,7 @@ docker compose run --rm --no-deps esphome compile tab5-thermostat.yaml
 ## Milestones
 
 1. **Bring-up** (PC, needs the Tab5 on USB): hello screen, touch, Wi-Fi, HA connection, web page, identify the screen revision. *Done (merged).*
-2. **Thermostat logic, simulated.** ESPHome `thermostat` climate driven by a simulated room (a "virtual house" whose temperature drifts toward outdoor and responds to virtual heat/cool/fan relays), plus all the safety requirements above. Develop it on ESPHome's **`host` platform**, which runs natively on Linux/macOS with no hardware, then run the same packages on the Tab5.
+2. **Thermostat logic, simulated.** ESPHome `thermostat` climate driven by a simulated room (a "virtual house" whose temperature drifts toward outdoor and responds to virtual heat/cool/fan relays), plus all the safety requirements above. Develop it on ESPHome's **`host` platform**, which runs natively on Linux/macOS with no hardware, then run the same packages on the Tab5. *Built, in review (`mac/thermostat-logic`).*
 3. **Thermostat UI** in LVGL. Dang's call (2026-10-28): **functional first, polish later**. First a clean, simple screen (big temperature, setpoint, mode, fan, humidity) built on the milestone 2 climate entity, then a proper design pass with mockups. The Tab5 can't show HA's own dashboard (it has no browser); phones and PCs get HA's built-in thermostat card meanwhile. The UI lives in `ui/` packages, separate from the logic, so restyling is cheap.
 4. **Bench rig** (when Dang buys the parts): real ENV IV + Unit 4-Relay + 24 VAC lamps, then 24 VAC → DC power.
 5. **House:** site survey, then install.
@@ -74,7 +79,7 @@ Hardware and simulation packages provide the same ids, so the logic package does
 |---|---|---|
 | `room_temperature` | sensor (°C) | `sim` package now, SHT40 later |
 | `room_humidity` | sensor (%) | `sim` package now, SHT40 later |
-| `relay_heat` (W), `relay_cool` (Y), `relay_fan` (G), `relay_ob` (O/B, unused unless heat pump) | switch, `restore_mode: ALWAYS_OFF` | `sim` template switches now, Unit 4-Relay later |
+| `relay_heat` (W), `relay_cool` (Y), `relay_fan` (G), `relay_ob` (O/B, unused unless heat pump) | switch, `restore_mode: ALWAYS_OFF`, `internal: true`; only the logic package drives them | `sim` template switches now, Unit 4-Relay later |
 | `main_thermostat` | climate (thermostat) | logic package |
 
 ESPHome climate works in °C internally. Show °F in the UI and HA (Dang is in the US).
