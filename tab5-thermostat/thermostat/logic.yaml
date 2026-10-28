@@ -35,9 +35,9 @@ globals:
     type: bool
     restore_value: false
     initial_value: "false"
-  # The user's climate mode, held while the Clear button walks the thermostat through Off.
-  - id: g_clear_saved_mode
-    type: int
+  # millis() of the latest trip; the Clear button waits the minimum off time from here.
+  - id: g_interlock_trip_ms
+    type: uint32_t
     restore_value: false
     initial_value: "0"
   # Auto changeover lockout in seconds (changeover_lockout x timer_unit_s), for Task 9.
@@ -172,24 +172,36 @@ binary_sensor:
 
 # Interlock layer 3 (spec, Safety 3): an independent watchdog. The actions never turn W and Y
 # on together (each turns the other relay off first), so both on means something else switched
-# a relay. Cut both at once, ignoring minimum run times, and latch.
+# a relay. Cut both at once, ignoring minimum run times, record the trip time and latch. While
+# latched it keeps W and Y off on every tick (whatever the action guards do) and drops G unless
+# the fan mode is On, so a trip mid-cooling doesn't leave the blower running with fan Auto.
+# Written as one lambda so a latched tick that finds nothing to do touches nothing (no log noise).
 interval:
   - interval: 100ms
     then:
-      - if:
-          condition:
-            lambda: return id(relay_heat).state && id(relay_cool).state;
-          then:
-            - switch.turn_off: relay_heat
-            - switch.turn_off: relay_cool
-            - lambda: |-
-                id(g_interlock_latched) = true;
-                ESP_LOGE("interlock", "W and Y both on: both relays cut, interlock fault latched");
+      - lambda: |-
+          const bool w = id(relay_heat).state, y = id(relay_cool).state;
+          if (w && y) {
+            id(g_interlock_trip_ms) = millis();  // a re-trip while waiting restarts the wait
+            id(g_interlock_latched) = true;
+            ESP_LOGE("interlock", "W and Y both on: both relays cut, interlock fault latched");
+          }
+          if (id(g_interlock_latched)) {
+            if (id(relay_heat).state) id(relay_heat).turn_off();
+            if (id(relay_cool).state) id(relay_cool).turn_off();
+            if (id(relay_fan).state && id(main_thermostat).fan_mode != climate::CLIMATE_FAN_ON)
+              id(relay_fan).turn_off();
+          }
 
 script:
-  # Clear button: the thermostat still believes it is heating or cooling (the watchdog cut the
-  # relays behind its back) and would not run its action again. Walk it through Off, which
-  # respects its minimum run time and restarts its off timers, then put the user's mode back.
+  # Clear button. Never changes the climate mode. The latch (and interlock_fault) stays on until
+  # the larger of the two minimum off times has passed since the trip: either relay may have been
+  # the forced one, and a compressor must not restart early. Then the latch drops. The
+  # thermostat still believes it is HEATING or COOLING if it wanted a call while latched (its
+  # actions were guarded, or the watchdog cut the relays behind its back) and would never run its
+  # action again, because refresh() does nothing when the computed action is unchanged. So reset
+  # that belief to IDLE and refresh: it re-evaluates and runs the right action (or, if a minimum
+  # run timer is still counting, when that timer ends).
   - id: clear_interlock
     mode: single
     then:
@@ -197,20 +209,20 @@ script:
           condition:
             lambda: return id(g_interlock_latched);
           then:
-            - lambda: |-
-                id(g_clear_saved_mode) = (int) id(main_thermostat).mode;
-                id(main_thermostat).make_call().set_mode(climate::CLIMATE_MODE_OFF).perform();
-                id(g_interlock_latched) = false;
             - wait_until:
                 condition:
                   lambda: |-
-                    return id(main_thermostat).action == climate::CLIMATE_ACTION_OFF ||
-                           id(main_thermostat).action == climate::CLIMATE_ACTION_IDLE;
-                timeout: 30min
+                    const uint32_t wait_ms =
+                        (uint32_t) lroundf(fmaxf(id(heat_min_off).state, id(cool_min_off).state) *
+                                           ${timer_unit_s}) * 1000u;
+                    return (uint32_t) (millis() - id(g_interlock_trip_ms)) >= wait_ms;
             - lambda: |-
-                if (id(main_thermostat).mode == climate::CLIMATE_MODE_OFF) {
-                  id(main_thermostat).make_call()
-                      .set_mode((climate::ClimateMode) id(g_clear_saved_mode)).perform();
+                id(g_interlock_latched) = false;
+                auto *t = id(main_thermostat);
+                if ((t->action == climate::CLIMATE_ACTION_HEATING && !id(relay_heat).state) ||
+                    (t->action == climate::CLIMATE_ACTION_COOLING && !id(relay_cool).state)) {
+                  t->action = climate::CLIMATE_ACTION_IDLE;
+                  t->refresh();
                 }
 
 button:
