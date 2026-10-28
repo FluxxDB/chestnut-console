@@ -83,6 +83,10 @@ Dang did not ask for a fast-forward mode for playing with it: the browser sim ru
   - **Heat:** heat to the effective target.
   - **Cool:** cool to the effective target.
   - **Auto:** low = target − 1°F, high = target + 1°F. In Eco without a hold, both move out by N. Each side keeps a small deadband and overrun, so a target of 72°F reads as "heat below about 71, cool above about 73" (PC relaying Dang).
+- **A mode change mid-run** (ESPHome behaviour, kept; the screen's "Finishing up" line relies on it):
+  - `main_thermostat` reports the new mode at once, but the action stays HEATING (or COOLING) until that call's minimum run ends. Switching to Off works the same way.
+  - Then it passes through IDLE (for `min_idle_time`). The new call starts at the next update once its own minimum off time allows; `call_wait_reason` names the wait meanwhile.
+  - A *manual* Heat→Cool switch gets no 30-minute changeover lockout, only the AC's minimum off. The lockout is for Auto's own switching. (Mac call.)
 - **"Auto" is ESPHome's `HEAT_COOL` mode** (heat or cool between setpoints). ESPHome's `AUTO` mode is not offered.
 - **What HA's card shows** (checked in HA's ESPHome integration, `climate.py` on HA `dev`). ESPHome marks this climate as *supporting* two setpoints, not *requiring* them. So HA's card shows **one number in Heat and Cool** (the effective target) and a **narrow range in Auto**. **Dang (Q1): the range in Auto is fine.** Stock ESPHome thermostat, no C++ wrapper.
 - **Auto changeover lockout:** after a heat call ends, no cool call for at least 30 minutes, and the other way around. It's editable within 10–120 min (Mac call). This stops ping-ponging on top of ESPHome's forced pass through idle.
