@@ -1,0 +1,50 @@
+# Chestnut Console: middle-floor thermostat on an M5Stack Tab5.
+# Milestone 1: Wi-Fi, Home Assistant API, local web page, display + touch smoke test.
+
+substitutions:
+  name: tab5-thermostat
+  friendly_name: Middle Floor Thermostat
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.10.0
+
+packages:
+  board: !include hardware/tab5-base.yaml
+  # Use the line matching the driver IC printed on the sticker on the back of the Tab5
+  # (just above the Espressif logo). Exactly one must be active.
+  display: !include hardware/display-ili9881c.yaml
+  # display: !include hardware/display-st7123.yaml
+  # display: !include hardware/display-st7121.yaml
+  ui: !include ui/hello.yaml
+
+wifi:
+  # The Tab5's radio is 2.4 GHz only.
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # If Wi-Fi fails, the Tab5 opens its own hotspot for setup.
+  ap:
+    ssid: "Tab5 Thermostat Fallback"
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  # Over-the-air updates reuse the API encryption key above.
+  - platform: esphome
+
+# Phone-friendly control page served by the Tab5 itself: http://<tab5-ip>/
+web_server:
+  port: 80
+  version: 3
+  local: true
+  ota: false
+  auth:
+    type: digest
+    username: !secret web_username
+    password: !secret web_password

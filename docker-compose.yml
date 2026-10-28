@@ -1,0 +1,39 @@
+# Chestnut Console: Home Assistant + ESPHome Device Builder.
+# The same file runs on the dev PC now and on the Ubuntu server VM at the house later.
+#
+#   docker compose up -d        start both
+#   docker compose down         stop both
+#
+# Home Assistant:  http://<host>:8123
+# ESPHome:         http://<host>:6052
+
+name: chestnut-console
+
+services:
+  homeassistant:
+    image: homeassistant/home-assistant:2026.10.4
+    container_name: homeassistant
+    # Host networking lets HA discover and talk to devices on the LAN directly.
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      TZ: America/New_York
+    volumes:
+      - ./home-assistant/config:/config
+      - /etc/localtime:/etc/localtime:ro
+
+  esphome:
+    image: esphome/esphome:2026.10.1
+    container_name: esphome
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      TZ: America/New_York
+      ESPHOME_DASHBOARD_USE_PING: "true"
+    volumes:
+      - ./tab5-thermostat:/config
+      # Toolchain and build cache, so rebuilding the container doesn't re-download gigabytes.
+      - esphome-cache:/cache
+
+volumes:
+  esphome-cache:

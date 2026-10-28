@@ -1,0 +1,173 @@
+# M5Stack Tab5 board support: everything except the display/touch revision.
+# Based on the ESPHome devices page config (devices.esphome.io/devices/m5stack-tab5).
+# Audio (ES8388/ES7210) and camera are left out until something needs them.
+
+esphome:
+  on_boot:
+    then:
+      # Read the battery-backed RTC once at boot so the clock is right before Wi-Fi/SNTP.
+      - rx8130.read_time:
+
+esp32:
+  variant: esp32p4
+  flash_size: 16MB
+  # ESPHome's 400MHz default for the P4 is experimental and may not boot.
+  cpu_frequency: 360MHZ
+  framework:
+    type: esp-idf
+    advanced:
+      enable_idf_experimental_features: true
+
+# Wi-Fi comes from the ESP32-C6 co-processor over SDIO.
+esp32_hosted:
+  variant: esp32c6
+  active_high: true
+  clk_pin: GPIO12
+  cmd_pin: GPIO13
+  d0_pin: GPIO11
+  d1_pin: GPIO10
+  d2_pin: GPIO9
+  d3_pin: GPIO8
+  reset_pin: GPIO15
+  slot: 1
+
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+
+psram:
+  mode: hex
+  speed: 200MHz
+
+i2c:
+  - id: bsp_bus
+    sda: GPIO31
+    scl: GPIO32
+    frequency: 400kHz
+    # Logs every I2C address at boot. Touch at 0x14 = original revision (GT911);
+    # 0x55 = newer revision (ST7123/ST7121).
+    scan: true
+
+esp_ldo:
+  - voltage: 2.5V
+    channel: 3
+
+pi4ioe5v6408:
+  - id: pi4ioe1
+    address: 0x43
+    # 0: O - wifi_antenna_int_ext
+    # 1: O - speaker_enable
+    # 2: O - external_5v_power
+    # 3: NC
+    # 4: O - lcd reset
+    # 5: O - touch panel reset
+    # 6: O - camera reset
+    # 7: I - headphone detect
+  - id: pi4ioe2
+    address: 0x44
+    # 0: O - wifi_power
+    # 1: NC
+    # 2: NC
+    # 3: O - usb_5v_power
+    # 4: O - poweroff pulse
+    # 5: O - quick charge enable (inverted)
+    # 6: I - charging status
+    # 7: O - charge enable
+
+output:
+  - platform: ledc
+    pin: GPIO22
+    id: backlight_pwm
+    frequency: 1000Hz
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Display Backlight"
+    id: backlight
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 250ms
+
+time:
+  - platform: rx8130
+    id: rtc_time
+    i2c_id: bsp_bus
+    update_interval: never
+    timezone: America/New_York
+  - platform: sntp
+    id: sntp_time
+    timezone: America/New_York
+    on_time_sync:
+      then:
+        # Keep the RTC accurate for boots without network.
+        - rx8130.write_time:
+
+switch:
+  - platform: gpio
+    id: wifi_power
+    name: "WiFi Power"
+    entity_category: config
+    pin:
+      pi4ioe5v6408: pi4ioe2
+      number: 0
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: usb_5v_power
+    name: "USB Power"
+    entity_category: config
+    pin:
+      pi4ioe5v6408: pi4ioe2
+      number: 3
+  - platform: gpio
+    id: quick_charge
+    name: "Quick Charge"
+    entity_category: config
+    pin:
+      pi4ioe5v6408: pi4ioe2
+      number: 5
+      inverted: true
+  - platform: gpio
+    id: charge_enable
+    name: "Charge Enable"
+    entity_category: config
+    pin:
+      pi4ioe5v6408: pi4ioe2
+      number: 7
+    restore_mode: ALWAYS_ON
+  - platform: gpio
+    id: wifi_antenna_int_ext
+    pin:
+      pi4ioe5v6408: pi4ioe1
+      number: 0
+  - platform: gpio
+    id: external_5v_power
+    name: "External 5V Power"
+    entity_category: config
+    pin:
+      pi4ioe5v6408: pi4ioe1
+      number: 2
+
+binary_sensor:
+  - platform: gpio
+    id: charging
+    name: "Charging Status"
+    entity_category: diagnostic
+    pin:
+      pi4ioe5v6408: pi4ioe2
+      number: 6
+      mode: INPUT_PULLDOWN
+
+sensor:
+  - platform: ina226
+    address: 0x41
+    adc_averaging: 16
+    max_current: 8.192A
+    shunt_resistance: 0.005ohm
+    bus_voltage:
+      id: battery_voltage
+      name: "Battery Voltage"
+      entity_category: diagnostic
+    current:
+      id: battery_current
+      # Positive means discharging, negative means charging
+      name: "Battery Current"
+      entity_category: diagnostic

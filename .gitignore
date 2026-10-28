@@ -1,0 +1,17 @@
+# Secrets (Wi-Fi, API keys, passwords). Copy secrets.yaml.example and fill it in locally.
+secrets.yaml
+
+# Home Assistant runtime state: database, logs, users, integrations (.storage).
+# Recreated on first run; only hand-written config is committed.
+home-assistant/config/*
+!home-assistant/config/configuration.yaml
+!home-assistant/config/automations.yaml
+!home-assistant/config/scripts.yaml
+!home-assistant/config/scenes.yaml
+
+# ESPHome build output
+tab5-thermostat/.esphome/
+tab5-thermostat/.pioenvs/
+tab5-thermostat/.piolibdeps/
+
+.DS_Store

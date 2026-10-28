@@ -1,0 +1,8 @@
+# Home Assistant config for Chestnut Console.
+# Users, integrations and devices are set up in the UI and live in .storage/ (not committed).
+
+default_config:
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml

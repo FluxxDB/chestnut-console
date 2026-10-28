@@ -1,0 +1,17 @@
+# Newer Tab5 revision: ST7121 integrated display + touch controller.
+# Some units labelled ST7123 actually have an ST7121: if the screen stays blank but touch
+# works with display-st7123.yaml, use this file instead.
+# The touch side is assumed to be compatible with the st7123 driver (unverified).
+
+display:
+  - platform: mipi_dsi
+    id: tab5_display
+    model: M5STACK-TAB5-ST7121
+    reset_pin:
+      pi4ioe5v6408: pi4ioe1
+      number: 4
+
+touchscreen:
+  - platform: st7123
+    id: touch
+    interrupt_pin: GPIO23
