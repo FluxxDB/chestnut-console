@@ -1,0 +1,83 @@
+# Console styles: the UI spec's color tokens as LVGL style definitions (light palette).
+# Every widget takes its colors from these, so a theme switch only re-colors the styles.
+
+lvgl:
+  style_definitions:
+    - id: st_page
+      bg_color: 0xE9ECF0
+      bg_opa: COVER
+      border_width: 0
+      radius: 0
+      pad_all: 0
+    - id: st_card
+      bg_color: 0xFFFFFF
+      bg_opa: COVER
+      border_color: 0xD3D8DE
+      border_width: 1
+      radius: 24
+      shadow_width: 0
+      pad_all: 0
+    - id: st_emph
+      bg_color: 0x1F232D
+      bg_opa: COVER
+      border_width: 0
+      radius: 24
+      shadow_width: 0
+      pad_all: 0
+    - id: st_hum
+      bg_color: 0xDFF9FF
+      bg_opa: COVER
+      border_color: 0xB8E6F2
+      border_width: 1
+      radius: 24
+      shadow_width: 0
+      pad_all: 0
+    - id: st_ebtn
+      bg_color: 0xF5F5F5
+      bg_opa: COVER
+      border_width: 0
+      radius: 16
+      shadow_width: 0
+      text_color: 0x181B22
+    - id: st_pill
+      bg_color: 0xEEF0F3
+      bg_opa: COVER
+      border_color: 0xD3D8DE
+      border_width: 1
+      radius: 999
+      shadow_width: 0
+      text_color: 0x181B22
+      pad_left: 22
+      pad_right: 22
+    - id: st_pill_sel
+      bg_color: 0xDBFFE7
+      border_color: 0x9FD9B4
+      text_color: 0x181B22
+    - id: st_ink
+      text_color: 0x181B22
+    - id: st_sub
+      text_color: 0x585C64
+    - id: st_on_emph
+      text_color: 0xFFFFFF
+    - id: st_on_emph_sub
+      text_color: 0xA3A6AB
+    - id: st_hum_text
+      text_color: 0x181B22
+    - id: st_rule
+      bg_color: 0xD9D9D9
+      bg_opa: COVER
+      border_width: 0
+      radius: 0
+    - id: st_banner
+      bg_color: 0xF8E645
+      bg_opa: COVER
+      border_width: 0
+      radius: 18
+      text_color: 0x181B22
+      pad_all: 22
+    - id: st_bare
+      bg_opa: TRANSP
+      border_width: 0
+      shadow_width: 0
+      pad_all: 0
+      radius: 0

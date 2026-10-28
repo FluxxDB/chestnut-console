@@ -1,0 +1,48 @@
+# Console fonts (UI spec: Inter for everything, Space Grotesk 500 for the title only).
+# Big sizes carry only the glyphs they show, to save flash.
+
+substitutions:
+  mdi_font_url: "https://github.com/Pictogrammers/pictogrammers.github.io/raw/main/@mdi/font/7.4.47/fonts/materialdesignicons-webfont.ttf"
+
+font:
+  - file: "gfonts://Space Grotesk@500"
+    id: f_title
+    size: 39
+    glyphs: "Main Thermost"
+  - file: "gfonts://Inter@400"
+    id: f_label
+    size: 23
+    glyphsets: [GF_Latin_Kernel]
+    glyphs: "°·–—"
+  - file: "gfonts://Inter@400"
+    id: f_small
+    size: 21
+    glyphsets: [GF_Latin_Kernel]
+    glyphs: "°·–—"
+  - file: "gfonts://Inter@400"
+    id: f_pill
+    size: 23
+    glyphsets: [GF_Latin_Kernel]
+  - file: "gfonts://Inter@400"
+    id: f_mid
+    size: 50
+    glyphs: "0123456789°%—–-+−"
+  - file: "gfonts://Inter@400"
+    id: f_target
+    size: 105
+    glyphs: "0123456789°—–-Of"
+  - file: "gfonts://Inter@400"
+    id: f_room
+    size: 164
+    glyphs: "0123456789—-"
+  - file: "gfonts://Inter@400"
+    id: f_deg
+    size: 100
+    glyphs: "°"
+  # Material Design Icons: moon, sun, cloud, water drop.
+  - file:
+      type: web
+      url: ${mdi_font_url}
+    id: f_icon
+    size: 30
+    glyphs: ["\U000F0594", "\U000F05A8", "\U000F0590", "\U000F058C"]

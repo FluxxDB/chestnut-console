@@ -19,7 +19,11 @@ packages:
   # display: !include hardware/display-ili9881c.yaml
   display: !include hardware/display-st7123.yaml
   # display: !include hardware/display-st7121.yaml
-  ui: !include ui/hello.yaml
+  ui_fonts: !include ui/fonts.yaml
+  ui_theme: !include ui/theme.yaml
+  ui_console: !include ui/console.yaml
+  # DEV ONLY until milestone 2 merges: stand-in for the thermostat logic (same entity ids).
+  contract: !include ui/dev/contract-stub.yaml
 
 wifi:
   # The Tab5's radio is 2.4 GHz only.

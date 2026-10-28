@@ -11,6 +11,9 @@ esphome:
 
 packages:
   contract: !include ../ui/dev/contract-stub.yaml
+  fonts: !include ../ui/fonts.yaml
+  theme: !include ../ui/theme.yaml
+  console: !include ../ui/console.yaml
 
 host:
 
@@ -52,12 +55,50 @@ light:
     output: backlight_out
     default_transition_length: 0s
 
-lvgl:
-  displays:
-    - tab5_display
-  touchscreens:
-    - touch
-  widgets:
-    - label:
-        align: CENTER
-        text: "preview ok"
+
+# Test-only: what the console's labels and pills say right now, as JSON (read by drive.py).
+text_sensor:
+  - platform: template
+    id: ui_snapshot
+    name: "UI Snapshot"
+    update_interval: 500ms
+    lambda: |-
+      auto txt = [](lv_obj_t *o) -> std::string { const char *s = lv_label_get_text(o); return s ? s : ""; };
+      auto child = [&](lv_obj_t *o) -> std::string { return txt(lv_obj_get_child(o, 0)); };
+      auto vis = [](lv_obj_t *o) -> std::string { return lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN) ? "0" : "1"; };
+      auto sel = [](lv_obj_t *o) -> std::string { return lv_obj_has_state(o, LV_STATE_CHECKED) ? "1" : "0"; };
+      std::string j = "{";
+      auto add = [&](const char *k, const std::string &v) {
+        std::string e;
+        for (char c : v) { if (c == '"' || c == '\\') e += '\\'; e += c; }
+        j += "\"" + std::string(k) + "\":\"" + e + "\",";
+      };
+      add("title", txt(id(lbl_title)));
+      add("date", txt(id(lbl_date)));
+      add("clock", txt(id(lbl_clock)));
+      add("sched", txt(id(lbl_sched)));
+      add("resume_visible", vis(id(btn_resume)));
+      add("inside", txt(id(lbl_inside)));
+      add("room", txt(id(lbl_room)));
+      add("status", txt(id(lbl_status)));
+      add("sub", txt(id(lbl_sub)));
+      add("hist_mid", txt(id(lbl_hist_mid)));
+      add("hist_visible", vis(id(obj_hist)));
+      add("banner_visible", vis(id(obj_banner)));
+      add("banner", txt(id(lbl_banner)));
+      add("tgt_label", txt(id(lbl_tgt_label)));
+      add("tgt_comfort", txt(id(lbl_tgt_comfort)));
+      add("target", txt(id(lbl_target)));
+      add("pm_visible", vis(id(btn_minus)));
+      add("out_temp", txt(id(lbl_out_temp)));
+      add("out_cond", txt(id(lbl_out_cond)));
+      add("hum", txt(id(lbl_hum)));
+      add("hum_cap", txt(id(lbl_hum_desc)));
+      add("mode_pills", child(id(btn_mode_off)) + "|" + child(id(btn_mode_heat)) + "|" + child(id(btn_mode_cool)) + "|" + child(id(btn_mode_auto)));
+      add("mode_sel", sel(id(btn_mode_off)) + sel(id(btn_mode_heat)) + sel(id(btn_mode_cool)) + sel(id(btn_mode_auto)));
+      add("fan_pills", child(id(btn_fan_auto)) + "|" + child(id(btn_fan_on)));
+      add("fan_sel", sel(id(btn_fan_auto)) + sel(id(btn_fan_on)));
+      add("lvl_pills", child(id(btn_lvl_comfort)) + "|" + child(id(btn_lvl_eco)));
+      add("lvl_sel", sel(id(btn_lvl_comfort)) + sel(id(btn_lvl_eco)));
+      j.back() = '}';
+      return j;
