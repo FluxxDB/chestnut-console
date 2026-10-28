@@ -14,8 +14,8 @@ packages:
   board: !include hardware/tab5-base.yaml
   # Use the line matching the driver IC printed on the sticker on the back of the Tab5
   # (just above the Espressif logo). Exactly one must be active.
-  display: !include hardware/display-ili9881c.yaml
-  # display: !include hardware/display-st7123.yaml
+  # display: !include hardware/display-ili9881c.yaml
+  display: !include hardware/display-st7123.yaml
   # display: !include hardware/display-st7121.yaml
   ui: !include ui/hello.yaml
 
