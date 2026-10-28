@@ -126,7 +126,7 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 
 **Outside card**
 - Temperature and condition from a Home Assistant weather entity (the builder picks the onboarding default, likely `weather.forecast_home`).
-- Shows "—" when HA is unreachable.
+- Shows "—" (and a blank condition) whenever no Home Assistant API client is connected, rather than a stale value. HA only resends an attribute when it changes, so a time-based staleness rule would blank valid readings.
 
 **Humidity card**
 - `room_humidity` in %.
@@ -143,13 +143,14 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 **Idle dimming** *(Dang)*
 - After 30 s without a touch, the backlight dims to ~10%.
 - **The first tap on a dimmed screen only wakes it**: the tap is swallowed and doesn't press anything. The screen returns to full brightness.
+- After a reboot the screen starts at full brightness. The backlight would otherwise restore its last level, usually the idle 10%.
 
 **Theme** *(Dang)*
 - The toggle switches light/dark immediately.
 - It also switches automatically: dark at sunset, light at sunrise, using ESPHome's `sun` component.
 - The house's latitude/longitude go in `secrets.yaml`. Never commit them: the repo is public.
 - A manual tap overrides the automatic choice until the next sunrise or sunset.
-- The current theme survives reboots.
+- The current theme survives reboots. Once the clock is valid after a boot, the theme catches up to the sun once, unless the toggle was used since boot (a power cut may have spanned sunset or sunrise).
 
 **Sensor fault** *(milestone 2: a bad sensor stops heating/cooling and raises an alert)*
 - The room temperature shows "—".
@@ -167,7 +168,7 @@ From the milestone 2 spec (`mac/thermostat-logic` @ cbeebb8, "Entities the scree
 |---|---|---|
 | Room temperature | `checked_temperature` (°F, the value the thermostat acts on); "—" when unknown | |
 | Status marker / word | `main_thermostat` action (heating / cooling / idle) and mode. Fan state from **`call_fan`**, never the climate action | |
-| Status subline | running: "to {target} · {N} min so far" (N from `action_since`); idle and off target: `call_wait_reason` (for example "Waiting · short-cycle protection"); idle and on target: "holding {target}"; mode Off: "System is off", or "System is off · fan on" when `call_fan` | |
+| Status subline | running: "to {target} · {N} min so far" (N timed on the screen from when it saw the action change: exact and offline. A float `action_since` is only ~128 s precise, so the screen doesn't read it); idle and off target: `call_wait_reason` (for example "Waiting · short-cycle protection"); idle and on target: "holding {target}"; mode Off: "System is off", or "System is off · fan on" when `call_fan` | |
 | Big target number | `effective_target`; in Auto with Eco and no hold, "`effective_low`–`effective_high`" | `set_target` ±1, clamped 50–90 (debounced). Milestone 2 makes this a hold. |
 | Target label | `comfort_level`: "Comfort target" or "Eco target", plus "Comfort {comfort_target}°" in small text while Eco | |
 | Comfort / Eco pills | `comfort_level` (select) | `comfort_level` (milestone 2 makes a manual change a hold) |
@@ -176,7 +177,7 @@ From the milestone 2 spec (`mac/thermostat-logic` @ cbeebb8, "Entities the scree
 | Schedule status (top bar) | `schedule_status` (the ready-made text, used as is); `schedule_hold` controls the Resume pill; `schedule_enabled` off: "Schedule off" with no pill | `resume_schedule` |
 | Temperature line | samples of `checked_temperature`; the dashed line is `effective_target` (the band centre in Auto) | |
 | Humidity | `room_humidity`; "—" when unknown | |
-| Outside | HA weather entity, imported; "—" when HA is unreachable | |
+| Outside | HA weather entity `weather.forecast_home`, imported; "—" when no HA client is connected | |
 | Sensor fault banner | `sensor_fault` | |
 | Interlock fault banner | `interlock_fault` | none on the wall *(my call: it's a latched safety fault; clear it from HA or the web page with `clear_interlock_fault`)* |
 

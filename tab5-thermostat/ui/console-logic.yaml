@@ -5,9 +5,24 @@
 
 substitutions:
   hist_sample_interval: 10min
+  hist_points: "72"
+  # One 'minute' of the running counter, in ms (the preview shortens it for tests).
+  action_minute_ms: "60000"
   # Dim the backlight after this long without a touch.
   idle_timeout: 30s
   hist_sample_seconds: "600"
+
+esphome:
+  on_boot:
+    # After the light restores its saved level (its own, earlier setup stage), well before
+    # the late -100 stage: the screen is bright as soon as it shows anything.
+    - priority: 200
+      then:
+        # The backlight restores its last level, which is usually the idle 10%: start bright.
+        - light.turn_on:
+            id: backlight
+            brightness: 100%
+            transition_length: 0s
 
 lvgl:
   on_idle:
@@ -26,12 +41,23 @@ globals:
     initial_value: "-1"
   # Room temperature samples for the history line: 72 x 10 min = 12 h, oldest first.
   - id: ui_hist
-    type: std::array<float, 72>
+    type: std::array<float, ${hist_points}>
   - id: ui_hist_n
     type: int
     initial_value: "0"
   - id: ui_hist_start
     type: time_t
+    initial_value: "0"
+  # Bumped on every sample, so a full ring still redraws (a full ring keeps n at its size).
+  - id: ui_hist_gen
+    type: int
+    initial_value: "0"
+  # The climate action the screen last saw, and when (millis) it started.
+  - id: ui_action_last
+    type: int
+    initial_value: "-1"
+  - id: ui_action_start_ms
+    type: uint32_t
     initial_value: "0"
 
 sensor:
@@ -68,6 +94,7 @@ interval:
             id(ui_hist_start) = now.is_valid() ? now.timestamp : 0;
           }
           h[n++] = t;
+          id(ui_hist_gen)++;
 
 script:
   - id: ui_wake
@@ -100,11 +127,18 @@ script:
     mode: restart
     then:
       - delay: 1.5s
-      - number.set:
-          id: set_target
-          value: !lambda "return id(ui_pending_target);"
-      # Keep showing the sent value until milestone 2's effective_target catches up.
-      - delay: 1s
+      # A burst that ends where it started (+ then −) writes nothing: a write starts a hold.
+      - if:
+          condition:
+            lambda: |-
+              float e = id(effective_target).state;
+              return std::isnan(e) || id(ui_pending_target) != (int) lroundf(e);
+          then:
+            - number.set:
+                id: set_target
+                value: !lambda "return id(ui_pending_target);"
+            # Keep showing the sent value until milestone 2's effective_target catches up.
+            - delay: 1s
       - lambda: "id(ui_pending_target) = -1;"
 
   - id: ui_refresh
@@ -177,10 +211,14 @@ script:
             return target_txt;
           };
 
+          // Time the current action here: exact and offline (a float epoch is only ~128 s precise).
+          if ((int) action != id(ui_action_last)) {
+            id(ui_action_last) = (int) action;
+            id(ui_action_start_ms) = millis();
+          }
           std::string mins;
-          const float since = id(action_since).state;
-          if (now.is_valid() && !std::isnan(since)) {
-            long m = (long) ((now.timestamp - (time_t) since) / 60);
+          {
+            long m = (long) ((millis() - id(ui_action_start_ms)) / ${action_minute_ms});
             if (m < 1) mins = "just started";
             else if (m < 60) mins = std::to_string(m) + " min so far";
             else mins = std::to_string(m / 60) + " h " + std::to_string(m % 60) + " min so far";
@@ -221,12 +259,12 @@ script:
           else if (sfault) set_text(id(lbl_banner), "Temperature sensor problem. Heating and cooling are paused.");
 
           // History line, redrawn only when the samples or the target change.
-          static int drawn_n = -1;
+          static int drawn_gen = -1;
           static float drawn_tgt = -1000;
           const float line_tgt = band ? (lo + hi) / 2 : eff;
           const int n = id(ui_hist_n);
-          if (n != drawn_n || !(line_tgt == drawn_tgt || (std::isnan(line_tgt) && std::isnan(drawn_tgt)))) {
-            drawn_n = n;
+          if (id(ui_hist_gen) != drawn_gen || !(line_tgt == drawn_tgt || (std::isnan(line_tgt) && std::isnan(drawn_tgt)))) {
+            drawn_gen = id(ui_hist_gen);
             drawn_tgt = line_tgt;
             const auto &hs = id(ui_hist);
             float vmin = 1e9, vmax = -1e9;
@@ -235,7 +273,7 @@ script:
             vmin -= 1; vmax += 1;
             if (vmax - vmin < 4) { float mid = (vmax + vmin) / 2; vmin = mid - 2; vmax = mid + 2; }
             auto ypos = [&](float t) -> lv_value_precise_t { return 6 + (vmax - t) / (vmax - vmin) * 110; };
-            static lv_point_precise_t pts[72];
+            static lv_point_precise_t pts[${hist_points}];
             static lv_point_precise_t tpts[2];
             for (int i = 0; i < n; i++) {
               pts[i].x = n > 1 ? (lv_value_precise_t) (i * 624.0f / (n - 1)) : 0;
@@ -269,9 +307,11 @@ script:
           show(id(btn_plus), !off);
 
           // ── outside and humidity ──
-          set_text(id(lbl_out_temp), deg(id(out_temp).state));
+          // No Home Assistant client means no fresh weather: show "—", not a stale value.
+          const bool ha = api::global_api_server != nullptr && api::global_api_server->is_connected();
+          set_text(id(lbl_out_temp), ha ? deg(id(out_temp).state) : std::string("—"));
           {
-            std::string c = id(out_cond).state;
+            std::string c = ha ? id(out_cond).state : std::string("");
             static const std::map<std::string, std::string> names = {
                 {"clear-night", "Clear"}, {"sunny", "Sunny"}, {"partlycloudy", "Partly cloudy"},
                 {"cloudy", "Cloudy"}, {"fog", "Fog"}, {"rainy", "Rain"}, {"pouring", "Heavy rain"},

@@ -13,7 +13,9 @@ export PLATFORMIO_PACKAGES_DIR=/cache/platformio/packages
 export PLATFORMIO_CACHE_DIR=/cache/platformio/cache
 export ESPHOME_HOST_PREFIX=/cache/host
 
-if ! esphome compile "$yaml" > "$out/compile.log" 2>&1; then
+# Optional substitutions, e.g. SUBS="-s house_longitude 120".
+# shellcheck disable=SC2086
+if ! esphome ${SUBS:-} compile "$yaml" > "$out/compile.log" 2>&1; then
   tail -40 "$out/compile.log"; exit 1
 fi
 bin=$(sed -n "s/.*Successfully compiled program to path '\(.*\)'.*/\1/p" "$out/compile.log" | tail -1)

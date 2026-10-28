@@ -13,7 +13,9 @@ docker compose run --rm --no-deps esphome run tab5-thermostat.yaml --device "$ip
   || { tail -20 "$out/ota.log"; echo "FAIL: build/OTA"; exit 1; }
 grep -q "OTA successful" "$out/ota.log" || { echo "FAIL: no OTA success line"; exit 1; }
 sleep 15
-timeout 60 docker compose run --rm --no-deps esphome logs tab5-thermostat.yaml --device "$ip" 2>&1 \
+# The timeout runs inside the container: a host-side timeout only kills the docker client and
+# leaves the log stream attached to the Tab5, using up one of its few API connections.
+docker compose run --rm --no-deps --entrypoint timeout esphome 60 /entrypoint.sh logs tab5-thermostat.yaml --device "$ip" 2>&1 \
   | sed 's/\x1b\[[0-9;]*m//g' > "$out/logs.txt" || true
 grep -q "Template Switch 'Dark Theme'" "$out/logs.txt" || { echo "FAIL: console entities missing from the config dump"; exit 1; }
 grep -q "IP Address" "$out/logs.txt" || { echo "FAIL: IP Address sensor missing"; exit 1; }

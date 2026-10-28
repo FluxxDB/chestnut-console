@@ -3,10 +3,12 @@
 # Audio (ES8388/ES7210) and camera are left out until something needs them.
 
 esphome:
+  # A list item, not a mapping: packages' on_boot mappings merge into one automation
+  # (actions concatenated, last priority wins); list items stay separate.
   on_boot:
-    then:
-      # Read the battery-backed RTC once at boot so the clock is right before Wi-Fi/SNTP.
-      - rx8130.read_time:
+    - then:
+        # Read the battery-backed RTC once at boot so the clock is right before Wi-Fi/SNTP.
+        - rx8130.read_time:
 
 esp32:
   variant: esp32p4

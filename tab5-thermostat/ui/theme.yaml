@@ -104,6 +104,29 @@ switch:
     on_turn_off:
       - script.execute: ui_apply_theme
 
+globals:
+  # The theme followed the sun once since boot / the user picked one by hand since boot.
+  - id: ui_theme_synced
+    type: bool
+    initial_value: "false"
+  - id: ui_theme_manual
+    type: bool
+    initial_value: "false"
+
+interval:
+  # Once the clock is valid after boot, match the sun (a power cut may have spanned
+  # sunset or sunrise), unless the theme button was used since boot.
+  - interval: 2s
+    then:
+      - lambda: |-
+          if (id(ui_theme_synced) || id(ui_theme_manual)) return;
+          if (!id(sntp_time).now().is_valid()) return;
+          bool dark = !id(house_sun).is_above_horizon();
+          if (dark != id(ui_dark_theme).state) {
+            if (dark) id(ui_dark_theme).turn_on(); else id(ui_dark_theme).turn_off();
+          }
+          id(ui_theme_synced) = true;
+
 sun:
   id: house_sun
   time_id: sntp_time
@@ -117,9 +140,9 @@ sun:
 
 esphome:
   on_boot:
-    priority: -100
-    then:
-      - script.execute: ui_apply_theme
+    - priority: -100
+      then:
+        - script.execute: ui_apply_theme
 
 script:
   - id: ui_apply_theme

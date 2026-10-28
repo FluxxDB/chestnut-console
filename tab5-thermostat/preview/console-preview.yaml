@@ -10,9 +10,21 @@ substitutions:
   hist_sample_seconds: "1"
   # Short idle timeout so the dim/wake test runs fast.
   idle_timeout: 3s
+  # Small history ring and fast 'minutes' so the review tests run in seconds.
+  hist_points: "8"
+  action_minute_ms: "1000"
 
 esphome:
   name: console-preview
+  # Test-only: simulate a backlight restored at 10% after a reboot while dimmed
+  # (the console must bring it back to full brightness on boot).
+  on_boot:
+    - priority: 250
+      then:
+        - light.turn_on:
+            id: backlight
+            brightness: 10%
+            transition_length: 0s
 
 packages:
   contract: !include ../ui/dev/contract-stub.yaml
@@ -117,6 +129,15 @@ text_sensor:
         add("topbar_gap", std::to_string((int) (b.x1 - a.x2)));
         lv_obj_get_coords(id(lbl_room), &a); lv_obj_get_coords(id(lbl_room_deg), &b);
         add("room_deg_gap", std::to_string((int) (b.x1 - a.x2)));
+        lv_obj_get_coords(id(obj_marker), &a); lv_obj_get_coords(id(lbl_status), &b);
+        add("marker_gap", std::to_string((int) (b.x1 - a.x2)));
+        uint32_t np = lv_line_get_point_count(id(line_hist)->obj);
+        const lv_point_precise_t *lp = lv_line_get_points(id(line_hist)->obj);
+        add("sun_elev", std::to_string((int) id(house_sun).elevation()));
+        add("wake_visible", lv_obj_has_flag(id(obj_wake), LV_OBJ_FLAG_HIDDEN) ? "0" : "1");
+        add("uptime_ms", std::to_string(millis()));
+        add("theme_synced", id(ui_theme_synced) ? "1" : "0");
+        add("hist_last_y", (np > 0 && lp) ? std::to_string((int) lp[np - 1].y) : std::string(""));
       }
       {
         auto hexof = [](lv_color_t c) { char h[8]; snprintf(h, sizeof(h), "%06x", (unsigned) (lv_color_to_u32(c) & 0xFFFFFF)); return std::string(h); };

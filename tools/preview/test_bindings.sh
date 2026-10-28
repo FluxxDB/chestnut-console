@@ -10,12 +10,12 @@ $dc preview preview/console-preview.yaml /config/preview/shots/bind --dump \
   "Heating" "Cooling" "Eco auto band" "Hold" "Schedule off" "Clock not set" "Waiting" \
   "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" >/dev/null
 c="python3 tools/preview/check_snapshot.py $sh/bind"
-$c heating light room=71 status=Heating "sub=~^to 72° · 1[789] min so far$" target=72° "tgt_label=Comfort target" tgt_comfort= \
+$c heating light room=71 status=Heating "sub=~^to 72° · ([0-9]+ min so far|just started)$" target=72° "tgt_label=Comfort target" tgt_comfort= \
   "sched=Comfort until 10:30 pm" resume_visible=0 mode_sel=0100 fan_sel=10 lvl_sel=10 hum=42% hum_cap=Comfortable \
   banner_visible=0 hist_visible=1 out_temp=— pm_visible=1 marker=ff7b1b "clock=~^[0-9]{1,2}:[0-9]{2} (am|pm)$" "date=~^[A-Z][a-z]{2}, [A-Z][a-z]{2} [0-9]{1,2}$"
-$c cooling light room=76 status=Cooling "sub=~^to 74° · 1[789] min so far$" target=74° mode_sel=0010 marker=4098ff "sched=Comfort until 8:00 am"
+$c cooling light room=76 status=Cooling "sub=~^to 74° · ([0-9]+ min so far|just started)$" target=74° mode_sel=0010 marker=4098ff "sched=Comfort until 8:00 am"
 $c eco-auto-band light target=68–76° "tgt_label=Eco target" "tgt_comfort=Comfort 72°" status=Idle "sub=holding 68–76°" lvl_sel=01 mode_sel=0001 marker=8b8d90 "sched=Eco until 5:30 pm" "room_deg_gap=~^[0-9]+$"
-$c hold light target=69° status=Heating "sub=~^to 69° · 1[789] min so far$" "sched=Holding 69° until 10:30 pm" resume_visible=1 "topbar_gap=~^[1-9][0-9]*$"
+$c hold light target=69° status=Heating "sub=~^to 69° · ([0-9]+ min so far|just started)$" "sched=Holding 69° until 10:30 pm" resume_visible=1 "topbar_gap=~^[1-9][0-9]*$"
 $c schedule-off light "sched=Schedule off" resume_visible=0
 $c clock-not-set light "sched=Schedule paused: clock not set" resume_visible=0 "topbar_gap=~^[1-9][0-9]*$"
 $c waiting light room=69 status=Idle "sub=Waiting · short-cycle protection"

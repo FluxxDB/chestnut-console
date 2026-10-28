@@ -70,6 +70,10 @@ async def main() -> None:
     ap.add_argument("--post-wait", type=float, default=2.5, help="seconds after the clicks (debounce)")
     ap.add_argument("--pre-wait", type=float, default=0.0, help="seconds of no input before clicking (idle tests)")
     ap.add_argument("--no-wake", action="store_true", help="skip the neutral wake tap")
+    ap.add_argument("--no-theme", action="store_true", help="leave the theme switch alone (files still say -light)")
+    ap.add_argument("--ha-state", action="append", default=[], help="entity:attribute=state to send as Home Assistant")
+    ap.add_argument("--disconnect", type=float, default=0.0,
+                    help="after each capture: drop the API connection this long, reconnect, save <base>-reconnect.json")
     ap.add_argument("scenarios", nargs="*")
     args = ap.parse_intermixed_args()
 
@@ -90,6 +94,15 @@ async def main() -> None:
 
     await maybe_await(client.subscribe_states(on_state))
 
+    if args.ha_state:
+        # Act as Home Assistant: answer the device's state subscriptions.
+        await maybe_await(client.subscribe_home_assistant_states(lambda entity_id, attribute: None))
+        await asyncio.sleep(0.5)
+        for spec in args.ha_state:
+            ent, rest = spec.split(":", 1)
+            attr, val = rest.split("=", 1)
+            client.send_home_assistant_state(ent, attr or None, val)
+
     scenario = by_id.get("scenario")
     theme = by_id.get("dark_theme")
     snapshot = by_id.get("ui_snapshot")
@@ -99,7 +112,7 @@ async def main() -> None:
         if scenario and name != "default":
             client.select_command(scenario.key, name)
         for th in args.themes.split(","):
-            if theme:
+            if theme and not args.no_theme:
                 client.switch_command(theme.key, th == "dark")
             await asyncio.sleep(args.settle)
             for spec in args.number:
@@ -137,6 +150,20 @@ async def main() -> None:
                     data = dump_states(entities, states)
                     data.update({f"_writes.{k}": v for k, v in writes.items()})
                     json.dump(data, f, indent=2)
+            if args.disconnect and snapshot:
+                await client.disconnect()
+                await asyncio.sleep(args.disconnect)
+                client = APIClient("127.0.0.1", 6053, None)
+                await client.connect(login=True)
+                first: list = []
+                await maybe_await(client.subscribe_states(
+                    lambda s: first.append(s.state) if s.key == snapshot.key and not first else None))
+                for _ in range(50):
+                    if first:
+                        break
+                    await asyncio.sleep(0.1)
+                with open(f"{base}-reconnect.json", "w") as f:
+                    json.dump(json.loads(first[0]) if first else {}, f, indent=2)
             print(f"captured {base}.png")
 
     await client.disconnect()

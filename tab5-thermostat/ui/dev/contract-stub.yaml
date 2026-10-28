@@ -227,8 +227,8 @@ script:
 
 esphome:
   on_boot:
-    priority: -100
-    then:
-      - script.execute:
-          id: stub_apply_scenario
-          name: !lambda "return id(scenario).current_option();"
+    - priority: -100
+      then:
+        - script.execute:
+            id: stub_apply_scenario
+            name: !lambda "return id(scenario).current_option();"

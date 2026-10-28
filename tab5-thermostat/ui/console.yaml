@@ -115,6 +115,8 @@ lvgl:
                     - button:
                         id: btn_theme
                         on_click:
+                          # A manual choice holds until the next sunrise/sunset (no boot catch-up).
+                          - lambda: "id(ui_theme_manual) = true;"
                           - switch.toggle: ui_dark_theme
                         width: 66
                         height: 50
@@ -173,27 +175,37 @@ lvgl:
                               text_font: f_deg
                               styles: st_ink
                               pad_top: 14
-                    - label:
-                        id: lbl_status
+                    # Marker and word in one row, so the square stays next to short words too.
+                    - obj:
+                        id: obj_status_row
                         align: TOP_RIGHT
                         x: -32
                         y: 28
-                        text: "Heating"
-                        text_font: f_label
-                        styles: st_ink
-                    - obj:
-                        id: obj_marker
-                        align_to:
-                          id: lbl_status
-                          align: OUT_LEFT_MID
-                          x: -12
-                        width: 18
-                        height: 18
-                        radius: 4
-                        bg_color: 0xFF7B1B
-                        bg_opa: COVER
-                        border_width: 0
+                        width: SIZE_CONTENT
+                        height: SIZE_CONTENT
+                        styles: st_bare
+                        scrollable: false
                         clickable: false
+                        layout:
+                          type: flex
+                          flex_flow: ROW
+                          flex_align_cross: CENTER
+                          pad_column: 12
+                        widgets:
+                          - obj:
+                              id: obj_marker
+                              width: 18
+                              height: 18
+                              radius: 4
+                              bg_color: 0xFF7B1B
+                              bg_opa: COVER
+                              border_width: 0
+                              clickable: false
+                          - label:
+                              id: lbl_status
+                              text: "Heating"
+                              text_font: f_label
+                              styles: st_ink
                     - label:
                         id: lbl_sub
                         align: TOP_RIGHT
