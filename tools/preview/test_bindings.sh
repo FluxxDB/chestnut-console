@@ -32,7 +32,7 @@ $c interlock-while-heating light status=Paused sub= marker=8b8d90 banner_visible
 # furnace still running doesn't look like a stuck relay (mac-chestnut-console's suggestion).
 # M2's two holds (mac-chestnut-console): Comfort/Eco pressed by hand is a level hold, and Eco keeps
 # widening Auto's range; − / + is a temperature hold at one number (low/high just ±1 around it).
-$c eco-hold-in-auto light target=67–77° "tgt_label=Eco target" "sched=Holding Eco until 10:30 pm" resume_visible=1
+$c eco-hold-in-auto light target=67–77° "tgt_label=Eco target" "sched=Holding Eco until 10:30 pm" resume_visible=1 "topbar_gap=~^[1-9][0-9]*$"
 $c temperature-hold-in-auto light target=70° "sched=Holding 70° until 10:30 pm" resume_visible=1
 $c sensor-fault-mid-run light status=Paused "sub=Finishing up · stops soon" marker=8b8d90 banner_visible=1
 # Debounce: 5 quick taps on + from 72 -> one write of 77.
