@@ -35,5 +35,17 @@ services:
       # Toolchain and build cache, so rebuilding the container doesn't re-download gigabytes.
       - esphome-cache:/cache
 
+  # Dev only: desktop preview of the console (ESPHome host + SDL under Xvfb).
+  #   docker compose --profile dev run --rm preview <yaml> <outdir> [scenario ...]
+  preview:
+    build: tools/preview
+    image: chestnut-preview
+    profiles: [dev]
+    volumes:
+      - ./tab5-thermostat:/config
+      - ./tools/preview:/tools:ro
+      - esphome-cache:/cache
+    entrypoint: ["/tools/shoot.sh"]
+
 volumes:
   esphome-cache:

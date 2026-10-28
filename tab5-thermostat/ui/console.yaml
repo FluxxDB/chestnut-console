@@ -1,0 +1,699 @@
+# The Main Thermostat console: one LVGL page, 1280x720 landscape (UI spec, "Layout").
+# Positions are device pixels: padding 26, gaps 18, top bar 50, controls strip 90,
+# columns 688 | 522. Colors come only from ui/theme.yaml styles. Text here is placeholder
+# until ui/console-logic.yaml binds it.
+
+lvgl:
+  id: lvgl_main
+  # Panel is natively portrait; the Tab5 sits landscape. Set in tab5-thermostat.yaml.
+  rotation: ${display_rotation}
+  displays:
+    - tab5_display
+  touchscreens:
+    - touch
+  default_font: f_label
+  # While the screen is dimmed or asleep, this layer covers everything, so the first tap only
+  # wakes the screen and never presses what's underneath (UI spec, idle stages). It is a 70%
+  # black scrim: the Tab5's backlight bottoms out above the in-use level, so dimming the
+  # backlight alone isn't visible.
+  top_layer:
+    widgets:
+      - obj:
+          id: obj_wake
+          x: 0
+          y: 0
+          width: 1280
+          height: 720
+          hidden: true
+          bg_color: 0x000000
+          bg_opa: 70%
+          border_width: 0
+          radius: 0
+          scrollable: false
+          on_press:
+            - script.execute: ui_wake
+  pages:
+    - id: page_console
+      # The console never scrolls (LVGL scrolled the screen at startup when it could).
+      scrollable: false
+      scrollbar_mode: "OFF"
+      widgets:
+        - obj:
+            id: bg_page
+            x: 0
+            y: 0
+            width: 1280
+            height: 720
+            styles: st_page
+            scrollable: false
+            clickable: false
+            widgets:
+              # ── Top bar ──────────────────────────────────────────────
+              - obj:
+                  id: top_left
+                  x: 26
+                  y: 26
+                  width: SIZE_CONTENT
+                  height: 50
+                  styles: st_bare
+                  scrollable: false
+                  clickable: false
+                  layout:
+                    type: flex
+                    flex_flow: ROW
+                    flex_align_cross: CENTER
+                    pad_column: 20
+                  widgets:
+                    - label:
+                        id: lbl_title
+                        text: "Main Thermostat"
+                        text_font: f_title
+                        styles: st_ink
+                    - label:
+                        id: lbl_date
+                        text: "Oct 28"
+                        text_font: f_small
+                        styles: st_sub
+              - obj:
+                  id: top_right
+                  x: 520
+                  y: 26
+                  width: 734
+                  height: 50
+                  styles: st_bare
+                  scrollable: false
+                  clickable: false
+                  layout:
+                    type: flex
+                    flex_flow: ROW
+                    flex_align_main: END
+                    flex_align_cross: CENTER
+                    pad_column: 18
+                  widgets:
+                    - label:
+                        id: lbl_sched
+                        text: "Return · Comfort until 10:30 pm"
+                        text_font: f_small
+                        styles: st_sub
+                    - button:
+                        id: btn_resume
+                        pad_left: 16
+                        pad_right: 16
+                        on_click:
+                          - button.press: resume_schedule
+                        height: 44
+                        hidden: true
+                        styles: st_pill
+                        checked:
+                          styles: st_pill_sel
+                        state:
+                          checked: true
+                        widgets:
+                          - label:
+                              align: CENTER
+                              text: "Resume"
+                              text_font: f_small
+                    - label:
+                        id: lbl_clock
+                        text: "7:42 pm"
+                        text_font: f_label
+                        styles: st_ink
+                    - button:
+                        id: btn_theme
+                        on_click:
+                          # A manual choice holds until the next sunrise/sunset (no boot catch-up).
+                          - lambda: "id(ui_theme_manual) = true;"
+                          - switch.toggle: ui_dark_theme
+                        width: 66
+                        height: 50
+                        styles: st_pill
+                        pad_left: 0
+                        pad_right: 0
+                        widgets:
+                          - label:
+                              id: lbl_theme_icon
+                              align: CENTER
+                              text: "\U000F0594"
+                              text_font: f_icon
+
+              # ── Room card ────────────────────────────────────────────
+              - obj:
+                  id: card_room
+                  x: 26
+                  y: 94
+                  width: 688
+                  height: 492
+                  styles: st_card
+                  scrollable: false
+                  clickable: false
+                  widgets:
+                    - label:
+                        id: lbl_inside
+                        x: 32
+                        y: 28
+                        text: "Inside now"
+                        styles: st_sub
+                    # Number and degree sign in a row, so the ° follows the number's width.
+                    - obj:
+                        id: obj_room_row
+                        x: 26
+                        y: 62
+                        width: SIZE_CONTENT
+                        height: SIZE_CONTENT
+                        styles: st_bare
+                        scrollable: false
+                        clickable: false
+                        layout:
+                          type: flex
+                          flex_flow: ROW
+                          flex_align_cross: START
+                          pad_column: 2
+                        widgets:
+                          - label:
+                              id: lbl_room
+                              text: "71"
+                              text_font: f_room
+                              text_letter_space: -7
+                              styles: st_ink
+                          - label:
+                              id: lbl_room_deg
+                              text: "°"
+                              text_font: f_deg
+                              styles: st_ink
+                              pad_top: 14
+                    # Marker and word in one row, so the square stays next to short words too.
+                    - obj:
+                        id: obj_status_row
+                        align: TOP_RIGHT
+                        x: -32
+                        y: 28
+                        width: SIZE_CONTENT
+                        height: SIZE_CONTENT
+                        styles: st_bare
+                        scrollable: false
+                        clickable: false
+                        layout:
+                          type: flex
+                          flex_flow: ROW
+                          flex_align_cross: CENTER
+                          pad_column: 12
+                        widgets:
+                          - obj:
+                              id: obj_marker
+                              width: 18
+                              height: 18
+                              radius: 4
+                              bg_color: 0xFF7B1B
+                              bg_opa: COVER
+                              border_width: 0
+                              clickable: false
+                          - label:
+                              id: lbl_status
+                              text: "Heating"
+                              text_font: f_label
+                              styles: st_ink
+                    - label:
+                        id: lbl_sub
+                        align: TOP_RIGHT
+                        x: -32
+                        y: 72
+                        # Stays right of the big number; long reasons wrap onto a second line.
+                        width: 310
+                        long_mode: WRAP
+                        text_align: RIGHT
+                        text: "to 72° · 18 min so far"
+                        text_font: f_small
+                        styles: st_sub
+                    - obj:
+                        id: obj_hist
+                        x: 32
+                        y: 296
+                        width: 624
+                        height: 160
+                        styles: st_bare
+                        scrollable: false
+                        clickable: false
+                        widgets:
+                          - line:
+                              id: line_target
+                              points:
+                                - 0, 28
+                                - 624, 28
+                              line_width: 2
+                              line_dash_width: 6
+                              line_dash_gap: 8
+                              styles: st_line_target
+                          - line:
+                              id: line_hist
+                              points:
+                                - 0, 60
+                                - 52, 64
+                                - 104, 68
+                                - 156, 66
+                                - 208, 58
+                                - 260, 48
+                                - 312, 44
+                                - 364, 50
+                                - 416, 56
+                                - 468, 52
+                                - 520, 42
+                                - 572, 36
+                                - 624, 34
+                              line_width: 4
+                              line_rounded: true
+                              line_color: 0x4098FF
+                          - label:
+                              id: lbl_hist_start
+                              align: BOTTOM_LEFT
+                              text: "6 am"
+                              text_font: f_small
+                              styles: st_sub
+                          - label:
+                              id: lbl_hist_mid
+                              align: BOTTOM_MID
+                              text: "Dashed line: target"
+                              text_font: f_small
+                              styles: st_sub
+                          - label:
+                              id: lbl_hist_end
+                              align: BOTTOM_RIGHT
+                              text: "Now"
+                              text_font: f_small
+                              styles: st_sub
+                    - obj:
+                        id: obj_banner
+                        x: 32
+                        y: 296
+                        width: 624
+                        height: 160
+                        styles: st_banner
+                        hidden: true
+                        scrollable: false
+                        clickable: false
+                        widgets:
+                          - label:
+                              id: lbl_banner
+                              width: 580
+                              align: LEFT_MID
+                              long_mode: WRAP
+                              text: "Temperature sensor problem. Heating and cooling are paused."
+                              text_font: f_small
+
+              # ── Target card ──────────────────────────────────────────
+              - obj:
+                  id: card_target
+                  x: 732
+                  y: 94
+                  width: 522
+                  height: 270
+                  styles: st_emph
+                  scrollable: false
+                  clickable: false
+                  widgets:
+                    - label:
+                        id: lbl_tgt_label
+                        x: 30
+                        y: 24
+                        text: "Comfort target"
+                        styles: st_on_emph_sub
+                    - label:
+                        id: lbl_tgt_comfort
+                        align: TOP_RIGHT
+                        x: -30
+                        y: 26
+                        text: ""
+                        text_font: f_small
+                        styles: st_on_emph_sub
+                    - button:
+                        id: btn_minus
+                        on_click:
+                          - script.execute:
+                              id: ui_step_target
+                              delta: -1
+                        align: LEFT_MID
+                        x: 30
+                        y: 22
+                        width: 82
+                        height: 82
+                        styles: st_ebtn
+                        widgets:
+                          - label:
+                              align: CENTER
+                              text: "−"
+                              text_font: f_mid
+                    - label:
+                        id: lbl_target
+                        align: CENTER
+                        y: 22
+                        text: "72°"
+                        text_font: f_target
+                        text_letter_space: -4
+                        styles: st_on_emph
+                    # Auto + Eco with no hold shows the band edges ("68–76°"): too wide for 105 px.
+                    - label:
+                        id: lbl_target_range
+                        align: CENTER
+                        y: 22
+                        hidden: true
+                        text: "68–76°"
+                        text_font: f_range
+                        text_letter_space: -2
+                        styles: st_on_emph
+                    - button:
+                        id: btn_plus
+                        on_click:
+                          - script.execute:
+                              id: ui_step_target
+                              delta: 1
+                        align: RIGHT_MID
+                        x: -30
+                        y: 22
+                        width: 82
+                        height: 82
+                        styles: st_ebtn
+                        widgets:
+                          - label:
+                              align: CENTER
+                              text: "+"
+                              text_font: f_mid
+
+              # ── Outside and humidity cards ───────────────────────────
+              - obj:
+                  id: card_out
+                  x: 732
+                  y: 382
+                  width: 252
+                  height: 204
+                  styles: st_card
+                  scrollable: false
+                  clickable: false
+                  widgets:
+                    - label:
+                        id: lbl_out_icon
+                        x: 22
+                        y: 22
+                        text: "\U000F0590"
+                        text_font: f_icon
+                        styles: st_sub
+                    - label:
+                        x: 60
+                        y: 26
+                        text: "Outside"
+                        text_font: f_small
+                        styles: st_sub
+                    - label:
+                        id: lbl_out_temp
+                        x: 22
+                        y: 70
+                        text: "48°"
+                        text_font: f_mid
+                        styles: st_ink
+                    - label:
+                        id: lbl_out_cond
+                        x: 24
+                        y: 144
+                        text: "Cloudy"
+                        text_font: f_small
+                        styles: st_sub
+              - obj:
+                  id: card_hum
+                  x: 1002
+                  y: 382
+                  width: 252
+                  height: 204
+                  styles: st_hum
+                  scrollable: false
+                  clickable: false
+                  widgets:
+                    - label:
+                        id: lbl_hum_icon
+                        x: 22
+                        y: 22
+                        text: "\U000F058C"
+                        text_font: f_icon
+                        styles: st_hum_text
+                    - label:
+                        x: 60
+                        y: 26
+                        text: "Humidity"
+                        text_font: f_small
+                        styles: st_hum_text
+                    - label:
+                        id: lbl_hum
+                        x: 22
+                        y: 70
+                        text: "42%"
+                        text_font: f_mid
+                        styles: st_hum_text
+                    - label:
+                        id: lbl_hum_desc
+                        x: 24
+                        y: 144
+                        text: "Comfortable"
+                        text_font: f_small
+                        styles: st_hum_text
+
+              # ── Controls strip ───────────────────────────────────────
+              - obj:
+                  id: card_strip
+                  x: 26
+                  y: 604
+                  width: 1228
+                  height: 90
+                  styles: st_card
+                  scrollable: false
+                  clickable: false
+                  pad_left: 26
+                  pad_right: 26
+                  layout:
+                    type: flex
+                    flex_flow: ROW
+                    flex_align_main: SPACE_BETWEEN
+                    flex_align_cross: CENTER
+                    flex_align_track: CENTER
+                  widgets:
+                    - obj:
+                        id: grp_mode
+                        width: SIZE_CONTENT
+                        height: SIZE_CONTENT
+                        styles: st_bare
+                        scrollable: false
+                        clickable: false
+                        layout:
+                          type: flex
+                          flex_flow: ROW
+                          flex_align_cross: CENTER
+                          pad_column: 10
+                        widgets:
+                          - label:
+                              text: "Mode"
+                              text_font: f_small
+                              styles: st_sub
+                              pad_right: 6
+                          - button:
+                              id: btn_mode_off
+                              # Every pill sends only a real change: under M2, a re-sent mode or
+                              # level would start a hold (a kid's poke on the lit pill).
+                              on_click:
+                                - if:
+                                    condition:
+                                      lambda: "return id(main_thermostat).mode != climate::CLIMATE_MODE_OFF;"
+                                    then:
+                                      - climate.control:
+                                          id: main_thermostat
+                                          mode: "OFF"
+                              height: 55
+                              styles: st_pill
+                              checked:
+                                styles: st_pill_sel
+                              widgets:
+                                - label:
+                                    align: CENTER
+                                    text: "Off"
+                                    text_font: f_pill
+                          - button:
+                              id: btn_mode_heat
+                              on_click:
+                                - if:
+                                    condition:
+                                      lambda: "return id(main_thermostat).mode != climate::CLIMATE_MODE_HEAT;"
+                                    then:
+                                      - climate.control:
+                                          id: main_thermostat
+                                          mode: HEAT
+                              height: 55
+                              styles: st_pill
+                              checked:
+                                styles: st_pill_sel
+                              state:
+                                checked: true
+                              widgets:
+                                - label:
+                                    align: CENTER
+                                    text: "Heat"
+                                    text_font: f_pill
+                          - button:
+                              id: btn_mode_cool
+                              on_click:
+                                - if:
+                                    condition:
+                                      lambda: "return id(main_thermostat).mode != climate::CLIMATE_MODE_COOL;"
+                                    then:
+                                      - climate.control:
+                                          id: main_thermostat
+                                          mode: COOL
+                              height: 55
+                              styles: st_pill
+                              checked:
+                                styles: st_pill_sel
+                              widgets:
+                                - label:
+                                    align: CENTER
+                                    text: "Cool"
+                                    text_font: f_pill
+                          - button:
+                              id: btn_mode_auto
+                              on_click:
+                                - if:
+                                    condition:
+                                      lambda: "return id(main_thermostat).mode != climate::CLIMATE_MODE_HEAT_COOL;"
+                                    then:
+                                      - climate.control:
+                                          id: main_thermostat
+                                          mode: HEAT_COOL
+                              height: 55
+                              styles: st_pill
+                              checked:
+                                styles: st_pill_sel
+                              widgets:
+                                - label:
+                                    align: CENTER
+                                    text: "Auto"
+                                    text_font: f_pill
+                    - obj:
+                        width: 1
+                        height: 48
+                        styles: st_rule
+                        clickable: false
+                    - obj:
+                        id: grp_fan
+                        width: SIZE_CONTENT
+                        height: SIZE_CONTENT
+                        styles: st_bare
+                        scrollable: false
+                        clickable: false
+                        layout:
+                          type: flex
+                          flex_flow: ROW
+                          flex_align_cross: CENTER
+                          pad_column: 10
+                        widgets:
+                          - label:
+                              text: "Fan"
+                              text_font: f_small
+                              styles: st_sub
+                              pad_right: 6
+                          - button:
+                              id: btn_fan_auto
+                              on_click:
+                                - if:
+                                    condition:
+                                      lambda: "return id(main_thermostat).fan_mode != climate::CLIMATE_FAN_AUTO;"
+                                    then:
+                                      - climate.control:
+                                          id: main_thermostat
+                                          fan_mode: AUTO
+                              height: 55
+                              styles: st_pill
+                              checked:
+                                styles: st_pill_sel
+                              state:
+                                checked: true
+                              widgets:
+                                - label:
+                                    align: CENTER
+                                    text: "Auto"
+                                    text_font: f_pill
+                          - button:
+                              id: btn_fan_on
+                              on_click:
+                                - if:
+                                    condition:
+                                      lambda: "return id(main_thermostat).fan_mode != climate::CLIMATE_FAN_ON;"
+                                    then:
+                                      - climate.control:
+                                          id: main_thermostat
+                                          fan_mode: "ON"
+                              height: 55
+                              styles: st_pill
+                              checked:
+                                styles: st_pill_sel
+                              widgets:
+                                - label:
+                                    align: CENTER
+                                    text: "On"
+                                    text_font: f_pill
+                    - obj:
+                        width: 1
+                        height: 48
+                        styles: st_rule
+                        clickable: false
+                    - obj:
+                        id: grp_level
+                        width: SIZE_CONTENT
+                        height: SIZE_CONTENT
+                        styles: st_bare
+                        scrollable: false
+                        clickable: false
+                        layout:
+                          type: flex
+                          flex_flow: ROW
+                          flex_align_cross: CENTER
+                          pad_column: 10
+                        widgets:
+                          - button:
+                              id: btn_lvl_comfort
+                              on_click:
+                                - if:
+                                    condition:
+                                      not:
+                                        select.is:
+                                          id: comfort_level
+                                          options: Comfort
+                                    then:
+                                      - select.set:
+                                          id: comfort_level
+                                          option: Comfort
+                              height: 55
+                              styles: st_pill
+                              checked:
+                                styles: st_pill_sel
+                              state:
+                                checked: true
+                              widgets:
+                                - label:
+                                    align: CENTER
+                                    text: "Comfort"
+                                    text_font: f_pill
+                          - button:
+                              id: btn_lvl_eco
+                              on_click:
+                                - if:
+                                    condition:
+                                      not:
+                                        select.is:
+                                          id: comfort_level
+                                          options: Eco
+                                    then:
+                                      - select.set:
+                                          id: comfort_level
+                                          option: Eco
+                              height: 55
+                              styles: st_pill
+                              checked:
+                                styles: st_pill_sel
+                              widgets:
+                                - label:
+                                    align: CENTER
+                                    text: "Eco"
+                                    text_font: f_pill

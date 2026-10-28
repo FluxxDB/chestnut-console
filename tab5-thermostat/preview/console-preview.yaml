@@ -1,0 +1,282 @@
+# Desktop preview of the Main Thermostat console (dev only).
+# ESPHome host platform + an SDL window, run under Xvfb by tools/preview/shoot.sh.
+# Provides the same ids the Tab5 hardware packages do (tab5_display, touch, sntp_time, backlight),
+# so the ui/ packages compile unchanged.
+
+substitutions:
+  display_rotation: 0°
+  # Fast history sampling so screenshots show a line.
+  hist_sample_interval: 1s
+  hist_sample_seconds: "1"
+  # Short idle timeout so the dim/wake test runs fast.
+  idle_timeout: 3s
+  sleep_timeout: 6s
+  # Small history ring and fast 'minutes' so the review tests run in seconds.
+  hist_points: "8"
+  action_minute_ms: "1000"
+
+esphome:
+  name: console-preview
+  # Test-only: simulate a backlight restored at some other level (50%) after a reboot
+  # (the console must bring it back to full brightness on boot).
+  on_boot:
+    # Test-only: count LVGL's requests to redraw the status marker (test_review.sh, 13).
+    - priority: -200
+      then:
+        - lambda: |-
+            lv_display_add_event_cb(lv_display_get_default(), [](lv_event_t *e) {
+              auto *a = (const lv_area_t *) lv_event_get_param(e);
+              lv_area_t m;
+              lv_obj_get_coords(id(obj_marker), &m);
+              if (a->x1 >= m.x1 - 4 && a->y1 >= m.y1 - 4 && a->x2 <= m.x2 + 4 && a->y2 <= m.y2 + 4)
+                id(preview_marker_redraws) += 1;
+            }, LV_EVENT_INVALIDATE_AREA, nullptr);
+            // Test-only: how long after a tap its result shows (test_anim.sh): a pill lit or unlit,
+            // or the − / + number changed. The interval below watches for the change.
+            for (lv_obj_t *b : {id(btn_plus), id(btn_mode_heat), id(btn_mode_cool), id(btn_lvl_comfort), id(btn_lvl_eco)}) {
+              lv_obj_add_event_cb(b, [](lv_event_t *e) {
+                auto *o = (lv_obj_t *) lv_event_get_target(e);
+                id(preview_tap_before) = o == id(btn_plus) ? std::string(lv_label_get_text(id(lbl_target)))
+                                                         : std::string(lv_obj_has_state(o, LV_STATE_CHECKED) ? "1" : "0");
+              }, LV_EVENT_PRESSED, nullptr);
+              lv_obj_add_event_cb(b, [](lv_event_t *e) {
+                id(preview_tap_obj) = (lv_obj_t *) lv_event_get_target(e);
+                id(preview_tap_at) = millis();
+              }, LV_EVENT_CLICKED, nullptr);
+            }
+    - priority: 250
+      then:
+        - light.turn_on:
+            id: backlight
+            brightness: 50%
+            transition_length: 0s
+
+packages:
+  contract: !include ../ui/dev/contract-stub.yaml
+  fonts: !include ../ui/fonts.yaml
+  theme: !include ../ui/theme.yaml
+  console: !include ../ui/console.yaml
+  console_logic: !include ../ui/console-logic.yaml
+
+host:
+
+api:
+
+logger:
+
+time:
+  - platform: host
+    id: sntp_time
+    timezone: America/New_York
+
+display:
+  - platform: sdl
+    id: tab5_display
+    dimensions:
+      width: 1280
+      height: 720
+    auto_clear_enabled: false
+    update_interval: never
+
+touchscreen:
+  - platform: sdl
+    id: touch
+
+output:
+  - platform: template
+    id: backlight_out
+    type: float
+    write_action:
+      - logger.log:
+          format: "backlight=%.2f"
+          args: ["state"]
+
+light:
+  - platform: monochromatic
+    id: backlight
+    name: "Display Backlight"
+    output: backlight_out
+    default_transition_length: 0s
+
+
+globals:
+  - id: preview_marker_redraws
+    type: uint32_t
+    initial_value: "0"
+  - id: preview_tap_obj
+    type: lv_obj_t *
+    initial_value: "nullptr"
+  - id: preview_tap_before
+    type: std::string
+  - id: preview_tap_at
+    type: uint32_t
+    initial_value: "0"
+  - id: preview_tap_max_ms
+    type: uint32_t
+    initial_value: "0"
+  - id: preview_tap_count
+    type: uint32_t
+    initial_value: "0"
+
+interval:
+  - interval: 10ms
+    then:
+      - lambda: |-
+          lv_obj_t *o = id(preview_tap_obj);
+          if (o == nullptr) return;
+          std::string now = o == id(btn_plus) ? std::string(lv_label_get_text(id(lbl_target)))
+                                              : std::string(lv_obj_has_state(o, LV_STATE_CHECKED) ? "1" : "0");
+          uint32_t ms = millis() - id(preview_tap_at);
+          if (now == id(preview_tap_before) && ms < 1000) return;
+          id(preview_tap_max_ms) = std::max(id(preview_tap_max_ms), ms);
+          id(preview_tap_count) += 1;
+          id(preview_tap_obj) = nullptr;
+
+# Test-only: what the console's labels and pills say right now, as JSON (read by drive.py).
+text_sensor:
+  - platform: template
+    id: ui_snapshot
+    name: "UI Snapshot"
+    # Often enough to catch the dim/sleep fades mid-way (tools/preview/test_anim.sh).
+    update_interval: 200ms
+    lambda: |-
+      auto txt = [](lv_obj_t *o) -> std::string { const char *s = lv_label_get_text(o); return s ? s : ""; };
+      auto child = [&](lv_obj_t *o) -> std::string { return txt(lv_obj_get_child(o, 0)); };
+      auto vis = [](lv_obj_t *o) -> std::string { return lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN) ? "0" : "1"; };
+      auto sel = [](lv_obj_t *o) -> std::string { return lv_obj_has_state(o, LV_STATE_CHECKED) ? "1" : "0"; };
+      std::string j = "{";
+      auto add = [&](const char *k, const std::string &v) {
+        std::string e;
+        for (char c : v) { if (c == '"' || c == '\\') e += '\\'; e += c; }
+        j += "\"" + std::string(k) + "\":\"" + e + "\",";
+      };
+      add("title", txt(id(lbl_title)));
+      add("date", txt(id(lbl_date)));
+      add("clock", txt(id(lbl_clock)));
+      add("sched", txt(id(lbl_sched)));
+      add("resume_visible", vis(id(btn_resume)));
+      add("inside", txt(id(lbl_inside)));
+      add("room", txt(id(lbl_room)));
+      add("status", txt(id(lbl_status)));
+      add("sub", txt(id(lbl_sub)));
+      add("hist_mid", txt(id(lbl_hist_mid)));
+      add("hist_visible", vis(id(obj_hist)));
+      add("banner_visible", vis(id(obj_banner)));
+      add("banner", txt(id(lbl_banner)));
+      add("tgt_label", txt(id(lbl_tgt_label)));
+      add("tgt_comfort", txt(id(lbl_tgt_comfort)));
+      add("target", lv_obj_has_flag(id(lbl_target), LV_OBJ_FLAG_HIDDEN) ? txt(id(lbl_target_range)) : txt(id(lbl_target)));
+      {
+        char hex[8];
+        snprintf(hex, sizeof(hex), "%06x", (unsigned) (lv_color_to_u32(lv_obj_get_style_bg_color(id(obj_marker), LV_PART_MAIN)) & 0xFFFFFF));
+        add("marker", hex);
+      }
+      add("pm_visible", vis(id(btn_minus)));
+      add("out_temp", txt(id(lbl_out_temp)));
+      add("out_cond", txt(id(lbl_out_cond)));
+      add("marker_redraws", std::to_string(id(preview_marker_redraws)));
+      // The outside labels the last time no API client was connected (test_review.sh, 3): the client
+      // that reconnects to read this counts as Home Assistant again within one refresh.
+      {
+        static std::string temp_offline, cond_offline;
+        if (!api::global_api_server->is_connected()) {
+          temp_offline = txt(id(lbl_out_temp));
+          cond_offline = txt(id(lbl_out_cond));
+        }
+        add("out_temp_offline", temp_offline);
+        add("out_cond_offline", cond_offline);
+      }
+      add("hum", txt(id(lbl_hum)));
+      add("hum_cap", txt(id(lbl_hum_desc)));
+      add("mode_pills", child(id(btn_mode_off)) + "|" + child(id(btn_mode_heat)) + "|" + child(id(btn_mode_cool)) + "|" + child(id(btn_mode_auto)));
+      add("mode_sel", sel(id(btn_mode_off)) + sel(id(btn_mode_heat)) + sel(id(btn_mode_cool)) + sel(id(btn_mode_auto)));
+      add("fan_pills", child(id(btn_fan_auto)) + "|" + child(id(btn_fan_on)));
+      add("fan_sel", sel(id(btn_fan_auto)) + sel(id(btn_fan_on)));
+      add("lvl_pills", child(id(btn_lvl_comfort)) + "|" + child(id(btn_lvl_eco)));
+      add("lvl_sel", sel(id(btn_lvl_comfort)) + sel(id(btn_lvl_eco)));
+      {
+        lv_area_t a, b;
+        lv_obj_get_coords(id(lbl_date), &a); lv_obj_get_coords(id(lbl_sched), &b);
+        add("topbar_gap", std::to_string((int) (b.x1 - a.x2)));
+        lv_obj_get_coords(id(lbl_room), &a); lv_obj_get_coords(id(lbl_room_deg), &b);
+        add("room_deg_gap", std::to_string((int) (b.x1 - a.x2)));
+        lv_obj_get_coords(id(obj_marker), &a); lv_obj_get_coords(id(lbl_status), &b);
+        add("marker_gap", std::to_string((int) (b.x1 - a.x2)));
+        uint32_t np = lv_line_get_point_count(id(line_hist)->obj);
+        const lv_point_precise_t *lp = lv_line_get_points(id(line_hist)->obj);
+        add("sun_elev", std::to_string((int) id(house_sun).elevation()));
+        add("wake_visible", lv_obj_has_flag(id(obj_wake), LV_OBJ_FLAG_HIDDEN) ? "0" : "1");
+        add("uptime_ms", std::to_string(millis()));
+        add("paused", id(lvgl_main)->is_paused() ? "1" : "0");
+        add("scrim_opa", std::to_string((int) lv_obj_get_style_bg_opa(id(obj_wake), LV_PART_MAIN)));
+        // Press feedback (the console's own, not LVGL's default theme): the transition into a state as
+        // "<ms>[ press][ color]" (what it eases: the press-in, any colors), "none" if the console sets
+        // none; and the pressed-state width change.
+        auto local = [](lv_obj_t *o, lv_style_prop_t prop, lv_style_selector_t sel, lv_style_value_t *v) {
+          return lv_obj_get_local_style_prop(o, prop, v, LV_PART_MAIN | sel) == LV_STYLE_RES_FOUND;
+        };
+        auto trans = [&](lv_obj_t *o, lv_style_selector_t sel) -> std::string {
+          lv_style_value_t v;
+          if (!local(o, LV_STYLE_TRANSITION, sel, &v)) return "none";
+          auto *tr = (const lv_style_transition_dsc_t *) v.ptr;
+          bool press = false, color = false;
+          for (const lv_style_prop_t *p = tr->props; *p; p++) {
+            press |= *p == LV_STYLE_TRANSFORM_WIDTH;
+            color |= *p == LV_STYLE_BG_COLOR || *p == LV_STYLE_BORDER_COLOR || *p == LV_STYLE_TEXT_COLOR;
+          }
+          return std::to_string(tr->time) + (press ? " press" : "") + (color ? " color" : "");
+        };
+        auto shrink = [&](lv_obj_t *o) -> std::string {
+          lv_style_value_t v;
+          return local(o, LV_STYLE_TRANSFORM_WIDTH, LV_STATE_PRESSED, &v) ? std::to_string((int) v.num) : "";
+        };
+        add("btn_press_trans", trans(id(btn_plus), LV_STATE_PRESSED));
+        add("pill_press_trans", trans(id(btn_mode_heat), LV_STATE_PRESSED));
+        add("btn_release_trans", trans(id(btn_plus), LV_STATE_DEFAULT));
+        add("pill_release_trans", trans(id(btn_mode_heat), LV_STATE_DEFAULT));
+        add("tap_latency_max_ms", std::to_string(id(preview_tap_max_ms)));
+        add("tap_count", std::to_string(id(preview_tap_count)));
+        add("btn_press", shrink(id(btn_plus)));
+        add("pill_press", shrink(id(btn_mode_heat)));
+        // The backlight's level right now (mid-transition too), in percent.
+        {
+          auto &cv = id(backlight).current_values;
+          add("bl_now", std::to_string((int) roundf(100.0f * cv.get_state() * cv.get_brightness())));
+        }
+        auto font_info = [&](const char *k, lv_obj_t *o) {
+          const lv_font_t *f = lv_obj_get_style_text_font(o, LV_PART_MAIN);
+          lv_font_glyph_dsc_t g;
+          bool ok = lv_font_get_glyph_dsc(f, &g, 'a', 0);
+          add((std::string(k) + "_h").c_str(), std::to_string((int) lv_font_get_line_height(f)));
+          add((std::string(k) + "_bpp").c_str(), ok ? std::to_string((int) g.format) : std::string(""));
+        };
+        font_info("f_sched", id(lbl_sched));
+        font_info("f_hist", id(lbl_hist_mid));
+        font_info("f_status", id(lbl_status));
+        font_info("f_title", id(lbl_title));
+        lv_area_t r1, r2;
+        lv_obj_get_coords(id(lbl_sub), &r1); lv_obj_get_coords(id(obj_room_row), &r2);
+        bool ov = r1.x1 < r2.x2 && r2.x1 < r1.x2 && r1.y1 < r2.y2 && r2.y1 < r1.y2;
+        add("sub_room_overlap", ov ? "1" : "0");
+        lv_obj_get_coords(id(card_strip), &r1); lv_obj_get_coords(id(btn_lvl_eco), &r2);
+        add("strip_slack", std::to_string((int) (r1.x2 - r2.x2)));
+        lv_obj_get_coords(id(obj_banner), &r1); lv_obj_get_coords(id(lbl_banner), &r2);
+        add("banner_fits", (r2.y1 >= r1.y1 && r2.y2 <= r1.y2) ? "1" : "0");
+        add("theme_synced", id(ui_theme_synced) ? "1" : "0");
+        add("hist_last_y", (np > 0 && lp) ? std::to_string((int) lp[np - 1].y) : std::string(""));
+      }
+      {
+        auto hexof = [](lv_color_t c) { char h[8]; snprintf(h, sizeof(h), "%06x", (unsigned) (lv_color_to_u32(c) & 0xFFFFFF)); return std::string(h); };
+        add("c_page", hexof(lv_obj_get_style_bg_color(id(bg_page), LV_PART_MAIN)));
+        add("c_card", hexof(lv_obj_get_style_bg_color(id(card_room), LV_PART_MAIN)));
+        add("c_emph", hexof(lv_obj_get_style_bg_color(id(card_target), LV_PART_MAIN)));
+        add("c_hum", hexof(lv_obj_get_style_bg_color(id(card_hum), LV_PART_MAIN)));
+        add("c_pill", hexof(lv_obj_get_style_bg_color(id(btn_mode_off), LV_PART_MAIN)));
+        add("c_pill_sel", hexof(lv_obj_get_style_bg_color(id(btn_lvl_comfort), LV_PART_MAIN)));
+        add("c_pill_sel_text", hexof(lv_obj_get_style_text_color(id(btn_lvl_comfort), LV_PART_MAIN)));
+        add("c_ink", hexof(lv_obj_get_style_text_color(id(lbl_room), LV_PART_MAIN)));
+        add("c_sub", hexof(lv_obj_get_style_text_color(id(lbl_inside), LV_PART_MAIN)));
+        add("icon", strcmp(lv_label_get_text(id(lbl_theme_icon)), "\U000F05A8") == 0 ? "sun" : "moon");
+      }
+      j.back() = '}';
+      return j;

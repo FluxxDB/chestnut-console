@@ -1,0 +1,427 @@
+# Console behavior: binds ui/console.yaml widgets to the milestone 2 contract entities
+# (UI spec, "Entity bindings"). The screen only reads entities and writes set_target,
+# comfort_level, the climate's mode / fan mode, and resume_schedule.
+# A short refresh timer re-reads everything; labels are only redrawn when their text changes.
+
+substitutions:
+  hist_sample_interval: 10min
+  hist_points: "72"
+  # One 'minute' of the running counter, in ms (the preview shortens it for tests).
+  action_minute_ms: "60000"
+  # Idle stages: dim after idle_timeout without a touch, backlight off and LVGL paused after
+  # sleep_timeout. The thermostat logic keeps running either way.
+  idle_timeout: 30s
+  sleep_timeout: 60s
+  hist_sample_seconds: "600"
+
+esphome:
+  on_boot:
+    # After the light restores its saved level (its own, earlier setup stage), well before
+    # the late -100 stage: the screen is bright as soon as it shows anything.
+    - priority: 200
+      then:
+        - lambda: |-
+            // Taps. LVGL's default theme grows a pressed button and darkens it, easing in over
+            // 80 ms. The console's buttons press in by 3 px instead, at once, and ease back over
+            // 80 ms; colors switch at once (a pill lighting up). Right after a tap the screen
+            // refreshes, so its result shows without waiting for the 250 ms refresh.
+            static const lv_style_prop_t none[] = {LV_STYLE_PROP_INV};
+            static const lv_style_prop_t back[] = {
+                LV_STYLE_TRANSFORM_WIDTH, LV_STYLE_TRANSFORM_HEIGHT, LV_STYLE_RECOLOR_OPA, LV_STYLE_PROP_INV};
+            static lv_style_transition_dsc_t at_once, ease_back;
+            lv_style_transition_dsc_init(&at_once, none, lv_anim_path_linear, 0, 0, nullptr);
+            lv_style_transition_dsc_init(&ease_back, back, lv_anim_path_ease_out, 80, 0, nullptr);
+            for (lv_obj_t *b : {id(btn_minus), id(btn_plus), id(btn_theme), id(btn_resume),
+                                id(btn_mode_off), id(btn_mode_heat), id(btn_mode_cool), id(btn_mode_auto),
+                                id(btn_fan_auto), id(btn_fan_on), id(btn_lvl_comfort), id(btn_lvl_eco)}) {
+              lv_obj_set_style_transition(b, &ease_back, LV_PART_MAIN);
+              lv_obj_set_style_transition(b, &at_once, LV_STATE_PRESSED);
+              lv_obj_set_style_transform_width(b, -3, LV_STATE_PRESSED);
+              lv_obj_set_style_transform_height(b, -3, LV_STATE_PRESSED);
+              // Added after the widget's own on_click, so it runs after the tap's action.
+              lv_obj_add_event_cb(b, [](lv_event_t *) { id(ui_refresh).execute(); }, LV_EVENT_CLICKED, nullptr);
+            }
+        # The backlight restores whatever level it had (often dim or off): start at the in-use level.
+        - script.execute: ui_wake
+
+lvgl:
+  # The idle stages switch at once (Dang tried fades and preferred none).
+  on_idle:
+    - timeout: ${idle_timeout}
+      then:
+        - light.turn_on:
+            id: backlight
+            brightness: !lambda "return id(ui_bright_dim).state / 100.0f;"
+            transition_length: 0s
+        - lvgl.widget.show: obj_wake
+    - timeout: ${sleep_timeout}
+      then:
+        - lvgl.widget.show: obj_wake
+        - light.turn_off:
+            id: backlight
+            transition_length: 0s
+        - lvgl.pause:
+  # A touch on a paused screen resumes LVGL (resume_on_input); the wake catcher still swallows it.
+  on_resume:
+    - script.execute: ui_wake
+
+number:
+  # Backlight levels, adjustable from Home Assistant and the web page. These are light
+  # brightness values, which ESPHome gamma-corrects (x^2.8): 4% is about a tenth of the
+  # light of 10%, and a literal 1% would be dark.
+  - platform: template
+    id: ui_bright_active
+    name: "Screen Brightness"
+    icon: mdi:brightness-6
+    entity_category: config
+    unit_of_measurement: "%"
+    min_value: 1
+    max_value: 100
+    step: 1
+    initial_value: 10
+    optimistic: true
+    restore_value: true
+    on_value:
+      - if:
+          condition:
+            # Only apply a new in-use level right away while the screen is awake.
+            lambda: "return lv_obj_has_flag(id(obj_wake), LV_OBJ_FLAG_HIDDEN);"
+          then:
+            - script.execute: ui_wake
+  - platform: template
+    id: ui_bright_dim
+    name: "Dim Brightness"
+    icon: mdi:brightness-4
+    entity_category: config
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 1
+    initial_value: 4
+    optimistic: true
+    restore_value: true
+
+globals:
+  # A − / + value not yet sent to set_target (debounced), or -1.
+  - id: ui_pending_target
+    type: int
+    initial_value: "-1"
+  # Room temperature samples for the history line: 72 x 10 min = 12 h, oldest first.
+  - id: ui_hist
+    type: std::array<float, ${hist_points}>
+  - id: ui_hist_n
+    type: int
+    initial_value: "0"
+  - id: ui_hist_start
+    type: time_t
+    initial_value: "0"
+  # Bumped on every sample, so a full ring still redraws (a full ring keeps n at its size).
+  - id: ui_hist_gen
+    type: int
+    initial_value: "0"
+  # The climate action the screen last saw, and when (millis) it started.
+  - id: ui_action_last
+    type: int
+    initial_value: "-1"
+  - id: ui_action_start_ms
+    type: uint32_t
+    initial_value: "0"
+
+sensor:
+  # How long since the screen was last touched (drives dim/sleep): handy for diagnosing.
+  - platform: template
+    id: ui_idle_s
+    name: "Screen Idle Time"
+    entity_category: diagnostic
+    unit_of_measurement: s
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: "return lv_display_get_inactive_time(nullptr) / 1000.0f;"
+  - platform: homeassistant
+    id: out_temp
+    entity_id: weather.forecast_home
+    attribute: temperature
+    internal: true
+
+text_sensor:
+  - platform: homeassistant
+    id: out_cond
+    entity_id: weather.forecast_home
+    internal: true
+
+interval:
+  - interval: 250ms
+    then:
+      - script.execute: ui_refresh
+  - interval: ${hist_sample_interval}
+    then:
+      - lambda: |-
+          float t = id(checked_temperature).state;
+          if (std::isnan(t)) return;
+          auto &h = id(ui_hist);
+          int &n = id(ui_hist_n);
+          if (n == (int) h.size()) {
+            std::rotate(h.begin(), h.begin() + 1, h.end());
+            n--;
+            id(ui_hist_start) += ${hist_sample_seconds};
+          }
+          if (n == 0) {
+            auto now = id(sntp_time).now();
+            id(ui_hist_start) = now.is_valid() ? now.timestamp : 0;
+          }
+          h[n++] = t;
+          id(ui_hist_gen)++;
+
+script:
+  - id: ui_wake
+    then:
+      - lvgl.widget.hide: obj_wake
+      - if:
+          condition:
+            lvgl.is_paused:
+          then:
+            - lvgl.resume:
+      - light.turn_on:
+          id: backlight
+          brightness: !lambda "return id(ui_bright_active).state / 100.0f;"
+          transition_length: 0s
+
+  # − / +: step the shown target now, send it once the taps stop.
+  - id: ui_step_target
+    parameters:
+      delta: int
+    then:
+      - lambda: |-
+          if (id(main_thermostat).mode == climate::CLIMATE_MODE_OFF) return;
+          int base = id(ui_pending_target);
+          if (base < 0) {
+            float e = id(effective_target).state;
+            if (std::isnan(e)) e = id(comfort_target).state;
+            if (std::isnan(e)) return;
+            base = (int) lroundf(e);
+          }
+          id(ui_pending_target) = std::max(50, std::min(90, base + delta));
+      - script.execute: ui_refresh
+      - script.execute: ui_push_target
+
+  - id: ui_push_target
+    mode: restart
+    then:
+      - delay: 1.5s
+      # A burst that ends where it started (+ then −) writes nothing: a write starts a hold.
+      - if:
+          condition:
+            lambda: |-
+              float e = id(effective_target).state;
+              return std::isnan(e) || id(ui_pending_target) != (int) lroundf(e);
+          then:
+            - number.set:
+                id: set_target
+                value: !lambda "return id(ui_pending_target);"
+            # Keep showing the sent value until milestone 2's effective_target catches up.
+            - delay: 1s
+      - lambda: "id(ui_pending_target) = -1;"
+
+  - id: ui_refresh
+    mode: single
+    then:
+      - lambda: |-
+          // ── helpers ──
+          auto set_text = [](lv_obj_t *o, const std::string &t) {
+            const char *cur = lv_label_get_text(o);
+            if (cur == nullptr || t != cur) lv_label_set_text(o, t.c_str());
+          };
+          auto show = [](lv_obj_t *o, bool on) {
+            bool hidden = lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN);
+            if (on && hidden) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+            if (!on && !hidden) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+          };
+          auto check = [](lv_obj_t *o, bool on) {
+            bool cur = lv_obj_has_state(o, LV_STATE_CHECKED);
+            if (on && !cur) lv_obj_add_state(o, LV_STATE_CHECKED);
+            if (!on && cur) lv_obj_remove_state(o, LV_STATE_CHECKED);
+          };
+          auto num = [](float v) -> std::string { return std::isnan(v) ? "—" : std::to_string((int) lroundf(v)); };
+          auto deg = [&](float v) -> std::string { return std::isnan(v) ? "—" : num(v) + "°"; };
+
+          // ── state ──
+          auto *cl = id(main_thermostat);
+          const auto mode = cl->mode;
+          const auto action = cl->action;
+          const bool off = mode == climate::CLIMATE_MODE_OFF;
+          const bool fan = id(call_fan).state;
+          const bool sfault = id(sensor_fault).state;
+          const bool ifault = id(interlock_fault).state;
+          const bool eco = std::string(id(comfort_level).current_option()) == "Eco";
+          const bool hold = id(schedule_hold).state;
+          const bool sched_on = id(schedule_enabled).state;
+          const float eff = id(effective_target).state;
+          const float lo = id(effective_low).state;
+          const float hi = id(effective_high).state;
+          const int pending = id(ui_pending_target);
+          const bool band = mode == climate::CLIMATE_MODE_HEAT_COOL && eco && !hold && pending < 0 &&
+                            !std::isnan(lo) && !std::isnan(hi);
+          auto now = id(sntp_time).now();
+
+          // ── top bar ──
+          if (now.is_valid()) {
+            int h12 = now.hour % 12 == 0 ? 12 : now.hour % 12;
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%d:%02d %s", h12, now.minute, now.hour < 12 ? "am" : "pm");
+            set_text(id(lbl_clock), buf);
+            set_text(id(lbl_date), now.strftime("%b ") + std::to_string(now.day_of_month));
+          } else {
+            set_text(id(lbl_clock), "—");
+            set_text(id(lbl_date), "");
+          }
+          set_text(id(lbl_sched), sched_on ? id(schedule_status).state : std::string("Schedule off"));
+          show(id(btn_resume), sched_on && hold);
+
+          // ── room card ──
+          const float room = id(checked_temperature).state;
+          set_text(id(lbl_room), num(room));
+          show(id(lbl_room_deg), !std::isnan(room));
+
+          std::string target_txt;
+          if (pending >= 0) target_txt = std::to_string(pending) + "°";
+          else if (band) target_txt = num(lo) + "–" + num(hi) + "°";
+          else target_txt = deg(eff);
+          auto action_target = [&]() -> std::string {
+            if (band && action == climate::CLIMATE_ACTION_HEATING) return deg(lo);
+            if (band && action == climate::CLIMATE_ACTION_COOLING) return deg(hi);
+            return target_txt;
+          };
+
+          // Time the current action here: exact and offline (a float epoch is only ~128 s precise).
+          if ((int) action != id(ui_action_last)) {
+            id(ui_action_last) = (int) action;
+            id(ui_action_start_ms) = millis();
+          }
+          std::string mins;
+          {
+            long m = (long) ((millis() - id(ui_action_start_ms)) / ${action_minute_ms});
+            if (m < 1) mins = "just started";
+            else if (m < 60) mins = std::to_string(m) + " min so far";
+            else mins = std::to_string(m / 60) + " h " + std::to_string(m % 60) + " min so far";
+          }
+          auto running = [&](const std::string &t) { return mins.empty() ? "to " + t : "to " + t + " · " + mins; };
+
+          std::string word, sub;
+          uint32_t color = 0x8B8D90;
+          // Switched to another mode mid-call: the furnace or AC finishes its minimum run first
+          // (milestone 2, up to a few minutes), so don't say it's still heading for the target.
+          const std::string finishing = "Finishing up · stops soon";
+          if (sfault || ifault) {
+            word = "Paused";
+          } else if (action == climate::CLIMATE_ACTION_HEATING) {
+            word = "Heating"; color = 0xFF7B1B;
+            sub = mode == climate::CLIMATE_MODE_HEAT || mode == climate::CLIMATE_MODE_HEAT_COOL ? running(action_target()) : finishing;
+          } else if (action == climate::CLIMATE_ACTION_COOLING) {
+            word = "Cooling"; color = 0x4098FF;
+            sub = mode == climate::CLIMATE_MODE_COOL || mode == climate::CLIMATE_MODE_HEAT_COOL ? running(action_target()) : finishing;
+          } else if (off) {
+            word = fan ? "Fan" : "Off";
+            if (fan) color = 0x00B595;
+            sub = fan ? "System is off · fan on" : "System is off";
+          } else {
+            word = fan ? "Fan" : "Idle";
+            if (fan) color = 0x00B595;
+            std::string wait = id(call_wait_reason).state;
+            if (!wait.empty()) {
+              wait[0] = (char) tolower((unsigned char) wait[0]);
+              sub = "Waiting · " + wait;
+            } else {
+              sub = "holding " + target_txt;
+            }
+          }
+          set_text(id(lbl_status), word);
+          set_text(id(lbl_sub), sub);
+          // Only on a change: setting a style redraws the marker, which would keep LVGL busy.
+          if (!lv_color_eq(lv_obj_get_style_bg_color(id(obj_marker), LV_PART_MAIN), lv_color_hex(color)))
+            lv_obj_set_style_bg_color(id(obj_marker), lv_color_hex(color), LV_PART_MAIN);
+
+          // Fault banner replaces the history line.
+          show(id(obj_banner), sfault || ifault);
+          show(id(obj_hist), !(sfault || ifault));
+          if (ifault) set_text(id(lbl_banner), "Heating and cooling were both requested, so the system stopped. Clear it in Home Assistant once it's checked.");
+          else if (sfault) set_text(id(lbl_banner), "Temperature sensor problem. Heating and cooling are paused.");
+
+          // History line, redrawn only when the samples or the target change.
+          static int drawn_gen = -1;
+          static float drawn_tgt = -1000;
+          const float line_tgt = band ? (lo + hi) / 2 : eff;
+          const int n = id(ui_hist_n);
+          if (id(ui_hist_gen) != drawn_gen || !(line_tgt == drawn_tgt || (std::isnan(line_tgt) && std::isnan(drawn_tgt)))) {
+            drawn_gen = id(ui_hist_gen);
+            drawn_tgt = line_tgt;
+            const auto &hs = id(ui_hist);
+            float vmin = 1e9, vmax = -1e9;
+            for (int i = 0; i < n; i++) { vmin = std::min(vmin, hs[i]); vmax = std::max(vmax, hs[i]); }
+            if (!std::isnan(line_tgt)) { vmin = std::min(vmin, line_tgt); vmax = std::max(vmax, line_tgt); }
+            vmin -= 1; vmax += 1;
+            if (vmax - vmin < 4) { float mid = (vmax + vmin) / 2; vmin = mid - 2; vmax = mid + 2; }
+            auto ypos = [&](float t) -> lv_value_precise_t { return 6 + (vmax - t) / (vmax - vmin) * 110; };
+            static lv_point_precise_t pts[${hist_points}];
+            static lv_point_precise_t tpts[2];
+            for (int i = 0; i < n; i++) {
+              pts[i].x = n > 1 ? (lv_value_precise_t) (i * 624.0f / (n - 1)) : 0;
+              pts[i].y = ypos(hs[i]);
+            }
+            show(id(line_hist)->obj, n > 1);
+            if (n > 1) lv_line_set_points(id(line_hist)->obj, pts, n);
+            show(id(line_target)->obj, !std::isnan(line_tgt));
+            if (!std::isnan(line_tgt)) {
+              tpts[0] = {0, ypos(line_tgt)};
+              tpts[1] = {624, ypos(line_tgt)};
+              lv_line_set_points(id(line_target)->obj, tpts, 2);
+            }
+            std::string start;
+            if (n > 0 && id(ui_hist_start) > 0) {
+              ESPTime st = ESPTime::from_epoch_local(id(ui_hist_start));
+              int sh = st.hour % 12 == 0 ? 12 : st.hour % 12;
+              start = std::to_string(sh) + (st.hour < 12 ? " am" : " pm");
+            }
+            set_text(id(lbl_hist_start), start);
+          }
+
+          // ── target card ──
+          set_text(id(lbl_tgt_label), off ? "Target" : (eco ? "Eco target" : "Comfort target"));
+          set_text(id(lbl_tgt_comfort), (eco && !off) ? "Comfort " + deg(id(comfort_target).state) : std::string(""));
+          show(id(lbl_target), off || !band);
+          show(id(lbl_target_range), !off && band);
+          set_text(id(lbl_target), off ? std::string("Off") : target_txt);
+          if (band) set_text(id(lbl_target_range), target_txt);
+          show(id(btn_minus), !off);
+          show(id(btn_plus), !off);
+
+          // ── outside and humidity ──
+          // No Home Assistant client means no fresh weather: show "—", not a stale value.
+          const bool ha = api::global_api_server != nullptr && api::global_api_server->is_connected();
+          set_text(id(lbl_out_temp), ha ? deg(id(out_temp).state) : std::string("—"));
+          {
+            std::string c = ha ? id(out_cond).state : std::string("");
+            static const std::map<std::string, std::string> names = {
+                {"clear-night", "Clear"}, {"sunny", "Sunny"}, {"partlycloudy", "Partly cloudy"},
+                {"cloudy", "Cloudy"}, {"fog", "Fog"}, {"rainy", "Rain"}, {"pouring", "Heavy rain"},
+                {"snowy", "Snow"}, {"snowy-rainy", "Sleet"}, {"hail", "Hail"}, {"lightning", "Thunder"},
+                {"lightning-rainy", "Storms"}, {"windy", "Windy"}, {"windy-variant", "Windy"},
+                {"exceptional", "Unusual"}, {"unavailable", ""}, {"unknown", ""}};
+            auto it = names.find(c);
+            if (it != names.end()) c = it->second;
+            else if (!c.empty()) { std::replace(c.begin(), c.end(), '-', ' '); c[0] = (char) toupper((unsigned char) c[0]); }
+            set_text(id(lbl_out_cond), c);
+          }
+          const float hum = id(room_humidity).state;
+          set_text(id(lbl_hum), std::isnan(hum) ? std::string("—") : num(hum) + "%");
+          set_text(id(lbl_hum_desc), std::isnan(hum) ? "" : (hum < 30 ? "Dry" : (hum > 60 ? "Humid" : "Comfortable")));
+
+          // ── pills ──
+          check(id(btn_mode_off), off);
+          check(id(btn_mode_heat), mode == climate::CLIMATE_MODE_HEAT);
+          check(id(btn_mode_cool), mode == climate::CLIMATE_MODE_COOL);
+          check(id(btn_mode_auto), mode == climate::CLIMATE_MODE_HEAT_COOL);
+          const bool fan_on = cl->fan_mode.has_value() && *cl->fan_mode == climate::CLIMATE_FAN_ON;
+          check(id(btn_fan_auto), !fan_on);
+          check(id(btn_fan_on), fan_on);
+          check(id(btn_lvl_comfort), !eco);
+          check(id(btn_lvl_eco), eco);
