@@ -25,7 +25,7 @@ export DISPLAY=:99
 sleep 1
 "$bin" > "$out/run.log" 2>&1 &
 prog=$!
-trap 'kill $prog $xvfb 2>/dev/null || true; chown -R "${HOST_UID:-1000}:${HOST_GID:-1000}" "$out" 2>/dev/null || true' EXIT
+trap 'kill $prog $xvfb 2>/dev/null || true; chown -R "${HOST_UID:-1000}:${HOST_GID:-1000}" "$out" "$(dirname "$out")" 2>/dev/null || true' EXIT
 
 for _ in $(seq 1 100); do
   python3 -c 'import socket,sys; s=socket.socket(); s.settimeout(0.2); sys.exit(s.connect_ex(("127.0.0.1",6053)))' && break

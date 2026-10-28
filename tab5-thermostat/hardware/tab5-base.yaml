@@ -176,3 +176,9 @@ sensor:
       # Positive means discharging, negative means charging
       name: "Battery Current"
       entity_category: diagnostic
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      entity_category: diagnostic

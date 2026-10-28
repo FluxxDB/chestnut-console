@@ -47,3 +47,32 @@ In HA: Settings → Devices & services → Add integration → ESPHome → host 
 ## Phone page
 
 Browse to `http://<tab5-ip>/` and log in with `web_username` / `web_password` from `secrets.yaml`. It only works on the home network; never port-forward it to the internet.
+
+## The console screen
+
+The screen is the Main Thermostat console from `docs/superpowers/specs/2026-10-28-main-thermostat-console-ui-design.md`, split into packages under `ui/`:
+
+| File | What it is |
+|---|---|
+| `ui/fonts.yaml` | Inter + Space Grotesk (Google Fonts) and the Material Design Icons used on screen |
+| `ui/theme.yaml` | color styles, the light/dark switch (also flips at sunset/sunrise), and the house location from `secrets.yaml` |
+| `ui/console.yaml` | the layout: one LVGL page, 1280×720 |
+| `ui/console-logic.yaml` | the bindings: what each element reads and writes, the − / + debounce, idle dimming |
+| `ui/dev/contract-stub.yaml` | **dev only:** a stand-in for the milestone 2 thermostat logic, with the same entity ids and fake values (it switches nothing). Swap it for milestone 2's packages when they land. |
+
+Add `house_latitude` / `house_longitude` (city-level) to `secrets.yaml` for the sunset/sunrise theme switch.
+
+## Desktop preview
+
+Runs the console on your computer (ESPHome's host platform in an SDL window under Xvfb) and saves screenshots, with no Tab5 needed. It uses the dev stand-in, whose `Scenario` select drives every state.
+
+```bash
+docker compose --profile dev build preview
+docker compose --profile dev run --rm preview preview/console-preview.yaml /config/preview/shots/mine "Heating" "Eco auto band" --themes light,dark
+```
+
+Screenshots land in `tab5-thermostat/preview/shots/mine/` (gitignored).
+
+**Tests:**
+- `tools/preview/test_all.sh` runs every preview test: layout, all 11 scenarios in both themes, the − / + debounce, the theme toggle, and idle/wake.
+- `tools/preview/test_device.sh` flashes the real Tab5 and checks its logs. Set `TAB5_IP` if it isn't 10.0.0.193.
