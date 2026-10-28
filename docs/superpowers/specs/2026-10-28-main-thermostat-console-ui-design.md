@@ -167,7 +167,8 @@ All fonts render with **4-bit anti-aliasing** (`bpp: 4`). At ESPHome's default 1
 
 **Sensor fault** *(milestone 2: a bad sensor stops heating/cooling and raises an alert)*
 - The room temperature shows "—".
-- The status marker turns Muted Steel with "Paused".
+- The status marker turns Muted Steel with "Paused". A fault always wins over the climate's action: under a latched interlock, ESPHome's thermostat can still report heating with the relays off.
+- If a heat or cool call is still on (after a sensor fault, milestone 2 lets it finish its minimum run), the subline says "Finishing up · stops soon", so the running furnace or AC doesn't look stuck. *(Mac agent's suggestion.)*
 - A Signal Yellow `#f8e645` banner with ink text replaces the temperature line: "Temperature sensor problem. Heating and cooling are paused." The docs reserve Signal Yellow for a single high-attention grouping *(my call)*.
 - The banner clears by itself when milestone 2 resumes.
 

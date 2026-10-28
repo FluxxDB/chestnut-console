@@ -8,7 +8,7 @@ sh="tab5-thermostat/preview/shots"
 $dc --entrypoint rm preview -rf /config/preview/shots/bind /config/preview/shots/debounce /config/preview/shots/clamp >/dev/null 2>&1
 $dc preview preview/console-preview.yaml /config/preview/shots/bind --dump \
   "Heating" "Cooling" "Eco auto band" "Hold" "Schedule off" "Clock not set" "Waiting" \
-  "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" "Finishing" "Interlock while heating" >/dev/null
+  "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" "Finishing" "Interlock while heating" "Sensor fault mid-run" >/dev/null
 c="python3 tools/preview/check_snapshot.py $sh/bind"
 $c heating light room=71 status=Heating "sub=~^to 72° · ([0-9]+ min so far|just started)$" target=72° "tgt_label=Comfort target" tgt_comfort= \
   "sched=Comfort until 10:30 pm" resume_visible=0 mode_sel=0100 fan_sel=10 lvl_sel=10 hum=42% hum_cap=Comfortable \
@@ -28,6 +28,9 @@ $c finishing light status=Heating "sub=Finishing up · stops soon" marker=ff7b1b
 # M2: while interlock_fault is latched the climate can still report HEATING with the relays off
 # (mac-chestnut-console). A fault always wins: Paused, grey marker, no "to 72°" line.
 $c interlock-while-heating light status=Paused sub= marker=8b8d90 banner_visible=1
+# M2: a sensor fault lets a running call finish its minimum run (call_heat still on). Say so, so the
+# furnace still running doesn't look like a stuck relay (mac-chestnut-console's suggestion).
+$c sensor-fault-mid-run light status=Paused "sub=Finishing up · stops soon" marker=8b8d90 banner_visible=1
 # Debounce: 5 quick taps on + from 72 -> one write of 77.
 $dc preview preview/console-preview.yaml /config/preview/shots/debounce --dump "Heating" \
   --clicks "1183,251;1183,251;1183,251;1183,251;1183,251" >/dev/null

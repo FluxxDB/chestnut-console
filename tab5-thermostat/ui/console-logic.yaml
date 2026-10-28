@@ -313,6 +313,9 @@ script:
           const std::string finishing = "Finishing up · stops soon";
           if (sfault || ifault) {
             word = "Paused";
+            // Milestone 2 lets a running call finish its minimum run after a sensor fault (an
+            // interlock fault cuts both at once): say so, so it doesn't look like a stuck relay.
+            if (id(call_heat).state || id(call_cool).state) sub = finishing;
           } else if (action == climate::CLIMATE_ACTION_HEATING) {
             word = "Heating"; color = 0xFF7B1B;
             sub = mode == climate::CLIMATE_MODE_HEAT || mode == climate::CLIMATE_MODE_HEAT_COOL ? running(action_target()) : finishing;
