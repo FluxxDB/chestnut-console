@@ -23,6 +23,8 @@ packages:
 
 wifi:
   # The Tab5's radio is 2.4 GHz only.
+  # Never reboot because Wi-Fi is down: a reboot drops the relays (the default is 15 min).
+  reboot_timeout: 0s
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   # If Wi-Fi fails, the Tab5 opens its own hotspot for setup.
@@ -33,6 +35,8 @@ wifi:
 captive_portal:
 
 api:
+  # Never reboot because Home Assistant is unreachable (the default is 15 min).
+  reboot_timeout: 0s
   encryption:
     key: !secret api_encryption_key
 
