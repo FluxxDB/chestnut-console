@@ -2,8 +2,10 @@
 target, Comfort, Eco and holds" and Safety 2's Auto changeover lockout).
 
 The climate's low / high setpoints are always derived (chestnut::derive_setpoints) from the
-mode, comfort_target, eco_offset, comfort_level and a hold. set_target and setpoint writes to
-the climate (HA, the API) start a hold; a mode change doesn't. Defaults: comfort 72°F, Eco
+mode, comfort_target, eco_offset, comfort_level and a hold. Two kinds of hold (rulings R12,
+R13), both shown as schedule_hold: switching comfort_level by hand is a level hold (the level
+applies normally, Eco widening included); set_target and setpoint writes to the climate (HA, the
+API) are a temperature hold (no Eco widening), which any mode change ends. Defaults: comfort 72°F, Eco
 offset 4, Comfort, mode Off. The thermostat's deadband and overrun are 0.5 °C (0.9°F), so a
 heat target of 68 starts heating at 67.1 and a cool target of 76 starts cooling at 76.9.
 
@@ -15,8 +17,8 @@ changeover lockout 30 "minutes" = 30 s.
 from aioesphomeapi import ClimateAction, ClimateMode
 
 from conftest import f_to_c
-from test_core import (COOL_OFF_S, EDGE_SLACK_S, HEAT_OFF_S, HEAT_RUN_S, fixed_weather, is_off,
-                       is_on, now)
+from test_core import (COOL_OFF_S, COOL_RUN_S, EDGE_SLACK_S, HEAT_OFF_S, HEAT_RUN_S, cool_to,
+                       fixed_weather, heat_to, is_off, is_on, now)
 
 LOCKOUT_S = 30  # changeover_lockout default, 30 x timer_unit_s
 DEADBAND_F = 0.9  # 0.5 °C
@@ -62,8 +64,13 @@ async def reading_when_on(dev, call):
     return await dev.state("checked_temperature")
 
 
-def actions(dev):
-    return [s.action for s in dev.history("main_thermostat") if s is not None]
+def actions_before(dev, call, action):
+    """Every climate state reporting `action` that arrived before `call` came on, allowing
+    0.25 s: the climate publishes in the dispatch that turns the relay on, the call sensor on
+    the next loop, so the two can arrive a batch apart in either order. Covers the whole wait."""
+    on_at = next(t for t, v in dev.timed_history(call) if v is True)
+    return [(round(on_at - t, 2), st.action) for t, st in dev.timed_history("main_thermostat")
+            if st is not None and st.action == action and t < on_at - 0.25]
 
 
 # --- Eco and Auto bands ---
@@ -121,20 +128,30 @@ async def test_auto_cools_above(device):
     assert True not in device.history("call_heat")
 
 
-async def test_auto_eco_band(device_keep_prefs):
+async def test_auto_eco_band(device):
+    # Eco pressed in Auto: a level hold, and Eco widens the band by the offset on both sides.
+    await ready(device)
+    await device.climate(mode="HEAT_COOL")
+    await device.select("comfort_level", "Eco")
+    await device.wait_for("schedule_hold", is_on, 2)
+    await effective(device, 72, 67, 77)
+    await setpoints_f(device, 67, 77)
+    assert (await climate(device)).mode == ClimateMode.HEAT_COOL
+
+
+async def test_holds_do_not_survive_restart(device_keep_prefs):
     dev = device_keep_prefs
     await ready(dev)
     await dev.climate(mode="HEAT_COOL")
     await dev.select("comfort_level", "Eco")
-    # A hold doesn't survive a reboot; the restored level does. Eco without a hold widens the
-    # Auto band by the offset on both sides.
+    assert await dev.set_number("set_target", 70) == 70
+    await effective(dev, 70, 69, 71)
     await dev.restart()
     await ready(dev)
     assert await dev.wait_for("comfort_level", lambda v: v is not None, 3) == "Eco"
     assert await dev.wait_for("schedule_hold", lambda v: v is not None, 3) is False
-    await effective(dev, 72, 67, 77)
+    await effective(dev, 72, 67, 77)  # the restored level, no hold
     await setpoints_f(dev, 67, 77)
-    assert (await climate(dev)).mode == ClimateMode.HEAT_COOL
 
 
 async def test_eco_offset_and_comfort_target_apply_without_hold(device):
@@ -153,22 +170,29 @@ async def test_eco_offset_and_comfort_target_apply_without_hold(device):
 
 # --- Holds ---
 
-async def test_set_target_starts_hold_comfort_untouched(device_keep_prefs):
-    dev = device_keep_prefs
-    await ready(dev)
-    await dev.climate(mode="HEAT")
-    await dev.select("comfort_level", "Eco")
-    await dev.restart()  # Eco with no hold: the spec's "in Eco at 68°, + gives a hold at 69°"
-    await ready(dev)
-    await effective(dev, 68)
-    assert await dev.wait_for("schedule_hold", lambda v: v is not None, 3) is False
-    assert await dev.set_number("set_target", 69) == 69
-    await dev.wait_for("schedule_hold", is_on, 2)
-    await effective(dev, 69)
-    await setpoints_f(dev, 69, 71)
-    assert await dev.state("comfort_target") == 72
-    assert await dev.state("eco_offset") == 4
-    assert await dev.state("comfort_level") == "Eco"
+async def test_set_target_starts_hold_comfort_untouched(device):
+    # The spec's example: in Eco at 68°, + gives a hold at 69°.
+    await ready(device)
+    await device.climate(mode="HEAT")
+    await device.select("comfort_level", "Eco")
+    await effective(device, 68)
+    assert await device.set_number("set_target", 69) == 69
+    await device.wait_for("schedule_hold", is_on, 2)
+    await effective(device, 69)
+    await setpoints_f(device, 69, 71)
+    assert await device.state("comfort_target") == 72
+    assert await device.state("eco_offset") == 4
+    assert await device.state("comfort_level") == "Eco"
+
+
+async def test_temperature_hold_in_auto_eco_has_no_widening(device):
+    await ready(device)
+    await device.climate(mode="HEAT_COOL")
+    await device.select("comfort_level", "Eco")
+    await effective(device, 72, 67, 77)
+    assert await device.set_number("set_target", 73) == 73  # first tap from the Comfort target
+    await effective(device, 73, 72, 74)
+    await setpoints_f(device, 72, 74)
 
 
 async def test_set_target_in_comfort_is_a_hold_too(device):
@@ -201,6 +225,50 @@ async def test_level_switch_starts_hold(device):
     await device.wait_for("schedule_hold", is_on, 2)
     await effective(device, 68)
     assert await device.state("set_target") == 68  # set_target follows the effective target
+
+
+async def test_eco_level_hold_follows_mode(device):
+    # A level hold holds Eco, not 68: switching Heat -> Cool cools to comfort + offset.
+    await ready(device)
+    await device.climate(mode="HEAT")
+    await device.select("comfort_level", "Eco")
+    await effective(device, 68)
+    await device.climate(mode="COOL")
+    await effective(device, 76)
+    await setpoints_f(device, 74, 76)
+    assert await device.state("schedule_hold") is True  # the level hold stays
+
+
+async def test_level_switch_ends_temperature_hold(device):
+    await ready(device)
+    await device.climate(mode="HEAT")
+    assert await device.set_number("set_target", 75) == 75
+    await effective(device, 75)
+    await device.select("comfort_level", "Eco")
+    await effective(device, 68)  # Eco's own target, not the held 75
+    assert await device.state("schedule_hold") is True
+
+
+async def test_mode_change_ends_temperature_hold(device):
+    await ready(device)
+    await device.climate(mode="HEAT")
+    assert await device.set_number("set_target", 75) == 75
+    await device.wait_for("schedule_hold", is_on, 2)
+    await device.climate(mode="COOL")
+    await device.wait_for("schedule_hold", is_off, 2)
+    await effective(device, 72)  # back to Comfort
+    await setpoints_f(device, 70, 72)
+
+
+async def test_mode_change_keeps_level_hold_under_temperature_hold(device):
+    await ready(device)
+    await device.climate(mode="HEAT")
+    await device.select("comfort_level", "Eco")
+    assert await device.set_number("set_target", 70) == 70
+    await effective(device, 70)
+    await device.climate(mode="COOL")
+    await effective(device, 76)  # the temperature hold ended; Eco (held) applies
+    assert await device.state("schedule_hold") is True
 
 
 async def test_mode_change_is_not_a_hold_and_rederives(device):
@@ -250,8 +318,10 @@ async def test_ha_auto_range_write_uses_midpoint(device):
 
 
 async def test_ha_mode_and_target_in_one_call(device):
+    # The mode change ends the old temperature hold first; the call's own target starts a new one.
     await ready(device)
     await device.climate(mode="HEAT")
+    assert await device.set_number("set_target", 70) == 70
     await device.climate(mode="COOL", target_temperature_high=f_to_c(76))
     await device.wait_for("schedule_hold", is_on, 2)
     await effective(device, 76)
@@ -300,13 +370,12 @@ async def test_auto_changeover_lockout(device):
     await auto_heat_then_cool_wanted(device)
     heat_off = now()
     await device.wait_for("call_wait_reason", lambda v: v == "Changeover wait", 3)
-    n = len(device.history("main_thermostat"))
     await device.wait_for("call_cool", is_on, LOCKOUT_S + 5)
     waited = now() - heat_off
     assert waited >= LOCKOUT_S - EDGE_SLACK_S, f"AC started {waited:.2f}s after heat ended"
     assert waited <= LOCKOUT_S + 3, f"AC started {waited:.2f}s after heat ended: late"
-    # The reported action matches the relays: never COOLING while Y was off.
-    assert ClimateAction.COOLING not in actions(device)[:n], actions(device)
+    # The reported action matches the relays: never COOLING while Y was off, over the whole wait.
+    assert actions_before(device, "call_cool", ClimateAction.COOLING) == []
     st = await device.wait_for("main_thermostat", lambda v: v.action == ClimateAction.COOLING, 1)
     assert st.mode == ClimateMode.HEAT_COOL
     await device.wait_for("call_wait_reason", lambda v: v == "", 1.5)
@@ -323,11 +392,10 @@ async def test_auto_changeover_lockout_after_cooling(device):
     await device.wait_for("call_cool", is_off, 5 + 3)
     cool_off = now()
     await device.wait_for("call_wait_reason", lambda v: v == "Changeover wait", 3)
-    n = len(device.history("main_thermostat"))
     await device.wait_for("call_heat", is_on, LOCKOUT_S + 5)
     waited = now() - cool_off
     assert LOCKOUT_S - EDGE_SLACK_S <= waited <= LOCKOUT_S + 3, f"heat after {waited:.2f}s"
-    assert ClimateAction.HEATING not in actions(device)[:n], actions(device)
+    assert actions_before(device, "call_heat", ClimateAction.HEATING) == []
 
 
 async def test_leaving_auto_ends_the_changeover_wait(device):
@@ -353,8 +421,8 @@ async def test_manual_heat_to_cool_no_lockout(device):
 async def test_mode_change_mid_run_finishes(device):
     await ready(device)
     await fixed_weather(device, 0)
+    assert await device.set_number("comfort_target", 80) == 80  # Cool to 80 later: nothing to do
     await device.climate(mode="HEAT")
-    assert await device.set_number("set_target", 80) == 80
     await device.wait_for("call_heat", is_on, HEAT_OFF_S + 3)
     started = now()
     await device.climate(mode="COOL")
@@ -368,3 +436,38 @@ async def test_mode_change_mid_run_finishes(device):
     st = await device.wait_for("main_thermostat", lambda v: v.action == ClimateAction.IDLE, 1)
     assert st.mode == ClimateMode.COOL
     assert True not in device.history("call_cool")  # cool to 80 in a cold room: nothing to do
+
+
+# --- Minimum runs under dispatch latency ---
+# The call starts from a reading (the sim's interval dispatch) that the test hook holds back
+# 3 ms first, so the thermostat starts its minimum-run timer well after the dispatch began. The
+# minimum run must still hold when the call is no longer wanted right after it starts.
+
+async def test_heat_min_run_holds_with_dispatch_latency(device):
+    await device.action("test_set_latency", ms=3)
+    await fixed_weather(device, 68)
+    await heat_to(device, 68)  # the 68°F room is on target: idle
+    await device.sleep(HEAT_OFF_S + 1)  # past the startup delay
+    assert True not in device.history("call_heat")
+    await fixed_weather(device, 0)  # the next readings fall below 67.1: heat starts on one
+    await device.wait_for("call_heat", is_on, 10)
+    started = now()
+    await heat_to(device, 50)
+    await device.wait_for("call_heat", is_off, HEAT_RUN_S + 3)
+    ran = now() - started
+    assert ran >= HEAT_RUN_S - EDGE_SLACK_S, f"furnace ran only {ran:.2f}s"
+
+
+async def test_cool_min_run_holds_with_dispatch_latency(device):
+    await device.action("test_set_latency", ms=3)
+    await fixed_weather(device, 68)
+    await cool_to(device, 68)  # idle: cooling starts at 68.9
+    await device.sleep(COOL_OFF_S + 1)
+    assert True not in device.history("call_cool")
+    await fixed_weather(device, 100)
+    await device.wait_for("call_cool", is_on, 10)
+    started = now()
+    await cool_to(device, 85)
+    await device.wait_for("call_cool", is_off, COOL_RUN_S + 3)
+    ran = now() - started
+    assert ran >= COOL_RUN_S - EDGE_SLACK_S, f"AC ran only {ran:.2f}s"

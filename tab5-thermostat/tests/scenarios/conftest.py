@@ -72,6 +72,7 @@ class Dev:
         self._climate = None
         self._values = {}  # object_id -> latest plain value
         self._history = {}  # object_id -> every value received, in order
+        self._times = {}  # object_id -> event-loop arrival time of each value in _history
         self._changed = asyncio.Event()
         self.started_at = None  # event-loop time just before the program was launched
 
@@ -119,6 +120,7 @@ class Dev:
         self._climate = climates[0] if len(climates) == 1 else None
         self._values.clear()
         self._history.clear()
+        self._times.clear()
         self._client.subscribe_states(self._on_state)
 
     def _on_state(self, state):
@@ -128,6 +130,7 @@ class Dev:
         value = _plain(state)
         self._values[oid] = value
         self._history.setdefault(oid, []).append(value)
+        self._times.setdefault(oid, []).append(asyncio.get_running_loop().time())
         self._changed.set()
         self._changed = asyncio.Event()
 
@@ -227,6 +230,12 @@ class Dev:
         self._info(object_id)
         self._check_alive()
         return list(self._history.get(object_id, ()))
+
+    def timed_history(self, object_id):
+        """Like history(), as (arrival time, value) pairs; times are the event loop's (now())."""
+        self._info(object_id)
+        self._check_alive()
+        return list(zip(self._times.get(object_id, ()), self._history.get(object_id, ())))
 
     async def _wait_change(self, deadline):
         """Wait for any new state until deadline; False on timeout. Raises if the program

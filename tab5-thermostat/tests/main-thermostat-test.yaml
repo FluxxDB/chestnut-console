@@ -37,6 +37,26 @@ api:
         - lambda: |-
             if (heat) id(relay_heat).turn_on(); else id(relay_heat).turn_off();
             if (cool) id(relay_cool).turn_on(); else id(relay_cool).turn_off();
+    # Test-only: hold every room_temperature reading for `ms` before the logic sees it, so the
+    # thermostat's decisions run well after their dispatch began (as a slow ESP32 dispatch
+    # would). 0 = off.
+    - action: test_set_latency
+      variables:
+        ms: int
+      then:
+        - lambda: id(g_test_latency_ms) = ms;
+
+globals:
+  - id: g_test_latency_ms
+    type: int
+    restore_value: false
+    initial_value: "0"
+
+sensor:
+  # Runs before the logic's own room_temperature callback (registered later, in on_boot).
+  - id: !extend room_temperature
+    on_value:
+      - lambda: if (id(g_test_latency_ms) > 0) delay(id(g_test_latency_ms));
 
 time:
   - platform: host

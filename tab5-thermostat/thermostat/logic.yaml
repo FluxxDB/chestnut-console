@@ -18,6 +18,9 @@ substitutions:
   cool_run_s: "300"
   cool_off_s: "300"
   min_idle_s: "30"
+  # The thermostat's heat / cool deadband (°C): 0.5 °C = 0.9°F. The Auto changeover lockout
+  # swaps the locked side's deadband for a huge one while it lasts (see sync_changeover).
+  deadband_c: "0.5"
 
 esphome:
   includes:
@@ -46,7 +49,7 @@ esphome:
             });
     # After every component's setup (the numbers and select restored, the climate restored or
     # given its Default preset): from here on, changes to the target entities apply and holds
-    # can start. A hold never survives a reboot (g_hold boots false).
+    # can start. A hold never survives a reboot (the hold flags boot false).
     - priority: -100
       then:
         - lambda: |-
@@ -105,8 +108,17 @@ globals:
     type: bool
     restore_value: false
     initial_value: "false"
-  # A manual hold (schedule_hold) at g_hold_f °F. Not restored: a hold doesn't survive a reboot.
-  - id: g_hold
+  # Manual holds (ruling R12), shown together as schedule_hold. Not restored: a hold doesn't
+  # survive a reboot. Resume / the next period (Task 10) clears both.
+  # - Level hold: comfort_level was switched by hand. The chosen level applies with its normal
+  #   derivation (Eco widens Auto), and the schedule leaves the level alone until the next period.
+  # - Temperature hold: set_target (or a setpoint write) at g_hold_f °F, with no Eco widening.
+  #   Any mode change ends it (ruling R13); a level hold under it stays.
+  - id: g_hold_level
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  - id: g_hold_temp
     type: bool
     restore_value: false
     initial_value: "false"
@@ -159,12 +171,6 @@ globals:
     initial_value: "0"
   - id: g_lockout_until_ms
     type: uint32_t
-    restore_value: false
-    initial_value: "0"
-  # The side whose call the lockout is holding back right now (0 none, 1 heat, 2 cool): its
-  # minimum-run timer is stretched to the end of the lockout (see heat_action).
-  - id: g_blocked_side
-    type: uint8_t
     restore_value: false
     initial_value: "0"
 
@@ -251,9 +257,9 @@ climate:
     # 0.5 °C (0.9°F) each side (ESPHome's defaults, stated here): a heat target of 72 starts
     # heating at 71.1 and stops at 72.9; the Auto band 71-73 heats below about 70 and cools
     # above about 74, and the two never overlap.
-    heat_deadband: 0.5
+    heat_deadband: ${deadband_c}
     heat_overrun: 0.5
-    cool_deadband: 0.5
+    cool_deadband: ${deadband_c}
     cool_overrun: 0.5
     # First boot (nothing restored yet): Off, fan Auto. Without the fan mode here the thermostat
     # would start in fan mode ON (its fallback for an unset fan mode) and run G at boot.
@@ -266,7 +272,9 @@ climate:
     #   or nothing if it equals the effective target. Heat reads low (else target), Cool reads
     #   high (else target), Auto the midpoint of low and high (else whichever is given);
     # - a call with a temperature or a mode gets its low / high replaced by the derived values
-    #   for the mode it leaves the climate in (a mode change alone isn't a hold);
+    #   for the mode it leaves the climate in. A mode change isn't a hold, and it ends a
+    #   temperature hold (ruling R13; a level hold stays) before the call's own temperature is
+    #   read, so a mode and a target in one call start a new hold;
     # - fan-mode-only calls keep the current setpoints.
     # Off until boot is done (the thermostat's own restore call goes through untouched; the
     # last on_boot step applies the setpoints) and around apply_setpoints' own call (g_applying).
@@ -284,8 +292,10 @@ climate:
           climate::ClimateMode mode = t->mode;
           if (x.get_mode().has_value() && t->get_traits().supports_mode(*x.get_mode()))
             mode = *x.get_mode();
+          if (mode != t->mode) id(g_hold_temp) = false;  // R13
           id(g_pending_call) = &x;
           id(g_pending_mode) = mode;
+          id(sync_changeover).execute();  // the lockout applies in Auto only
           id(apply_setpoints).execute();  // the derived setpoints (and effective target) for mode
           if (has_temp) {
             float c = NAN;
@@ -324,32 +334,11 @@ climate:
     # Heat and cool turn the opposite relay off before turning theirs on (interlock layer 2).
     # While the interlock is latched the relays are not turned on (layer 3 guards the actions
     # as well as cutting the relays); turning them off is always allowed.
-    #
-    # Auto changeover lockout (spec): after a call ends in Auto, the other call waits
-    # changeover_lockout minutes (a manual mode switch gets none: it's checked only in Auto).
-    # ESPHome has already decided HEATING (or COOLING) and started that call's minimum-run timer
-    # by the time this action runs, so a locked-out call is turned back here: the relay stays
-    # off, the reported action goes back to IDLE (so it always matches the relays), and the
-    # minimum-run timer just started is stretched to the end of the lockout. While that timer
-    # runs the thermostat holds its action, and when it ends ESPHome re-evaluates and the call
-    # starts on time. The 1 s interval ends the stretched timer early if the wait no longer
-    # applies (the mode left Auto, or that call isn't wanted any more). Each action first puts
-    # its real minimum run back, so a stretched (or shortened) value never times a real run.
     heat_action:
       - switch.turn_off: relay_cool
-      - lambda: |-
-          auto *t = id(main_thermostat);
-          t->set_heating_minimum_run_time_in_sec(lroundf(id(heat_min_run).state * ${timer_unit_s}));
-          const int32_t left_ms = (int32_t) (id(g_lockout_until_ms) - millis());
-          id(g_blocked_side) = 0;
-          if (t->mode == climate::CLIMATE_MODE_HEAT_COOL && id(g_last_call) == 2 && left_ms > 0) {
-            id(g_blocked_side) = 1;
-            t->set_heating_minimum_run_time_in_sec((left_ms + 999) / 1000);
-            t->action = climate::CLIMATE_ACTION_IDLE;
-          }
       - if:
           condition:
-            lambda: return !id(g_interlock_latched) && id(g_blocked_side) == 0;
+            lambda: return !id(g_interlock_latched);
           then:
             - switch.turn_on: relay_heat
             - if:
@@ -361,25 +350,15 @@ climate:
                   - switch.turn_off: relay_fan  # the furnace runs its own blower
     cool_action:
       - switch.turn_off: relay_heat
-      - lambda: |-
-          auto *t = id(main_thermostat);
-          t->set_cooling_minimum_run_time_in_sec(lroundf(id(cool_min_run).state * ${timer_unit_s}));
-          const int32_t left_ms = (int32_t) (id(g_lockout_until_ms) - millis());
-          id(g_blocked_side) = 0;
-          if (t->mode == climate::CLIMATE_MODE_HEAT_COOL && id(g_last_call) == 1 && left_ms > 0) {
-            id(g_blocked_side) = 2;
-            t->set_cooling_minimum_run_time_in_sec((left_ms + 999) / 1000);
-            t->action = climate::CLIMATE_ACTION_IDLE;
-          }
       - if:
           condition:
-            lambda: return !id(g_interlock_latched) && id(g_blocked_side) == 0;
+            lambda: return !id(g_interlock_latched);
           then:
             - switch.turn_on: relay_cool
             - switch.turn_on: relay_fan  # the air handler needs G for the blower
     idle_action:
-      # A heat or cool call ending in Auto starts the lockout on the other side; one ending in
-      # any other mode clears it (that call is the last one now).
+      # Auto changeover lockout: a heat or cool call ending in Auto starts the lockout on the
+      # other side; one ending in any other mode clears it (that call is the last one now).
       - lambda: |-
           const bool w = id(relay_heat).state, y = id(relay_cool).state;
           if (w || y) {
@@ -390,6 +369,7 @@ climate:
               id(g_last_call) = 0;
             }
           }
+      - script.execute: sync_changeover
       - switch.turn_off: relay_heat
       - switch.turn_off: relay_cool
       - if:
@@ -443,12 +423,13 @@ binary_sensor:
     lambda: |-
       auto *s = static_cast<chestnut::SanityChecker *>(id(g_sanity));
       return s != nullptr && s->fault();
-  # Contract: a manual hold is on (set_target, a setpoint write or a Comfort / Eco switch).
+  # Contract: a manual hold is on: a level hold (Comfort / Eco switched by hand) or a
+  # temperature hold (set_target or a setpoint write), or both.
   - platform: template
     id: schedule_hold
     name: "Schedule Hold"
     icon: mdi:hand-back-right-outline
-    lambda: return id(g_hold);
+    lambda: return id(g_hold_level) || id(g_hold_temp);
 
 # Contract: why the room is off target but nothing is running. Set by the 1 s interval below.
 text_sensor:
@@ -491,31 +472,18 @@ interval:
           const bool was = s->fault();
           s->tick(millis());
           if (s->fault() != was) id(checked_temperature_c).publish_state(s->value());
-      # Auto changeover lockout tick (see heat_action). Clears the lockout once it's over, and
-      # ends a held-back call's stretched minimum-run timer early when the wait no longer
-      # applies: the mode left Auto (a manual switch has no lockout) or that call isn't wanted
-      # any more (e.g. heat held back, then the room needs heat again: same side, no lockout).
-      # Shortened to 1 s from when it started, the timer is over at once and ESPHome
-      # re-evaluates; the next heat / cool action puts the real minimum run back.
+      # Auto changeover lockout: when it ends, put the normal deadband back and let the
+      # thermostat re-evaluate at once (the held-back call starts within a second). Clearing
+      # g_last_call also keeps millis() wrapping from reviving an old lockout.
       - lambda: |-
-          auto *t = id(main_thermostat);
-          if (id(g_last_call) != 0 && (int32_t) (id(g_lockout_until_ms) - millis()) <= 0)
-            id(g_last_call) = 0;
-          const uint8_t side = id(g_blocked_side);
-          if (side == 0) return;
-          const auto held = side == 1 ? climate::CLIMATE_ACTION_HEATING : climate::CLIMATE_ACTION_COOLING;
-          if (id(g_last_call) == 0 || t->mode != climate::CLIMATE_MODE_HEAT_COOL ||
-              t->delayed_climate_action() != held) {
-            id(g_blocked_side) = 0;
-            if (side == 1)
-              t->set_heating_minimum_run_time_in_sec(1);
-            else
-              t->set_cooling_minimum_run_time_in_sec(1);
-          }
+          if (id(g_last_call) == 0 || (int32_t) (id(g_lockout_until_ms) - millis()) > 0) return;
+          id(g_last_call) = 0;
+          id(sync_changeover).execute();
+          id(main_thermostat).refresh();
       # call_wait_reason, first match wins. The two faults show whenever they're on (a running
       # call may still be finishing its minimum run under a sensor fault). The waits show only
-      # when the room is off target (the thermostat wants heat or cool, timers aside) and
-      # nothing is running. "Nothing is running" comes from the relays (W / Y), never from
+      # when the room is off target (the thermostat wants heat or cool, timers aside, or the
+      # changeover lockout is holding the other side's call back) and nothing is running. "Nothing is running" comes from the relays (W / Y), never from
       # main_thermostat's action, which can read HEATING while the interlock latch holds the
       # relays off. Published only when it changes.
       - lambda: |-
@@ -533,12 +501,16 @@ interval:
           const bool off_target = wanted == climate::CLIMATE_ACTION_HEATING ||
                                   wanted == climate::CLIMATE_ACTION_COOLING;
           const bool waiting = off_target && !running;
-          // The Auto changeover lockout holds the call that's wanted (the other side's).
+          // The Auto changeover lockout holds the other side's call back by hiding it from the
+          // thermostat (sync_changeover), so `wanted` never shows it: check the room against
+          // that side's normal threshold instead.
+          const auto *th = id(main_thermostat);
+          const float room = th->current_temperature;  // NaN on a fault: no match
           const bool changeover =
-              id(main_thermostat).mode == climate::CLIMATE_MODE_HEAT_COOL &&
+              th->mode == climate::CLIMATE_MODE_HEAT_COOL &&
               (int32_t) (id(g_lockout_until_ms) - millis()) > 0 &&
-              ((id(g_last_call) == 1 && wanted == climate::CLIMATE_ACTION_COOLING) ||
-               (id(g_last_call) == 2 && wanted == climate::CLIMATE_ACTION_HEATING));
+              ((id(g_last_call) == 1 && room >= th->target_temperature_high + ${deadband_c}) ||
+               (id(g_last_call) == 2 && room <= th->target_temperature_low - ${deadband_c}));
           const char *reason = "";
           if (id(g_interlock_latched)) {
             reason = "Interlock fault";
@@ -546,7 +518,7 @@ interval:
             reason = "Sensor fault";
           } else if (waiting && !started_up) {
             reason = "Starting up";  // the boot-time minimum off timers
-          } else if (waiting && changeover) {
+          } else if (changeover && !running) {
             reason = "Changeover wait";  // checked before short-cycle: it's the longer wait
           } else if (waiting) {
             reason = "Short-cycle protection";  // a minimum off / idle timer holds the call
@@ -571,6 +543,26 @@ script:
   # climate's low / high: into the outside call being handled (on_control), or with its own
   # call marked g_applying. Synchronous; runs at boot, on any of those changing and on every
   # mode change.
+  # Auto changeover lockout (spec, Safety 2): after a heat call ends in Auto, no cool call for
+  # changeover_lockout minutes, and the other way round. In Auto, while the lockout lasts, the
+  # locked side's deadband is set far out of reach, so the stock thermostat never decides that
+  # call: its action stays IDLE (always matching the relays), no timer is touched, and the
+  # other side works as usual. Run on every lockout change (idle_action, its end in the
+  # interval) and before every mode change (on_control, with the incoming mode), so a manual
+  # switch out of Auto gets the normal deadbands back before the thermostat re-evaluates. A
+  # call already running when the deadband changes keeps its own hysteresis and finishes.
+  - id: sync_changeover
+    mode: single
+    then:
+      - lambda: |-
+          auto *t = id(main_thermostat);
+          const climate::ClimateMode m = id(g_pending_call) != nullptr ? id(g_pending_mode) : t->mode;
+          const bool on = m == climate::CLIMATE_MODE_HEAT_COOL && id(g_last_call) != 0 &&
+                          (int32_t) (id(g_lockout_until_ms) - millis()) > 0;
+          static constexpr float LOCKED_C = 1000.0f;  // no room ever gets there
+          t->set_cool_deadband(on && id(g_last_call) == 1 ? LOCKED_C : ${deadband_c});
+          t->set_heat_deadband(on && id(g_last_call) == 2 ? LOCKED_C : ${deadband_c});
+
   - id: apply_setpoints
     mode: single
     then:
@@ -584,7 +576,7 @@ script:
                                                                              : chestnut::Mode::Off;
           const chestnut::Setpoints s = chestnut::derive_setpoints(
               mode, lroundf(id(comfort_target).state), lroundf(id(eco_offset).state),
-              id(g_level_eco), id(g_hold), id(g_hold_f));
+              id(g_level_eco), id(g_hold_temp), id(g_hold_f));
           id(g_effective_f) = s.effective_f;
           auto publish = [](sensor::Sensor *sens, int f) {
             if (!sens->has_state() || sens->state != (float) f) sens->publish_state(f);
@@ -773,13 +765,13 @@ number:
           if (f == id(g_effective_f)) return;  // already the target: no hold (spec)
           // Task 10 hook: with schedule_enabled off there is no hold; set comfort_target to f
           // here instead (and return).
-          id(g_hold) = true;
+          id(g_hold_temp) = true;  // a temperature hold (R12)
           id(g_hold_f) = f;
           id(apply_setpoints).execute();
 
 select:
-  # Contract: Comfort / Eco. A manual change starts a hold at the new level's effective target,
-  # but only when the level actually changes (a template select fires on_value again when set
+  # Contract: Comfort / Eco. A manual change starts a level hold (R12) and ends a temperature
+  # hold, but only when the level actually changes (a template select fires on_value again when set
   # to the same option). The schedule (Task 10) sets it with g_sched_setting: no hold. Restored.
   - platform: template
     id: comfort_level
@@ -799,14 +791,9 @@ select:
           if (eco == id(g_level_eco)) return;
           id(g_level_eco) = eco;
           if (!id(g_sched_setting)) {
-            const climate::ClimateMode m = id(main_thermostat).mode;
-            const chestnut::Mode mode = m == climate::CLIMATE_MODE_HEAT        ? chestnut::Mode::Heat
-                                        : m == climate::CLIMATE_MODE_COOL      ? chestnut::Mode::Cool
-                                        : m == climate::CLIMATE_MODE_HEAT_COOL ? chestnut::Mode::Auto
-                                                                               : chestnut::Mode::Off;
-            id(g_hold) = true;
-            id(g_hold_f) = chestnut::derive_setpoints(mode, lroundf(id(comfort_target).state),
-                                                      lroundf(id(eco_offset).state), eco, false, 0)
-                               .effective_f;
+            // A level hold (R12): the level applies with its normal derivation, and it replaces
+            // any temperature hold.
+            id(g_hold_level) = true;
+            id(g_hold_temp) = false;
           }
           id(apply_setpoints).execute();
