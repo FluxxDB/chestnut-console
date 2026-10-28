@@ -13,6 +13,9 @@ esp32:
   flash_size: 16MB
   # ESPHome's 400MHz default for the P4 is experimental and may not boot.
   cpu_frequency: 360MHZ
+  # Dang's Tab5 has early ESP32-P4 silicon, revision v1.3 (checked with esptool chip-id).
+  # ESPHome assumes rev3 production silicon unless told otherwise; drop this for a rev3 unit.
+  engineering_sample: true
   framework:
     type: esp-idf
     advanced:
