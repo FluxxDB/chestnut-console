@@ -11,13 +11,13 @@ The Tab5 can't render Home Assistant's own dashboard (it has no browser). Phones
 ## Goals
 
 - At a glance: room temperature, target, what the system is doing right now, humidity, outdoor temperature, time.
-- Change the target with big − / + buttons. Change mode, fan and preset with one tap.
+- Change the target with big − / + buttons. Change mode, fan and Comfort/Eco with one tap. See the schedule state, see when a manual change is holding, and resume the schedule.
 - Readable in light and dark, with a theme toggle that also follows sunset and sunrise.
 - Works fully when Home Assistant or Wi-Fi is down (only the outdoor reading goes blank).
 
 ## Non-goals (for this version)
 
-- Editing the weekly schedule on the screen (milestone 2 runs the schedule on the device; how it's edited is still open), settings pages, top-floor control, voice, animations, a drag dial.
+- The schedule-editing screen (milestone 2 runs the schedule on the device and makes it editable from HA and the web page; a touch editor comes later, owned by the PC), settings pages, top-floor control, voice, animations, a drag dial.
 - Home Assistant's dashboard on the Tab5.
 
 ## Anti-goals
@@ -74,7 +74,7 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 │ ~~~~~~ temperature line ~~~~~~~ - - - │ 48°  Cloudy  │ 42% Comfort.  │
 │ 6 am        Dashed line: target   Now │              │ (cyan card)   │
 ├───────────────────────────────────────┴──────────────┴───────────────┤
-│ Mode (Off)(Heat)(Cool)(Auto) │ Fan (Auto)(On) │ (preset group: pending M2) │  strip ~90
+│ Mode (Off)(Heat)(Cool)(Auto) │ Fan (Auto)(On) │ (Comfort)(Eco)            │  strip ~90
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -113,7 +113,11 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 - **One target in every mode** *(Dang, 2026-10-28: replaces the two-setpoint Auto from mockup v5)*:
   - One number ("Target") sits between the − / + buttons, in Heat, Cool and Auto alike.
   - Each tap moves the target by 1 °F, clamped to the climate's min/max (the range and step come from the milestone 2 spec).
-  - In Auto the thermostat decides to heat or cool toward the target. The anti-flip-flop gap is hidden logic in milestone 2, not shown on screen.
+  - In Auto the thermostat decides to heat or cool toward the target. The anti-flip-flop gap is hidden logic in milestone 2, not shown on screen. ESPHome's single-point heat_cool does this natively, per the milestone 2 spec.
+  - The number shown is always the **Comfort** target, even while Eco is active (milestone 2). The card label says which is in effect: "Comfort target" or "Eco · Comfort 72°".
+- **Schedule line** at the bottom of the target card *(my call)*:
+  - Following the schedule: the current period and when it ends, for example "Return · Comfort until 10:30 pm".
+  - Holding a manual change (target or Comfort/Eco, which holds until the next period starts, per milestone 2): "Holding until 10:30 pm" next to a **Resume schedule** pill in the emphasis-button style. Tapping it ends the hold.
 - **Off mode:** the card shows "Off" and the − / + buttons are hidden.
 - The number updates instantly. The new setpoint goes to the climate entity once there's been no tap for ~1.5 s, so a run of taps is one change *(my call)*.
 
@@ -129,9 +133,9 @@ Landscape, 1280×720. LVGL `rotation: 270` (the panel is natively portrait), set
 - Three pill groups, separated by hairline dividers:
   - **Mode:** Off / Heat / Cool / Auto
   - **Fan:** Auto / On
-  - **Preset:** *pending*. Dang said the Home / Away / Sleep pills from mockup v5 don't match what he decided in the milestone 2 brainstorm, so this group waits for the milestone 2 spec.
+  - **Comfort / Eco** *(milestone 2 replaced presets with this; placement is my call)*. Eco lets the house drift the money-saving way (default 4 °F, set in HA or on the web page). Selecting either one manually starts a hold.
 - One tap selects, and the selected pill shows Mint Wash.
-- If a third group lands, pills may narrow (padding ~20 px) to fit in 1228 px.
+- Eight pills in three groups fit in 1228 px at ~20 px horizontal padding.
 
 **Idle dimming** *(Dang)*
 - After 30 s without a touch, the backlight dims to ~10%.
