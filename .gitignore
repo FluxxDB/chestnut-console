@@ -9,8 +9,9 @@ home-assistant/config/*
 !home-assistant/config/scripts.yaml
 !home-assistant/config/scenes.yaml
 
-# ESPHome build output
+# ESPHome build output and Device Builder state (includes a pairing key)
 tab5-thermostat/.esphome/
+tab5-thermostat/.device-builder*
 tab5-thermostat/.pioenvs/
 tab5-thermostat/.piolibdeps/
 
