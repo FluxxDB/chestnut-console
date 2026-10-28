@@ -1,5 +1,7 @@
-# Console styles: the UI spec's color tokens as LVGL style definitions (light palette).
-# Every widget takes its colors from these, so a theme switch only re-colors the styles.
+# Console styles: the UI spec's color tokens as LVGL style definitions, plus the light/dark
+# switch. Every widget takes its colors from these styles, so switching theme only re-colors
+# the styles (script ui_apply_theme). The house location for sunset/sunrise comes from
+# substitutions (secrets on the Tab5), never from git.
 
 lvgl:
   style_definitions:
@@ -75,9 +77,162 @@ lvgl:
       radius: 18
       text_color: 0x181B22
       pad_all: 22
+    - id: st_line_target
+      line_color: 0x585C64
+      line_opa: 60%
     - id: st_bare
       bg_opa: TRANSP
       border_width: 0
       shadow_width: 0
       pad_all: 0
       radius: 0
+
+substitutions:
+  # Overridden on the Tab5 from secrets.yaml (house_latitude / house_longitude).
+  house_latitude: "0.0"
+  house_longitude: "0.0"
+
+switch:
+  - platform: template
+    id: ui_dark_theme
+    name: "Dark Theme"
+    icon: mdi:theme-light-dark
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - script.execute: ui_apply_theme
+    on_turn_off:
+      - script.execute: ui_apply_theme
+
+sun:
+  id: house_sun
+  time_id: sntp_time
+  latitude: ${house_latitude}°
+  longitude: ${house_longitude}°
+  # Dark at sunset, light at sunrise. A tap on the theme button overrides until the next one.
+  on_sunset:
+    - switch.turn_on: ui_dark_theme
+  on_sunrise:
+    - switch.turn_off: ui_dark_theme
+
+esphome:
+  on_boot:
+    priority: -100
+    then:
+      - script.execute: ui_apply_theme
+
+script:
+  - id: ui_apply_theme
+    mode: restart
+    then:
+      - if:
+          condition:
+            switch.is_on: ui_dark_theme
+          then:
+            - lvgl.style.update:
+                id: st_page
+                bg_color: 0x181B22
+            - lvgl.style.update:
+                id: st_card
+                bg_color: 0x1F232D
+                border_color: 0x2A2F3A
+            - lvgl.style.update:
+                id: st_emph
+                bg_color: 0x2B303C
+            - lvgl.style.update:
+                id: st_hum
+                bg_color: 0x2A343C
+                border_color: 0x2A343C
+                bg_opa: COVER
+                border_width: 0
+            - lvgl.style.update:
+                id: st_ebtn
+                bg_color: 0x3A4050
+                text_color: 0xFFFFFF
+            - lvgl.style.update:
+                id: st_pill
+                bg_color: 0x272B35
+                bg_opa: COVER
+                border_color: 0x272B35
+                border_width: 0
+                text_color: 0xFFFFFF
+            - lvgl.style.update:
+                id: st_pill_sel
+                bg_color: 0x1E3B33
+                border_color: 0x2F6A55
+                text_color: 0xDBFFE7
+            - lvgl.style.update:
+                id: st_ink
+                text_color: 0xFFFFFF
+            - lvgl.style.update:
+                id: st_sub
+                text_color: 0x9A9CA1
+            - lvgl.style.update:
+                id: st_on_emph_sub
+                text_color: 0x9A9CA1
+            - lvgl.style.update:
+                id: st_hum_text
+                text_color: 0xDFF9FF
+            - lvgl.style.update:
+                id: st_rule
+                bg_color: 0x2E333E
+            - lvgl.style.update:
+                id: st_line_target
+                line_color: 0x9A9CA1
+            - lvgl.label.update:
+                id: lbl_theme_icon
+                text: "\U000F05A8"
+          else:
+            - lvgl.style.update:
+                id: st_page
+                bg_color: 0xE9ECF0
+            - lvgl.style.update:
+                id: st_card
+                bg_color: 0xFFFFFF
+                border_color: 0xD3D8DE
+            - lvgl.style.update:
+                id: st_emph
+                bg_color: 0x1F232D
+            - lvgl.style.update:
+                id: st_hum
+                bg_color: 0xDFF9FF
+                border_color: 0xB8E6F2
+                bg_opa: COVER
+                border_width: 1
+            - lvgl.style.update:
+                id: st_ebtn
+                bg_color: 0xF5F5F5
+                text_color: 0x181B22
+            - lvgl.style.update:
+                id: st_pill
+                bg_color: 0xEEF0F3
+                bg_opa: COVER
+                border_color: 0xD3D8DE
+                border_width: 1
+                text_color: 0x181B22
+            - lvgl.style.update:
+                id: st_pill_sel
+                bg_color: 0xDBFFE7
+                border_color: 0x9FD9B4
+                text_color: 0x181B22
+            - lvgl.style.update:
+                id: st_ink
+                text_color: 0x181B22
+            - lvgl.style.update:
+                id: st_sub
+                text_color: 0x585C64
+            - lvgl.style.update:
+                id: st_on_emph_sub
+                text_color: 0xA3A6AB
+            - lvgl.style.update:
+                id: st_hum_text
+                text_color: 0x181B22
+            - lvgl.style.update:
+                id: st_rule
+                bg_color: 0xD9D9D9
+            - lvgl.style.update:
+                id: st_line_target
+                line_color: 0x585C64
+            - lvgl.label.update:
+                id: lbl_theme_icon
+                text: "\U000F0594"

@@ -85,7 +85,7 @@ async def main() -> None:
     await maybe_await(client.subscribe_states(on_state))
 
     scenario = by_id.get("scenario")
-    theme = by_id.get("ui_dark_theme")
+    theme = by_id.get("dark_theme")
     snapshot = by_id.get("ui_snapshot")
     scenarios = args.scenarios if (args.scenarios and scenario) else ["default"]
 

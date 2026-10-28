@@ -6,6 +6,9 @@ substitutions:
   friendly_name: Main Thermostat
   # Landscape. Use 90° instead if the screen comes out upside down.
   display_rotation: 270°
+  # Sunset/sunrise theme switching (house location stays in secrets.yaml, not git).
+  house_latitude: !secret house_latitude
+  house_longitude: !secret house_longitude
 
 esphome:
   name: ${name}

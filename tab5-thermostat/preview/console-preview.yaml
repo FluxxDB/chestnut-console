@@ -116,5 +116,18 @@ text_sensor:
         lv_obj_get_coords(id(lbl_room), &a); lv_obj_get_coords(id(lbl_room_deg), &b);
         add("room_deg_gap", std::to_string((int) (b.x1 - a.x2)));
       }
+      {
+        auto hexof = [](lv_color_t c) { char h[8]; snprintf(h, sizeof(h), "%06x", (unsigned) (lv_color_to_u32(c) & 0xFFFFFF)); return std::string(h); };
+        add("c_page", hexof(lv_obj_get_style_bg_color(id(bg_page), LV_PART_MAIN)));
+        add("c_card", hexof(lv_obj_get_style_bg_color(id(card_room), LV_PART_MAIN)));
+        add("c_emph", hexof(lv_obj_get_style_bg_color(id(card_target), LV_PART_MAIN)));
+        add("c_hum", hexof(lv_obj_get_style_bg_color(id(card_hum), LV_PART_MAIN)));
+        add("c_pill", hexof(lv_obj_get_style_bg_color(id(btn_mode_off), LV_PART_MAIN)));
+        add("c_pill_sel", hexof(lv_obj_get_style_bg_color(id(btn_lvl_comfort), LV_PART_MAIN)));
+        add("c_pill_sel_text", hexof(lv_obj_get_style_text_color(id(btn_lvl_comfort), LV_PART_MAIN)));
+        add("c_ink", hexof(lv_obj_get_style_text_color(id(lbl_room), LV_PART_MAIN)));
+        add("c_sub", hexof(lv_obj_get_style_text_color(id(lbl_inside), LV_PART_MAIN)));
+        add("icon", strcmp(lv_label_get_text(id(lbl_theme_icon)), "\U000F05A8") == 0 ? "sun" : "moon");
+      }
       j.back() = '}';
       return j;

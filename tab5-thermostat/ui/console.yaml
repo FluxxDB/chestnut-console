@@ -97,6 +97,8 @@ lvgl:
                         styles: st_ink
                     - button:
                         id: btn_theme
+                        on_click:
+                          - switch.toggle: ui_dark_theme
                         width: 66
                         height: 50
                         styles: st_pill
@@ -201,8 +203,7 @@ lvgl:
                               line_width: 2
                               line_dash_width: 6
                               line_dash_gap: 8
-                              line_color: 0x585C64
-                              line_opa: 60%
+                              styles: st_line_target
                           - line:
                               id: line_hist
                               points:
