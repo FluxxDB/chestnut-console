@@ -44,9 +44,10 @@ sensor:
     device_class: humidity
     accuracy_decimals: 0
   - platform: template
-    id: action_since
-    name: "Action Since"
-    device_class: timestamp
+    id: action_elapsed
+    name: "Action Elapsed"
+    unit_of_measurement: s
+    accuracy_decimals: 0
 
 binary_sensor:
   - platform: template
@@ -149,6 +150,10 @@ select:
       - Interlock fault
       - Unknowns
       - Finishing
+      - Interlock while heating
+      - Sensor fault mid-run
+      - Eco hold in Auto
+      - Temperature hold in Auto
     initial_option: Heating
     on_value:
       - script.execute:
@@ -217,7 +222,7 @@ script:
           auto action = climate::CLIMATE_ACTION_IDLE;
           if (name == "Heating") { heat = true; action = climate::CLIMATE_ACTION_HEATING; }
           else if (name == "Cooling") { mode = climate::CLIMATE_MODE_COOL; room = 76; target = 74; cool = true; fan = true; action = climate::CLIMATE_ACTION_COOLING; period = "Wake"; next = "8:00 am"; status = "Comfort until 8:00 am"; }
-          else if (name == "Eco auto band") { mode = climate::CLIMATE_MODE_HEAT_COOL; level = "Eco"; room = 70; low = 68; high = 76; target = 72; period = "Leave"; next = "5:30 pm"; status = "Eco until 5:30 pm"; }
+          else if (name == "Eco auto band") { mode = climate::CLIMATE_MODE_HEAT_COOL; level = "Eco"; room = 70; low = 67; high = 77; target = 72; period = "Leave"; next = "5:30 pm"; status = "Eco until 5:30 pm"; }
           else if (name == "Hold") { heat = true; action = climate::CLIMATE_ACTION_HEATING; target = 69; hold = true; status = "Holding 69° until 10:30 pm"; }
           else if (name == "Schedule off") { sched_on = false; period = ""; next = ""; status = "Schedule off"; heat = true; action = climate::CLIMATE_ACTION_HEATING; }
           else if (name == "Clock not set") { period = ""; next = ""; status = "Schedule paused: clock not set"; }
@@ -225,6 +230,10 @@ script:
           else if (name == "Off fan on") { mode = climate::CLIMATE_MODE_OFF; fan = true; action = climate::CLIMATE_ACTION_OFF; }
           else if (name == "Sensor fault") { room = NAN; sfault = true; wait = "Sensor fault"; }
           else if (name == "Interlock fault") { ifault = true; wait = "Interlock fault"; }
+          else if (name == "Interlock while heating") { ifault = true; wait = "Interlock fault"; action = climate::CLIMATE_ACTION_HEATING; }
+          else if (name == "Sensor fault mid-run") { room = NAN; sfault = true; wait = "Sensor fault"; heat = true; action = climate::CLIMATE_ACTION_HEATING; }
+          else if (name == "Eco hold in Auto") { mode = climate::CLIMATE_MODE_HEAT_COOL; level = "Eco"; room = 70; low = 67; high = 77; target = 72; hold = true; status = "Holding Eco until 10:30 pm"; }
+          else if (name == "Temperature hold in Auto") { mode = climate::CLIMATE_MODE_HEAT_COOL; level = "Eco"; room = 70; low = 69; high = 71; target = 70; hold = true; status = "Holding 70° until 10:30 pm"; }
           else if (name == "Finishing") { mode = climate::CLIMATE_MODE_COOL; heat = true; action = climate::CLIMATE_ACTION_HEATING; }
           else if (name == "Unknowns") { room = NAN; target = NAN; hum = NAN; period = ""; next = ""; status = ""; }
           id(checked_temperature).publish_state(room);
@@ -232,7 +241,7 @@ script:
           id(effective_low).publish_state(low);
           id(effective_high).publish_state(high);
           id(room_humidity).publish_state(hum);
-          id(action_since).publish_state(id(sntp_time).now().is_valid() ? id(sntp_time).now().timestamp - 18 * 60 : NAN);
+          id(action_elapsed).publish_state(18 * 60);
           id(call_heat).publish_state(heat);
           id(call_cool).publish_state(cool);
           id(call_fan).publish_state(fan);

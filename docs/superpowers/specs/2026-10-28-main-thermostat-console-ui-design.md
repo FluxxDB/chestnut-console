@@ -89,7 +89,7 @@ All fonts render with **4-bit anti-aliasing** (`bpp: 4`). At ESPHome's default 1
 | Date, clock | Inter 400, 27 / 30 |
 | Labels ("Inside now", "Target", card captions) | Inter 400, 27–30 (all grey text 27) |
 | Room temperature | Inter 400, 172, tight tracking (≈ −0.045 em); the ° sign smaller and raised |
-| Target | Inter 400, 112 (a range like "68–76°": 78) |
+| Target | Inter 400, 112 (a range like "67–77°": 78) |
 | Small-card values | Inter 400, 56 |
 | Pills | Inter 400, 28, height ~55, fully rounded |
 | − / + buttons | ~82×82, radius ~16, glyph ~46 |
@@ -122,7 +122,7 @@ All fonts render with **4-bit anti-aliasing** (`bpp: 4`). At ESPHome's default 1
   - In Auto the thermostat decides to heat or cool toward the target. The anti-flip-flop gap is hidden in milestone 2: ESPHome's thermostat is two-point under the hood, and milestone 2 derives both points from the single target.
 - **Comfort vs Eco on the card** *(Dang: show the Eco number big)*:
   - In Comfort, the big number is the Comfort target, labeled "Comfort target".
-  - In Eco, the big number is the **Eco temperature** (`effective_target`). In Auto with Eco and no hold, it shows the band edges as "68–76°". It's labeled "Eco target", with "Comfort 72°" in small text.
+  - In Eco, the big number is the **Eco temperature** (`effective_target`). In Auto, when Eco widens the range (scheduled Eco, or an Eco level hold), it shows the band edges, e.g. "67–77°". Plain Auto and a temperature hold keep a hidden ±1 around one number, so they show that number. *(Milestone 2's hold model: Comfort/Eco pressed by hand holds the level, − / + holds a temperature.)* It's labeled "Eco target", with "Comfort 72°" in small text.
   - **− / + in Eco change the shown Eco temperature for now** *(Dang)*. Tapping + on 68° writes 69 to `set_target`, which milestone 2 holds until the next period. Comfort isn't changed.
 - **Off mode:** the card shows "Off" and the − / + buttons are hidden.
 - The number updates instantly. The new setpoint goes to the climate entity once there's been no tap for ~1.5 s, so a run of taps is one change *(my call)*.
@@ -167,7 +167,8 @@ All fonts render with **4-bit anti-aliasing** (`bpp: 4`). At ESPHome's default 1
 
 **Sensor fault** *(milestone 2: a bad sensor stops heating/cooling and raises an alert)*
 - The room temperature shows "—".
-- The status marker turns Muted Steel with "Paused".
+- The status marker turns Muted Steel with "Paused". A fault always wins over the climate's action: under a latched interlock, ESPHome's thermostat can still report heating with the relays off.
+- If a heat or cool call is still on (after a sensor fault, milestone 2 lets it finish its minimum run), the subline says "Finishing up · stops soon", so the running furnace or AC doesn't look stuck. *(Mac agent's suggestion.)*
 - A Signal Yellow `#f8e645` banner with ink text replaces the temperature line: "Temperature sensor problem. Heating and cooling are paused." The docs reserve Signal Yellow for a single high-attention grouping *(my call)*.
 - The banner clears by itself when milestone 2 resumes.
 

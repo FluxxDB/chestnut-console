@@ -259,8 +259,11 @@ script:
           const float lo = id(effective_low).state;
           const float hi = id(effective_high).state;
           const int pending = id(ui_pending_target);
-          const bool band = mode == climate::CLIMATE_MODE_HEAT_COOL && eco && !hold && pending < 0 &&
-                            !std::isnan(lo) && !std::isnan(hi);
+          // Auto shows its range when Eco widens it, an Eco level hold included (milestone 2: Comfort
+          // or Eco pressed by hand holds the level, and Eco keeps its band). Plain Auto and a
+          // temperature hold keep low/high just ±1 around the target, which stays hidden.
+          const bool band = mode == climate::CLIMATE_MODE_HEAT_COOL && pending < 0 &&
+                            !std::isnan(lo) && !std::isnan(hi) && hi - lo > 2.5f;
           auto now = id(sntp_time).now();
 
           // ── top bar ──
@@ -313,6 +316,9 @@ script:
           const std::string finishing = "Finishing up · stops soon";
           if (sfault || ifault) {
             word = "Paused";
+            // Milestone 2 lets a running call finish its minimum run after a sensor fault (an
+            // interlock fault cuts both at once): say so, so it doesn't look like a stuck relay.
+            if (id(call_heat).state || id(call_cool).state) sub = finishing;
           } else if (action == climate::CLIMATE_ACTION_HEATING) {
             word = "Heating"; color = 0xFF7B1B;
             sub = mode == climate::CLIMATE_MODE_HEAT || mode == climate::CLIMATE_MODE_HEAT_COOL ? running(action_target()) : finishing;

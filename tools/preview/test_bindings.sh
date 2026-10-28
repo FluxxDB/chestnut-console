@@ -8,13 +8,13 @@ sh="tab5-thermostat/preview/shots"
 $dc --entrypoint rm preview -rf /config/preview/shots/bind /config/preview/shots/debounce /config/preview/shots/clamp >/dev/null 2>&1
 $dc preview preview/console-preview.yaml /config/preview/shots/bind --dump \
   "Heating" "Cooling" "Eco auto band" "Hold" "Schedule off" "Clock not set" "Waiting" \
-  "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" "Finishing" >/dev/null
+  "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" "Finishing" "Interlock while heating" "Sensor fault mid-run" "Eco hold in Auto" "Temperature hold in Auto" >/dev/null
 c="python3 tools/preview/check_snapshot.py $sh/bind"
 $c heating light room=71 status=Heating "sub=~^to 72° · ([0-9]+ min so far|just started)$" target=72° "tgt_label=Comfort target" tgt_comfort= \
   "sched=Comfort until 10:30 pm" resume_visible=0 mode_sel=0100 fan_sel=10 lvl_sel=10 hum=42% hum_cap=Comfortable \
   banner_visible=0 hist_visible=1 out_temp=— pm_visible=1 marker=ff7b1b "clock=~^[0-9]{1,2}:[0-9]{2} (am|pm)$" "date=~^[A-Z][a-z]{2} [0-9]{1,2}$"
 $c cooling light room=76 status=Cooling "sub=~^to 74° · ([0-9]+ min so far|just started)$" target=74° mode_sel=0010 marker=4098ff "sched=Comfort until 8:00 am"
-$c eco-auto-band light target=68–76° "tgt_label=Eco target" "tgt_comfort=Comfort 72°" status=Idle "sub=holding 68–76°" lvl_sel=01 mode_sel=0001 marker=8b8d90 "sched=Eco until 5:30 pm" "room_deg_gap=~^[0-9]+$"
+$c eco-auto-band light target=67–77° "tgt_label=Eco target" "tgt_comfort=Comfort 72°" status=Idle "sub=holding 67–77°" lvl_sel=01 mode_sel=0001 marker=8b8d90 "sched=Eco until 5:30 pm" "room_deg_gap=~^[0-9]+$"
 $c hold light target=69° status=Heating "sub=~^to 69° · ([0-9]+ min so far|just started)$" "sched=Holding 69° until 10:30 pm" resume_visible=1 "topbar_gap=~^[1-9][0-9]*$"
 $c schedule-off light "sched=Schedule off" resume_visible=0
 $c clock-not-set light "sched=Schedule paused: clock not set" resume_visible=0 "topbar_gap=~^[1-9][0-9]*$"
@@ -25,6 +25,16 @@ $c interlock-fault light status=Paused banner_visible=1 hist_visible=0 "banner=H
 $c unknowns light room=— target=— hum=— hum_cap= out_temp=— sched=
 # Switched to Cool mid-heat: under M2 the furnace finishes its minimum run first (up to 3 min).
 $c finishing light status=Heating "sub=Finishing up · stops soon" marker=ff7b1b mode_sel=0010
+# M2: while interlock_fault is latched the climate can still report HEATING with the relays off
+# (mac-chestnut-console). A fault always wins: Paused, grey marker, no "to 72°" line.
+$c interlock-while-heating light status=Paused sub= marker=8b8d90 banner_visible=1
+# M2: a sensor fault lets a running call finish its minimum run (call_heat still on). Say so, so the
+# furnace still running doesn't look like a stuck relay (mac-chestnut-console's suggestion).
+# M2's two holds (mac-chestnut-console): Comfort/Eco pressed by hand is a level hold, and Eco keeps
+# widening Auto's range; − / + is a temperature hold at one number (low/high just ±1 around it).
+$c eco-hold-in-auto light target=67–77° "tgt_label=Eco target" "sched=Holding Eco until 10:30 pm" resume_visible=1 "topbar_gap=~^[1-9][0-9]*$"
+$c temperature-hold-in-auto light target=70° "sched=Holding 70° until 10:30 pm" resume_visible=1
+$c sensor-fault-mid-run light status=Paused "sub=Finishing up · stops soon" marker=8b8d90 banner_visible=1
 # Debounce: 5 quick taps on + from 72 -> one write of 77.
 $dc preview preview/console-preview.yaml /config/preview/shots/debounce --dump "Heating" \
   --clicks "1183,251;1183,251;1183,251;1183,251;1183,251" >/dev/null
