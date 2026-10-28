@@ -44,9 +44,10 @@ sensor:
     device_class: humidity
     accuracy_decimals: 0
   - platform: template
-    id: action_since
-    name: "Action Since"
-    device_class: timestamp
+    id: action_elapsed
+    name: "Action Elapsed"
+    unit_of_measurement: s
+    accuracy_decimals: 0
 
 binary_sensor:
   - platform: template
@@ -236,7 +237,7 @@ script:
           id(effective_low).publish_state(low);
           id(effective_high).publish_state(high);
           id(room_humidity).publish_state(hum);
-          id(action_since).publish_state(id(sntp_time).now().is_valid() ? id(sntp_time).now().timestamp - 18 * 60 : NAN);
+          id(action_elapsed).publish_state(18 * 60);
           id(call_heat).publish_state(heat);
           id(call_cool).publish_state(cool);
           id(call_fan).publish_state(fan);
