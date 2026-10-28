@@ -1,6 +1,6 @@
 # Milestone 2: Main Thermostat logic and virtual house
 
-*Design, 2026-10-28. Owner: mac-chestnut-console (branch `mac/thermostat-logic`). Status: draft, waiting on Dang's approval.*
+*Design, 2026-10-28. Owner: mac-chestnut-console (branch `mac/thermostat-logic`). Status: ready for Dang's approval. Builder check done; Q1–Q3 answered by Dang.*
 
 Decisions are marked by who made them: **Dang** (asked in a survey), **PC** (pc-chestnut-console, Dang delegated the call), or **Mac call** (my default, open to change while you read this).
 
@@ -10,7 +10,7 @@ The Main Thermostat has to keep the house comfortable on its own. Home Assistant
 
 ## What done looks like (Dang)
 
-1. **Play with it in a browser.** The virtual Main Thermostat runs on a computer (ESPHome `host` platform) and serves the same kind of web page the Tab5 does. You can set the mode and target, change the outdoor temperature, break the sensor on purpose, and watch the virtual relays react.
+1. **Play with it in a browser.** You set the mode and target, change the outdoor temperature, break the sensor on purpose, and watch the virtual relays react. **Catch:** ESPHome's `web_server` doesn't build for the `host` platform (its `only_on` list in 2026.10.1 leaves out `host`), so the computer-run sim can't serve that page. **Dang (Q2):** the browser play happens on the **Tab5's own web page**, with the Tab5 running the logic against the virtual house (criterion 4). The computer-run sim shows up in **HA** and runs the automated tests.
 2. **See it in Home Assistant.** The simulated device connects to HA like the real one does, so the HA thermostat card, history graphs and alerts can be tried before the Tab5 runs the logic.
 3. **Automated safety tests.** Scripted scenarios check each safety rule on their own and report pass/fail.
 4. **The same logic package runs on the Tab5**, with the virtual house package standing in for the real sensor and relays until M4.
@@ -47,7 +47,8 @@ Dang did not ask for a fast-forward mode for playing with it: the browser sim ru
 ## Constraints
 
 - ESPHome 2026.10.1 (pinned in `docker-compose.yml`). C++ only for custom bits (AGENTS.md).
-- **ESPHome forces two setpoints when the thermostat has both heat and cool actions.** `thermostat/climate.py` sets `supports_two_points` automatically when `heat_action` and `cool_action` both exist. So the single-target behaviour has to be built on top: a **Comfort target** that we own, with the climate's low/high setpoints derived from it. See "Single target" below and open question Q1.
+- **ESPHome forces two setpoints when the thermostat has both heat and cool actions.** `thermostat/climate.py` sets `supports_two_points` automatically when `heat_action` and `cool_action` both exist. So the single-target behaviour is built on top: the logic owns the effective target and derives the climate's low/high setpoints from it. See "Single target" below and Q1 (answered: stock thermostat, range in Auto).
+- **ESPHome's `web_server` is not available on `host`** (Dang's answer to Q2: browser play is on the Tab5's own page; the host sim is for HA and the tests).
 - Climate values are °C inside ESPHome. The UI and HA show °F. Setpoints change in **whole °F** steps.
 - The package contract in AGENTS.md: the logic package uses `room_temperature`, `room_humidity`, `relay_heat`, `relay_cool`, `relay_fan` and `relay_ob`, and provides `main_thermostat`. It never knows whether the sim or real hardware is loaded.
 - The Tab5's `api:` and `wifi:` have `reboot_timeout: 0s` (on `pc/no-reboot-timeout`, approved). The sim entry point does the same for `api:`.
@@ -65,17 +66,27 @@ Dang did not ask for a fast-forward mode for playing with it: the browser sim ru
 | Idle / Off | none (except G when the fan is On) |
 | O/B | never on in M2 |
 
-### Single target, Comfort and Eco
+### Single target, Comfort, Eco and holds
 
-- **Source of truth: the Comfort target** (°F, whole degrees, 50–90°F, restored after reboot). It is the big number on the screen and what the user changes. (Range and step: Mac call.)
-- **Eco offset**: N°F, default 4, editable 2–10°F (Mac call for the range).
-- The climate's internal setpoints are derived from Comfort, the mode and Comfort/Eco (Mac call; the builder may refine the exact values within these rules):
-  - **Heat:** heat to Comfort, or to Comfort − N in Eco.
-  - **Cool:** cool to Comfort, or to Comfort + N in Eco.
-  - **Auto:** the low setpoint is Comfort − 1°F and the high setpoint is Comfort + 1°F, both moved out by N in Eco. Each side keeps a small deadband and overrun so a target of 72°F reads as "heat below about 71, cool above about 73" (PC relaying Dang).
+- **Settings** (restored after reboot; ranges are a Mac call):
+  - **Comfort target**: °F, whole degrees, 50–90°F.
+  - **Eco offset**: N°F, default 4, 2–10°F.
+- **The effective target** is the one temperature the thermostat is holding right now. It's the **big number on the screen** (Dang, via PC):
+  - In a **hold**: the held temperature.
+  - In **Comfort**: the Comfort target.
+  - In **Eco**: Comfort − N in Heat, Comfort + N in Cool. In Auto the screen shows the Eco band edges.
+
+  When Eco is on, the screen shows Comfort small, beside the big number (PC's screen spec).
+- **− / + on the screen, or a setpoint change from HA or the web page, starts a hold** at that temperature. The hold lasts until the next schedule period starts or Resume schedule is pressed. The Comfort target and Eco offset settings are untouched. Example: in Eco at 68°, + gives a hold at 69° (Dang, via PC). The same applies in a Comfort period (Mac call, following Dang's "a manual change holds until the next period"). The Comfort target itself only changes through its setting, in HA or on the web page, and later in a settings screen.
+- **Hold in Auto**: the held temperature becomes the centre of the normal ±1°F band, with no Eco widening. In Auto with Eco on, the first tap starts from the Comfort target. (Mac call.)
+- The climate's internal low/high setpoints are always **derived from the effective target and the mode** (Mac call; the builder may refine the exact values within these rules):
+  - **Heat:** heat to the effective target.
+  - **Cool:** cool to the effective target.
+  - **Auto:** low = target − 1°F, high = target + 1°F. In Eco without a hold, both move out by N. Each side keeps a small deadband and overrun, so a target of 72°F reads as "heat below about 71, cool above about 73" (PC relaying Dang).
+- **"Auto" is ESPHome's `HEAT_COOL` mode** (heat or cool between setpoints). ESPHome's `AUTO` mode is not offered.
+- **What HA's card shows** (checked in HA's ESPHome integration, `climate.py` on HA `dev`). ESPHome marks this climate as *supporting* two setpoints, not *requiring* them. So HA's card shows **one number in Heat and Cool** (the effective target) and a **narrow range in Auto**. **Dang (Q1): the range in Auto is fine.** Stock ESPHome thermostat, no C++ wrapper.
 - **Auto changeover lockout:** after a heat call ends, no cool call for at least 30 minutes, and the other way around. It's editable within 10–120 min (Mac call). This stops ping-ponging on top of ESPHome's forced pass through idle.
-- **Manual changes from HA or the web page**: a change to a climate setpoint from HA's card is read as "set Comfort to this and hold". It also leaves Eco, because the person evidently wants that temperature now. (Mac call.)
-- Comfort/Eco shows in HA, ideally as the climate's standard `comfort` / `eco` presets so HA's card shows and switches it natively. If that fights the thermostat component's own preset handling, a `select` is fine. (Builder's call.)
+- **Comfort/Eco is always a `select` (`comfort_level`).** The screen and HA bind to it. If it can also be mirrored to the climate's standard `comfort` / `eco` presets without fighting the thermostat's own preset handling, do that too, so HA's card shows it (builder's call).
 
 ### Schedule (Dang, defaults are a Mac call)
 
@@ -83,7 +94,8 @@ Dang did not ask for a fast-forward mode for playing with it: the browser sim ru
 - Default times and levels: weekdays Wake 6:30 Comfort, Leave 8:30 Eco, Return 17:30 Comfort, Sleep 22:30 Eco. Weekends Wake 8:00 Comfort, Leave 10:00 Comfort, Return 17:00 Comfort, Sleep 23:00 Eco.
 - The schedule **only switches Comfort ↔ Eco**. It never changes the mode or the Comfort target. Off stays Off.
 - **Schedule on/off** switch (default on, restored).
-- **Hold:** any manual change (Comfort target, Comfort/Eco, or a setpoint from HA) starts a hold. The hold ends when the next period starts, which then applies its own level. A **Resume schedule** button ends the hold early. A status text says what's happening, e.g. "Eco until 17:30 (schedule)" or "Hold: Comfort 70°F until 22:30".
+- **Hold:** a manual temperature change (see above) or a manual Comfort/Eco switch starts a hold. The hold ends when the next period starts, which then applies its own level. A **Resume schedule** button ends the hold early. With the schedule off, a manual change simply stays: there is no hold and no "until".
+- **What the screen needs as data, not just text** (from the PC's screen spec): the current period name, its level, the next period's start time, whether a hold is on, and the held temperature. A ready-made status text also exists for HA and the web page, e.g. "Eco until 5:30 pm" or "Holding 69° until 10:30 pm". Times use 12-hour format.
 - **Clock:** the schedule uses the device clock (on the Tab5, the battery-backed RTC, then SNTP; on the host, the system clock), in America/New_York. If the clock isn't valid, the schedule pauses at the current level and says so in its status. Heating and cooling carry on regardless.
 - **After a reboot** the schedule re-applies the current period's level. A hold doesn't survive a reboot. (Mac call: simplest, and a reboot is rare.)
 
@@ -111,7 +123,13 @@ Dang did not ask for a fast-forward mode for playing with it: the browser sim ru
    - it's outside 2–40°C (36–104°F);
    - it hasn't changed at all for 30 minutes. (The SHT40 always has a little noise, so an identical value for that long means a stuck sensor. The sim adds similar noise.)
 
-   A single-reading jump of more than 2°C is held back for one more reading before it's believed: a spike is filtered, a real change gets through. On a bad reading, the checked temperature becomes NaN. ESPHome's thermostat then goes straight to the OFF action, all calls stop, and a **`sensor_fault`** problem sensor turns on. After **5 minutes** of good readings it clears by itself and normal control resumes. Minimum off times still apply, so the compressor can't short-cycle on recovery. Humidity faults only make humidity unknown; they never affect control.
+   A single-reading jump of more than 2°C is held back for one more reading before it's believed: a spike is filtered, a real change gets through. On a bad reading:
+   - the checked temperature becomes NaN, and a **`sensor_fault`** problem sensor turns on at once;
+   - ESPHome's thermostat asks for the OFF action, so no new call starts;
+   - **a call already running still finishes its minimum run time** (at most 5 min for the AC, 3 min for the furnace), because ESPHome's switch to OFF waits for the run timers (`idle_action_ready_`, checked in the 2026.10.1 source). **Dang (Q3): accepted.** No custom early cut.
+
+   After **5 minutes** of good readings the fault clears by itself and normal control resumes. Minimum off times still apply, so the compressor can't short-cycle on recovery. Humidity faults only make humidity unknown; they never affect control.
+   - The interlock fault is different: it **cuts both relays at once**, minimum run or not. Two calls together is the one thing worse than a short cycle. (Mac call.)
 5. **No reboot on HA or Wi-Fi loss** (see Constraints).
 6. **Nothing in the logic depends on HA, the API, Wi-Fi or SNTP being up.**
 
@@ -121,14 +139,22 @@ Final names are the builder's, but the ids are fixed so the PC can build the scr
 
 | id | type | what |
 |---|---|---|
-| `main_thermostat` | climate | the thermostat (existing contract) |
-| `comfort_target` | number (°F, step 1, 50–90) | the single target |
+| `main_thermostat` | climate | the thermostat (existing contract). Modes OFF / HEAT / COOL / HEAT_COOL; fan modes AUTO / ON. |
+| `effective_target` | sensor (°F) | the big number: the temperature being held right now. In Auto with Eco and no hold, the band centre (the screen shows the edges from `effective_low` / `effective_high`). |
+| `effective_low`, `effective_high` | sensor (°F) | the band edges in Auto |
+| `set_target` | number (°F, step 1, 50–90) | what − / + and HA writes go to: setting it starts a hold at that value (or just sets it, with the schedule off) |
+| `comfort_target` | number (°F, step 1, 50–90) | the Comfort setting |
 | `eco_offset` | number (°F, 2–10) | how far Eco drifts |
-| `comfort_level` | select or climate preset: Comfort / Eco | the current level |
+| `comfort_level` | select: Comfort / Eco | the current level; a manual change starts a hold |
 | `schedule_enabled` | switch | schedule on/off |
-| `schedule_status` | text_sensor | e.g. "Eco until 17:30 (schedule)" |
 | `schedule_hold` | binary_sensor | a manual hold is active |
+| `schedule_period` | text_sensor | Wake / Leave / Return / Sleep (empty with the schedule off or paused) |
+| `schedule_next_change` | text_sensor | next period's start, 12-hour, e.g. "10:30 pm" |
+| `schedule_status` | text_sensor | ready-made text, e.g. "Eco until 5:30 pm", "Holding 69° until 10:30 pm", "Schedule paused: clock not set" |
 | `resume_schedule` | button | end the hold |
+| `call_wait_reason` | text_sensor | why the room is off target but nothing is running: "Starting up", "Short-cycle protection", "Changeover wait", "Sensor fault", "Interlock fault", or empty |
+| `action_since` | sensor (timestamp) | when the current heating/cooling/idle action started, for "18 min so far" |
+| `checked_temperature` | sensor (°F) | the sanity-checked room temperature the thermostat acts on; the screen's big room number should use it |
 | `sched_{weekday,weekend}_{wake,leave,return,sleep}_time` | datetime (time) | period start times |
 | `sched_{weekday,weekend}_{wake,leave,return,sleep}_level` | select | Comfort / Eco per period |
 | `heat_min_run`, `heat_min_off`, `cool_min_run`, `cool_min_off`, `changeover_lockout` | number (min) | safety timers |
@@ -137,7 +163,7 @@ Final names are the builder's, but the ids are fixed so the PC can build the scr
 | `clear_interlock_fault` | button | reset the latch |
 | `call_heat`, `call_cool`, `call_fan` | binary_sensor | read-only W / Y / G state, for the screen, HA history and the sim page |
 
-The current action (heating/cooling/idle) comes from `main_thermostat`'s action, which HA and the screen already read.
+The current action (heating/cooling/idle) comes from `main_thermostat`'s action. The fan's state always comes from `call_fan`, because ESPHome only reports a fan action in fan-only mode, which we don't use, while G runs with Fan On in any mode, including Off.
 
 ## Virtual house (Dang: simple, with knobs)
 
@@ -155,7 +181,7 @@ A `sim` package that provides the contract ids `room_temperature`, `room_humidit
 |---|---|---|
 | `tab5-thermostat/thermostat/logic.yaml` (plus small C++ helpers if needed) | climate, safety, Comfort/Eco, schedule | Mac |
 | `tab5-thermostat/sim/virtual-house.yaml` | the virtual house | Mac |
-| `tab5-thermostat/main-thermostat-sim.yaml` | `host` entry: logic + sim, `api` (own key, `reboot_timeout: 0s`), `web_server` v3 with digest auth, host time in America/New_York. Device name `main-thermostat-sim`, shown as "Main Thermostat (Sim)" so HA keeps it apart from the real one. | Mac |
+| `tab5-thermostat/main-thermostat-sim.yaml` | `host` entry: logic + sim, `api` (own key, `reboot_timeout: 0s`), host time in America/New_York, no `web_server` (not available on host). Device name `main-thermostat-sim`, shown as "Main Thermostat (Sim)" so HA keeps it apart from the real one. | Mac |
 | `tab5-thermostat/tests/` | the test entry point (short timers, fast physics, hooks) and the scenario tests | Mac |
 | `tab5-thermostat.yaml` | adds the logic + sim packages so the Tab5 runs the same logic against the virtual house until M4 | PC (Mac sends the change for review) |
 | `docker-compose.yml`, `home-assistant/` | a way to run the sim next to HA if needed; an HA notification automation for `sensor_fault` / `interlock_fault` | PC (Mac asks) |
@@ -172,9 +198,9 @@ Python scenario tests talk to the test build over ESPHome's native API (`aioesph
 4. Minimum off: no restart before the minimum off time (short-cycle protection).
 5. Auto: heats and cools toward one target, idles inside the band, and honours the changeover lockout.
 6. Interlock: forcing both relays on trips the watchdog within a second; both go off, the fault latches, and calls stay blocked until cleared.
-7. Sensor faults (unplugged, frozen, out of range): calls stop at once and `sensor_fault` turns on. Recovery comes after 5 minutes of good readings, and the AC minimum off is still honoured. A single spike does not trip a fault.
-8. Eco: the band moves N°F the saving way in Heat, Cool and Auto.
-9. Schedule: period changes switch the level; a manual change holds until the next period; Resume ends a hold; with the schedule off, nothing switches; an invalid clock pauses it.
+7. Sensor faults (unplugged, frozen, out of range): `sensor_fault` turns on at once, no new call starts, and a running call ends no later than its minimum run time (Q3). Recovery comes after 5 minutes of good readings, and the AC minimum off is still honoured. A single spike does not trip a fault.
+8. Eco: the band moves N°F the saving way in Heat, Cool and Auto, and `effective_target` follows it.
+9. Schedule: period changes switch the level. A `set_target` change or a Comfort/Eco switch holds until the next period, with `comfort_target` untouched. Resume ends a hold. With the schedule off, nothing switches and there's no hold. An invalid clock pauses it. `schedule_period`, `schedule_next_change` and `call_wait_reason` report correctly.
 10. Timer settings outside their range are refused or clamped.
 11. Persistence: mode, Comfort target, Eco offset, schedule and timers survive a restart.
 
@@ -185,6 +211,20 @@ Python scenario tests talk to the test build over ESPHome's native API (`aioesph
 - How the sim runs in Docker on the Mac, and how the tests get time control.
 - Friendly names, icons and entity categories.
 
-## Open questions for Dang
+## Answered by Dang after the builder check
 
-- **Q1. HA's thermostat card in Auto.** Because of ESPHome's forced two setpoints, HA's card in Auto will show a narrow range (two handles, e.g. 71–73°F) that move together, instead of one number. Heat and Cool show one number. Showing one number in Auto too needs a small custom C++ wrapper around ESPHome's thermostat. *(Asked of Dang after the builder check.)*
+- **Q1. HA's card in Auto:** a narrow range is fine. Stock ESPHome thermostat, no C++ wrapper.
+- **Q2. Browser play:** on the Tab5's own web page (Tab5 running logic + virtual house). The host sim shows up in HA and runs the tests. No separate web page for the sim.
+- **Q3. Bad sensor mid-run:** the running call finishes its minimum run (at most 5 min). No new call starts, and the alert shows at once.
+
+## Calls I made that you may want to check
+
+- Setpoints 50–90°F in whole degrees; Eco offset 2–10°F (default 4).
+- Timer defaults and allowed ranges (the table under Safety), plus the 30-minute Auto changeover lockout.
+- Any − / + or HA setpoint change is a hold until the next period, in Comfort periods too. Comfort itself only changes in its setting.
+- In Auto, a hold is a ±1°F band around the held temperature, with no Eco widening.
+- A hold doesn't survive a reboot; the schedule re-applies the current period.
+- Sensor sanity thresholds: 2 min stale, 2–40°C, 30 min frozen, 5 min of good readings to recover.
+- An interlock fault cuts both relays at once, ignoring minimum run, and latches until cleared.
+- Default schedule times and levels.
+- The tests use shortened timers and sped-up physics; the shipped values stay real.
