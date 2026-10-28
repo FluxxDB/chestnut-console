@@ -17,4 +17,9 @@ python3 tools/preview/check_states.py $out/to-cool heating main_thermostat.mode=
 python3 tools/preview/check_snapshot.py $out/to-cool heating light status=Idle
 $dc preview preview/console-preview.yaml /config/preview/shots/stub/to-heat --dump "Heating" --clicks "410,649;293,649" >/dev/null
 python3 tools/preview/check_states.py $out/to-heat heating main_thermostat.mode=HEAT main_thermostat.action=HEATING call_heat=true
+# A target change re-checks too (Dang: it "still says idle" sometimes). Cool at 71 toward 72 is
+# idle; − three times to 69 puts the room above the target, so it cools.
+$dc preview preview/console-preview.yaml /config/preview/shots/stub/cool-lower --dump "Heating" --clicks "410,649;803,251;803,251;803,251" --click-gap 0.3 >/dev/null
+python3 tools/preview/check_states.py $out/cool-lower heating main_thermostat.mode=COOL effective_target=69 main_thermostat.action=COOLING call_cool=true
+python3 tools/preview/check_snapshot.py $out/cool-lower heating light status=Cooling
 echo "PASS: stub scenarios"

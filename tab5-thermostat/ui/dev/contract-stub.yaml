@@ -12,23 +12,8 @@ climate:
     supports_action: true
     supported_modes: ["OFF", HEAT, COOL, HEAT_COOL]
     supported_fan_modes: [AUTO, "ON"]
-    # A mode pill moves the action at once, as milestone 2 does when nothing is mid-run (M2 lets
-    # a running call finish its minimum run first: scenario "Finishing").
     set_mode_action:
-      - lambda: |-
-          const float room = id(checked_temperature).state;
-          float low = id(effective_low).state, high = id(effective_high).state;
-          if (x != climate::CLIMATE_MODE_HEAT_COOL || std::isnan(low) || std::isnan(high))
-            low = high = id(effective_target).state;
-          const bool heat = (x == climate::CLIMATE_MODE_HEAT || x == climate::CLIMATE_MODE_HEAT_COOL) && room < low;
-          const bool cool = (x == climate::CLIMATE_MODE_COOL || x == climate::CLIMATE_MODE_HEAT_COOL) && room > high;
-          auto *cl = id(main_thermostat);
-          cl->action = x == climate::CLIMATE_MODE_OFF ? climate::CLIMATE_ACTION_OFF
-                       : heat ? climate::CLIMATE_ACTION_HEATING
-                       : cool ? climate::CLIMATE_ACTION_COOLING : climate::CLIMATE_ACTION_IDLE;
-          id(call_heat).publish_state(heat);
-          id(call_cool).publish_state(cool);
-          id(call_fan).publish_state(cool || cl->fan_mode == climate::CLIMATE_FAN_ON);
+      - script.execute: stub_follow
 
 sensor:
   - platform: template
@@ -120,6 +105,7 @@ number:
       - text_sensor.template.publish:
           id: schedule_status
           state: !lambda 'return "Holding " + to_string((int) x) + "° until " + id(schedule_next_change).state;'
+      - script.execute: stub_follow
   - platform: template
     id: comfort_target
     name: "Comfort Target"
@@ -196,6 +182,28 @@ button:
           state: false
 
 script:
+  # Heating and cooling follow a mode or target change at once: heat below the target, cool above
+  # it (Auto: outside the band). Milestone 2 also lets a running call finish its minimum run
+  # (scenario "Finishing") and waits out minimum off times. The room temperature never moves here.
+  - id: stub_follow
+    then:
+      - lambda: |-
+          auto *cl = id(main_thermostat);
+          const auto m = cl->mode;
+          const float room = id(checked_temperature).state;
+          float low = id(effective_low).state, high = id(effective_high).state;
+          if (m != climate::CLIMATE_MODE_HEAT_COOL || std::isnan(low) || std::isnan(high))
+            low = high = id(effective_target).state;
+          const bool heat = (m == climate::CLIMATE_MODE_HEAT || m == climate::CLIMATE_MODE_HEAT_COOL) && room < low;
+          const bool cool = (m == climate::CLIMATE_MODE_COOL || m == climate::CLIMATE_MODE_HEAT_COOL) && room > high;
+          cl->action = m == climate::CLIMATE_MODE_OFF ? climate::CLIMATE_ACTION_OFF
+                       : heat ? climate::CLIMATE_ACTION_HEATING
+                       : cool ? climate::CLIMATE_ACTION_COOLING : climate::CLIMATE_ACTION_IDLE;
+          id(call_heat).publish_state(heat);
+          id(call_cool).publish_state(cool);
+          id(call_fan).publish_state(cool || cl->fan_mode == climate::CLIMATE_FAN_ON);
+          cl->publish_state();
+
   - id: stub_apply_scenario
     parameters:
       name: std::string
