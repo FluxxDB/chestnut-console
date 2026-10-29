@@ -1,1 +1,12 @@
-[]
+- id: chestnut_axiom_theme
+  alias: "Chestnut: Axiom theme"
+  description: "Makes the Axiom theme HA's default (light and dark) for every user, at startup."
+  mode: single
+  triggers:
+    - trigger: homeassistant
+      event: start
+  actions:
+    - action: frontend.set_theme
+      data:
+        name: axiom
+        name_dark: axiom

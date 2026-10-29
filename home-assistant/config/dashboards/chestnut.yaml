@@ -1,0 +1,10 @@
+# The Chestnut dashboard (HA's Overview): one panel view, drawn entirely by the custom element
+# in www/chestnut/chestnut-dashboard.js. device_name picks the thermostat's ESPHome device.
+title: Chestnut
+views:
+  - title: Main Thermostat
+    path: main
+    type: panel
+    cards:
+      - type: custom:chestnut-dashboard
+        device_name: "Main Thermostat"

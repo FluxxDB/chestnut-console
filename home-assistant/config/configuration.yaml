@@ -3,6 +3,29 @@
 
 default_config:
 
+frontend:
+  # The Axiom theme (themes/axiom.yaml), made the default for everyone by the
+  # "Chestnut: Axiom theme" automation at startup.
+  themes: !include_dir_merge_named themes
+  # Loads the self-hosted JetBrains Mono on every HA page (the theme's font), not only on
+  # the dashboard.
+  extra_module_url:
+    - /local/chestnut/style.js
+
+lovelace:
+  resource_mode: yaml
+  resources:
+    - url: /local/chestnut/chestnut-dashboard.js
+      type: module
+  dashboards:
+    # Takes the place of HA's Overview (url /lovelace).
+    lovelace:
+      mode: yaml
+      filename: dashboards/chestnut.yaml
+      title: Chestnut
+      icon: mdi:thermostat
+      show_in_sidebar: true
+
 automation: !include automations.yaml
 script: !include scripts.yaml
 scene: !include scenes.yaml

@@ -1,0 +1,136 @@
+# Axiom: HA in the Chestnut dashboard's style (spec: docs/superpowers/specs/2026-10-29-ha-dashboard-design.md).
+# Dark only: page #000000, cards #111111, dialogs #191919, hairlines #202020, outlines #3a3a3a;
+# text #eeeeee / #b4b4b4 / labels #7e7e7e; Ember #da5c2c is the primary action, blue #2a7fff
+# is cooling; switches and selections are white on black. JetBrains Mono (self-hosted,
+# www/chestnut/fonts), 2px corners, no shadows.
+#
+# The variables sit under `modes: dark:` with no light mode, so HA's frontend always runs this
+# theme in dark mode (on top of HA's own dark palette), whatever the browser prefers.
+axiom:
+  # Read at the top level by HA for the app's theme colour (manifest); same as below.
+  app-header-background-color: "#000000"
+  modes:
+    dark:
+      # Type
+      primary-font-family: "'JetBrains Mono', ui-monospace, monospace"
+      ha-font-family-body: "'JetBrains Mono', ui-monospace, monospace"
+      ha-font-family-heading: "'JetBrains Mono', ui-monospace, monospace"
+      ha-font-family-code: "'JetBrains Mono', ui-monospace, monospace"
+      ha-font-family-longform: "'JetBrains Mono', ui-monospace, monospace"
+      paper-font-common-base_-_font-family: "'JetBrains Mono', ui-monospace, monospace"
+      paper-font-common-code_-_font-family: "'JetBrains Mono', ui-monospace, monospace"
+      mdc-typography-font-family: "'JetBrains Mono', ui-monospace, monospace"
+      md-ref-typeface-brand: "'JetBrains Mono', ui-monospace, monospace"
+      md-ref-typeface-plain: "'JetBrains Mono', ui-monospace, monospace"
+      wa-font-family-body: "'JetBrains Mono', ui-monospace, monospace"
+
+      # Surfaces
+      primary-background-color: "#000000"
+      secondary-background-color: "#000000"
+      lovelace-background: "#000000"
+      card-background-color: "#111111"
+      ha-card-background: "#111111"
+      ha-color-surface-default: "#111111"
+      ha-color-surface-low: "#000000"
+      ha-color-surface-lower: "#000000"
+      ha-dialog-surface-background: "#191919"
+      mdc-theme-surface: "#191919"
+      dialog-backdrop-filter: "none"
+      ha-dialog-scrim-backdrop-filter: "none"
+      ha-dialog-surface-backdrop-filter: "none"
+      markdown-code-background-color: "#111111"
+      code-editor-background-color: "#111111"
+
+      # Lines
+      divider-color: "#202020"
+      ha-card-border-color: "#202020"
+      ha-card-border-width: "1px"
+      outline-color: "#3a3a3a"
+      ha-color-border-neutral-quiet: "#202020"
+      ha-color-border-neutral-normal: "#3a3a3a"
+      ha-color-border-neutral-loud: "#7e7e7e"
+      scrollbar-thumb-color: "#3a3a3a"
+
+      # Text
+      primary-text-color: "#eeeeee"
+      secondary-text-color: "#b4b4b4"
+      disabled-text-color: "#7e7e7e"
+      text-primary-color: "#000000"
+      ha-color-text-primary: "#eeeeee"
+      ha-color-text-secondary: "#b4b4b4"
+      ha-color-text-disabled: "#7e7e7e"
+      ha-color-text-link: "#eeeeee"
+      mdc-theme-text-primary-on-background: "#eeeeee"
+      mdc-theme-text-secondary-on-background: "#b4b4b4"
+      mdc-theme-text-hint-on-background: "#7e7e7e"
+      state-icon-color: "#b4b4b4"
+
+      # Primary action = Ember; accents stay quiet
+      primary-color: "#da5c2c"
+      dark-primary-color: "#da5c2c"
+      light-primary-color: "#da5c2c"
+      accent-color: "#da5c2c"
+      mdc-theme-primary: "#da5c2c"
+      mdc-theme-secondary: "#da5c2c"
+      mdc-theme-on-primary: "#000000"
+      ha-color-on-primary-normal: "#000000"
+      ha-color-on-primary-loud: "#000000"
+      ha-color-fill-primary-loud-resting: "#da5c2c"
+      ha-color-fill-primary-loud-hover: "#e2714a"
+      ha-color-fill-primary-loud-active: "#c4501f"
+      ha-color-border-primary-loud: "#da5c2c"
+
+      # Selections and switches: white on black
+      switch-checked-color: "#ffffff"
+      switch-checked-button-color: "#000000"
+      switch-checked-track-color: "#ffffff"
+      switch-unchecked-button-color: "#7e7e7e"
+      switch-unchecked-track-color: "#202020"
+      ha-color-fill-primary-quiet-resting: "#202020"
+      ha-color-fill-primary-quiet-hover: "#3a3a3a"
+      ha-color-fill-primary-normal-resting: "#202020"
+      ha-color-fill-primary-normal-hover: "#3a3a3a"
+      ha-color-on-primary-quiet: "#eeeeee"
+      sidebar-selected-text-color: "#eeeeee"
+      sidebar-selected-icon-color: "#eeeeee"
+
+      # App bar and sidebar
+      app-header-background-color: "#000000"
+      app-header-text-color: "#eeeeee"
+      app-header-border-bottom: "1px solid #202020"
+      sidebar-background-color: "#000000"
+      sidebar-text-color: "#b4b4b4"
+      sidebar-icon-color: "#7e7e7e"
+      sidebar-menu-button-background-color: "#000000"
+      sidebar-menu-button-text-color: "#eeeeee"
+
+      # Forms
+      input-fill-color: "#111111"
+      input-disabled-fill-color: "#111111"
+      input-ink-color: "#eeeeee"
+      input-label-ink-color: "#b4b4b4"
+      input-idle-line-color: "#3a3a3a"
+      input-hover-line-color: "#7e7e7e"
+      input-outlined-idle-border-color: "#3a3a3a"
+      input-outlined-hover-border-color: "#7e7e7e"
+      ha-color-form-background: "#111111"
+      ha-color-form-background-hover: "#191919"
+
+      # Shape: 2px corners, no shadows
+      ha-card-border-radius: "2px"
+      ha-dialog-border-radius: "2px"
+      ha-border-radius-sm: "2px"
+      ha-border-radius-md: "2px"
+      ha-border-radius-lg: "2px"
+      ha-border-radius-xl: "2px"
+      ha-border-radius-2xl: "2px"
+      ha-border-radius-3xl: "2px"
+      ha-card-box-shadow: "none"
+      dialog-box-shadow: "none"
+
+      # Data colours
+      state-climate-heat-color: "#da5c2c"
+      state-climate-cool-color: "#2a7fff"
+      state-climate-heat_cool-color: "#eeeeee"
+      state-climate-auto-color: "#eeeeee"
+      state-climate-off-color: "#7e7e7e"
