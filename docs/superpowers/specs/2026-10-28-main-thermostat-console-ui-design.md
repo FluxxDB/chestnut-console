@@ -124,6 +124,7 @@ All fonts render with **4-bit anti-aliasing** (`bpp: 4`). At ESPHome's default 1
   - In Comfort, the big number is the Comfort target, labeled "Comfort target".
   - In Eco, the big number is the **Eco temperature** (`effective_target`). In Auto, when Eco widens the range (scheduled Eco, or an Eco level hold), it shows the band edges, e.g. "67–77°". Plain Auto and a temperature hold keep a hidden ±1 around one number, so they show that number. *(Milestone 2's hold model: Comfort/Eco pressed by hand holds the level, − / + holds a temperature.)* It's labeled "Eco target", with "Comfort 72°" in small text.
   - **− / + in Eco change the shown Eco temperature for now** *(Dang)*. Tapping + on 68° writes 69 to `set_target`, which milestone 2 holds until the next period. Comfort isn't changed.
+- **Schedule off, after − / +** *(Dang, through milestone 2: a lasting manual number, no hold)*: while `manual_target` is on, no level is in force. The card says "Target" with no Comfort line, and neither Comfort nor Eco is lit. Tapping either one, even the level that was current, drops the manual number and goes back to that level's target. Otherwise a lit pill sends nothing.
 - **Off mode:** the card shows "Off" and the − / + buttons are hidden.
 - The number updates instantly. The new setpoint goes to the climate entity once there's been no tap for ~1.5 s, so a run of taps is one change *(my call)*.
 

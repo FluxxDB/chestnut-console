@@ -254,6 +254,8 @@ script:
           const bool ifault = id(interlock_fault).state;
           const bool eco = std::string(id(comfort_level).current_option()) == "Eco";
           const bool hold = id(schedule_hold).state;
+          // Schedule off and a − / + number in force (milestone 2): no level is in force.
+          const bool manual = id(manual_target).state;
           const bool sched_on = id(schedule_enabled).state;
           const float eff = id(effective_target).state;
           const float lo = id(effective_low).state;
@@ -391,8 +393,8 @@ script:
           }
 
           // ── target card ──
-          set_text(id(lbl_tgt_label), off ? "Target" : (eco ? "Eco target" : "Comfort target"));
-          set_text(id(lbl_tgt_comfort), (eco && !off) ? "Comfort " + deg(id(comfort_target).state) : std::string(""));
+          set_text(id(lbl_tgt_label), off || manual ? "Target" : (eco ? "Eco target" : "Comfort target"));
+          set_text(id(lbl_tgt_comfort), (eco && !off && !manual) ? "Comfort " + deg(id(comfort_target).state) : std::string(""));
           show(id(lbl_target), off || !band);
           show(id(lbl_target_range), !off && band);
           set_text(id(lbl_target), off ? std::string("Off") : target_txt);
@@ -429,5 +431,5 @@ script:
           const bool fan_on = cl->fan_mode.has_value() && *cl->fan_mode == climate::CLIMATE_FAN_ON;
           check(id(btn_fan_auto), !fan_on);
           check(id(btn_fan_on), fan_on);
-          check(id(btn_lvl_comfort), !eco);
-          check(id(btn_lvl_eco), eco);
+          check(id(btn_lvl_comfort), !manual && !eco);
+          check(id(btn_lvl_eco), !manual && eco);

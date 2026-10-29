@@ -22,4 +22,10 @@ python3 tools/preview/check_states.py $out/to-heat heating main_thermostat.mode=
 $dc preview preview/console-preview.yaml /config/preview/shots/stub/cool-lower --dump "Heating" --clicks "410,649;803,251;803,251;803,251" --click-gap 0.3 >/dev/null
 python3 tools/preview/check_states.py $out/cool-lower heating main_thermostat.mode=COOL effective_target=69 main_thermostat.action=COOLING call_cool=true
 python3 tools/preview/check_snapshot.py $out/cool-lower heating light status=Cooling
+# Schedule off (M2, Dang): − / + sets a manual number with no hold. Tapping Comfort, the current
+# level, still sends and drops it (back to the level's target). The gap lets set_target land first.
+$dc preview preview/console-preview.yaml /config/preview/shots/stub/manual --dump "Schedule off" --clicks "803,251" >/dev/null
+python3 tools/preview/check_states.py $out/manual schedule-off manual_target=true schedule_hold=false effective_target=71 "schedule_status=Schedule off"
+$dc preview preview/console-preview.yaml /config/preview/shots/stub/manual-drop --dump "Schedule off" --clicks "803,251;1043,649" --click-gap 2.5 >/dev/null
+python3 tools/preview/check_states.py $out/manual-drop schedule-off manual_target=false effective_target=72 comfort_level=Comfort _writes.comfort_level=1
 echo "PASS: stub scenarios"

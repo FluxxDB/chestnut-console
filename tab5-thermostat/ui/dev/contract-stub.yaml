@@ -53,6 +53,10 @@ binary_sensor:
   - platform: template
     id: schedule_hold
     name: "Schedule Hold"
+  # Milestone 2: on while the schedule is off and a − / + number is in force (no level is).
+  - platform: template
+    id: manual_target
+    name: "Manual Target"
   - platform: template
     id: sensor_fault
     name: "Sensor Fault"
@@ -96,16 +100,25 @@ number:
     optimistic: true
     initial_value: 72
     on_value:
-      # Milestone 2: setting a target starts a hold at that value.
-      - binary_sensor.template.publish:
-          id: schedule_hold
-          state: true
+      # Milestone 2: setting a target starts a hold at that value; with the schedule off it's a
+      # manual number instead (no hold, no "until").
+      - if:
+          condition:
+            switch.is_on: schedule_enabled
+          then:
+            - binary_sensor.template.publish:
+                id: schedule_hold
+                state: true
+            - text_sensor.template.publish:
+                id: schedule_status
+                state: !lambda 'return "Holding " + to_string((int) x) + "° until " + id(schedule_next_change).state;'
+          else:
+            - binary_sensor.template.publish:
+                id: manual_target
+                state: true
       - sensor.template.publish:
           id: effective_target
           state: !lambda "return x;"
-      - text_sensor.template.publish:
-          id: schedule_status
-          state: !lambda 'return "Holding " + to_string((int) x) + "° until " + id(schedule_next_change).state;'
       - script.execute: stub_follow
   - platform: template
     id: comfort_target
@@ -133,6 +146,23 @@ select:
     options: [Comfort, Eco]
     optimistic: true
     initial_option: Comfort
+    # Milestone 2: picking a level (even the current one) drops a manual number and goes back to
+    # that level's target.
+    on_value:
+      - if:
+          condition:
+            binary_sensor.is_on: manual_target
+          then:
+            - binary_sensor.template.publish:
+                id: manual_target
+                state: false
+            - sensor.template.publish:
+                id: effective_target
+                state: !lambda |-
+                  const float c = id(comfort_target).state, n = id(eco_offset).state;
+                  if (x != "Eco") return c;
+                  return id(main_thermostat).mode == climate::CLIMATE_MODE_COOL ? c + n : c - n;
+            - script.execute: stub_follow
   - platform: template
     id: scenario
     name: "Scenario"
@@ -154,6 +184,7 @@ select:
       - Sensor fault mid-run
       - Eco hold in Auto
       - Temperature hold in Auto
+      - Manual target
     initial_option: Heating
     on_value:
       - script.execute:
@@ -217,6 +248,8 @@ script:
           // Baseline: heating at 71 toward 72, Comfort, schedule on, nothing wrong.
           float room = 71, target = 72, low = NAN, high = NAN, hum = 42;
           bool heat = false, cool = false, fan = false, hold = false, sfault = false, ifault = false, sched_on = true;
+          bool manual = false;
+          id(manual_target).publish_state(false);  // so the level set below doesn't touch the target
           std::string level = "Comfort", period = "Return", next = "10:30 pm", status = "Comfort until 10:30 pm", wait = "";
           auto mode = climate::CLIMATE_MODE_HEAT;
           auto action = climate::CLIMATE_ACTION_IDLE;
@@ -234,6 +267,7 @@ script:
           else if (name == "Sensor fault mid-run") { room = NAN; sfault = true; wait = "Sensor fault"; heat = true; action = climate::CLIMATE_ACTION_HEATING; }
           else if (name == "Eco hold in Auto") { mode = climate::CLIMATE_MODE_HEAT_COOL; level = "Eco"; room = 70; low = 67; high = 77; target = 72; hold = true; status = "Holding Eco until 10:30 pm"; }
           else if (name == "Temperature hold in Auto") { mode = climate::CLIMATE_MODE_HEAT_COOL; level = "Eco"; room = 70; low = 69; high = 71; target = 70; hold = true; status = "Holding 70° until 10:30 pm"; }
+          else if (name == "Manual target") { sched_on = false; period = ""; next = ""; status = "Schedule off"; target = 70; manual = true; }
           else if (name == "Finishing") { mode = climate::CLIMATE_MODE_COOL; heat = true; action = climate::CLIMATE_ACTION_HEATING; }
           else if (name == "Unknowns") { room = NAN; target = NAN; hum = NAN; period = ""; next = ""; status = ""; }
           id(checked_temperature).publish_state(room);
@@ -256,6 +290,7 @@ script:
           auto call = id(comfort_level).make_call();
           call.set_option(level);
           call.perform();
+          id(manual_target).publish_state(manual);
           id(main_thermostat).mode = mode;
           id(main_thermostat).action = action;
           id(main_thermostat).fan_mode = climate::CLIMATE_FAN_AUTO;
