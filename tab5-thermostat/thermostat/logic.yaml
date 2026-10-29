@@ -57,6 +57,11 @@ esphome:
               checker.on_reading(millis(), c);
               id(checked_temperature_c).publish_state(checker.value());
             });
+            // Humidity only needs to know when it last arrived (the 1 s interval makes it
+            // unknown once it stops); it never affects control.
+            id(room_humidity).add_on_state_callback([](float h) {
+              if (!std::isnan(h)) id(g_humidity_ms) = millis();
+            });
     # After every component's setup (the numbers, selects, schedule settings and switch
     # restored, the climate restored or given its Default preset): from here on, changes to the
     # target and schedule entities apply and holds can start. A hold never survives a reboot
@@ -91,6 +96,12 @@ globals:
     type: void *
     restore_value: false
     initial_value: nullptr
+  # millis() of the latest humidity reading (spec, Safety 4: a humidity fault only makes
+  # humidity unknown).
+  - id: g_humidity_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
   # millis() at boot, for call_wait_reason's "Starting up".
   - id: g_boot_ms
     type: uint32_t
@@ -568,6 +579,14 @@ interval:
           const bool was = s->fault();
           s->tick(millis());
           if (s->fault() != was) id(checked_temperature_c).publish_state(s->value());
+      # Humidity: unknown (NaN) after the same 2 "minutes" with no reading, for the climate, the
+      # screen and HA alike (published into room_humidity itself, which they all read). Control
+      # never uses it. Published once; the next reading brings it back.
+      - lambda: |-
+          auto *h = id(room_humidity);
+          if (h->has_state() && !std::isnan(h->state) &&
+              (uint32_t) (millis() - id(g_humidity_ms)) > 2000u * ${timer_unit_s})
+            h->publish_state(NAN);
       # Auto changeover lockout: when it ends, put Auto's own deadband back and let the
       # thermostat re-evaluate at once (the held-back call starts within a second). Clearing
       # g_last_call also keeps millis() wrapping from reviving an old lockout.

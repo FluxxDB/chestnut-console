@@ -230,3 +230,19 @@ async def test_freezing_house_is_still_heated(device):
     await heat_to(device, 68)
     await device.wait_for("call_heat", is_on, HEAT_OFF_S + 3)
     assert await device.state("sensor_fault") is False
+
+
+async def test_unplugged_makes_humidity_unknown(device):
+    # Spec, Safety 4: humidity faults only make humidity unknown (the screen shows "—"). With no
+    # humidity reading for 2 "minutes" (2 s here), room_humidity and the climate's humidity
+    # become unknown; heating and cooling never depend on it.
+    await device.wait_for("room_humidity", lambda v: not is_nan(v), 3)
+    await device.select("sim_fault", "Unplugged")
+    t0 = now()
+    await device.wait_for("room_humidity", is_nan, 4)
+    assert now() - t0 >= 1.5, f"humidity unknown after only {now() - t0:.2f}s"
+    st = await device.wait_for("main_thermostat", lambda v: math.isnan(v.current_humidity), 2)
+    assert math.isnan(st.current_humidity)
+    await device.select("sim_fault", "None")
+    h = await device.wait_for("room_humidity", lambda v: not is_nan(v), 2)
+    assert 40 < h < 50, h  # sim_humidity 45 ± noise
