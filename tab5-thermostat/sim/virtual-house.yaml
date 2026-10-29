@@ -84,6 +84,16 @@ sensor:
     state_class: measurement
     accuracy_decimals: 2
     update_interval: never
+  # The outdoor temperature the physics is using right now (°F): the Fixed setting, or the
+  # Winter/Summer day curve at the current time. Read-only; for the HA dashboard and the tests.
+  - platform: template
+    id: sim_outdoor_now_f
+    name: "Sim Outdoor Now F"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: never
 
 # Knobs, restored across reboots (all but sim_fault). Entity names are chosen so their
 # object_ids match the ids.
@@ -180,6 +190,10 @@ interval:
           const auto now = id(${clock_id}).now();
           if (kind != chestnut::Weather::Fixed && now.is_valid())
             outdoor_f = chestnut::weather_outdoor_f(kind, outdoor_f, now.hour * 60 + now.minute);
+          // Publish only on a visible change (0.05°F), not every second.
+          const float shown = id(sim_outdoor_now_f).state;
+          if (std::isnan(shown) || std::fabs(shown - outdoor_f) >= 0.05f)
+            id(sim_outdoor_now_f).publish_state(outdoor_f);
 
           const bool w = id(relay_heat).state, y = id(relay_cool).state;
           // house_step works in float. Step the offset from the equilibrium rather than the

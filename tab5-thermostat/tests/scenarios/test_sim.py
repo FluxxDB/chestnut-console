@@ -24,6 +24,45 @@ async def test_forced_heat_warms(device):
     await device.wait_for("sim_room_f", lambda f: f > 69, 20)
 
 
+def day_curve_f(lo, hi, minute):
+    """The sim's daily outdoor curve (house_model.h weather_outdoor_f): min at 05:00, max at 15:00."""
+    import math
+    m = minute % 1440
+    if 300 <= m <= 900:
+        frac = 0.5 * (1 - math.cos(math.pi * (m - 300) / 600))
+    else:
+        s = m - 900 if m > 900 else m + 540
+        frac = 0.5 * (1 + math.cos(math.pi * s / 840))
+    return lo + (hi - lo) * frac
+
+
+def ny_minute():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("America/New_York"))
+    return now.hour * 60 + now.minute
+
+
+async def test_outdoor_now_is_fixed_setting_in_fixed_weather(device):
+    await fixed_weather(device, 50)
+    await device.wait_for("sim_outdoor_now_f", lambda f: abs(f - 50) < 0.05, 3)
+    await device.set_number("sim_outdoor_f", 12)
+    await device.wait_for("sim_outdoor_now_f", lambda f: abs(f - 12) < 0.05, 3)
+
+
+async def test_outdoor_now_follows_the_day_curves(device):
+    # The Fixed setting (70) must not leak into the day curves.
+    await fixed_weather(device, 70)
+    await device.select("sim_weather", "Winter day")
+    want = day_curve_f(25, 45, ny_minute())
+    await device.wait_for("sim_outdoor_now_f", lambda f: abs(f - want) < 0.6, 3)
+    await device.select("sim_weather", "Summer day")
+    want = day_curve_f(70, 95, ny_minute())
+    await device.wait_for("sim_outdoor_now_f", lambda f: abs(f - want) < 0.8, 3)
+    await device.select("sim_weather", "Fixed")
+    await device.wait_for("sim_outdoor_now_f", lambda f: abs(f - 70) < 0.05, 3)
+
+
 async def test_room_temperature_is_celsius_with_noise(device):
     await fixed_weather(device, 68)
     await device.sleep(1.5)  # let the room settle near 68 so it barely moves between readings
