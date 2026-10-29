@@ -1,0 +1,747 @@
+#include "check.h"
+#include "chestnut_logic.h"
+
+#include <cmath>
+#include <cstdint>
+#include <string>
+
+using namespace chestnut;
+
+static void derive_heat_comfort() {
+  auto s = derive_setpoints(Mode::Heat, 72, 4, false, false, 0);
+  CHECK(s.effective_f == 72 && s.low_f == 72 && s.high_f == 74);
+}
+
+static void derive_heat_eco() {
+  auto s = derive_setpoints(Mode::Heat, 72, 4, true, false, 0);
+  CHECK(s.effective_f == 68 && s.low_f == 68 && s.high_f == 70);
+}
+
+static void derive_cool_eco() {
+  auto s = derive_setpoints(Mode::Cool, 72, 4, true, false, 0);
+  CHECK(s.effective_f == 76 && s.high_f == 76 && s.low_f == 74);
+}
+
+static void derive_auto() {
+  auto s = derive_setpoints(Mode::Auto, 72, 4, false, false, 0);
+  CHECK(s.low_f == 71 && s.high_f == 73 && s.effective_f == 72);
+}
+
+static void derive_auto_eco() {
+  auto s = derive_setpoints(Mode::Auto, 72, 4, true, false, 0);
+  CHECK(s.low_f == 67 && s.high_f == 77 && s.effective_f == 72);
+}
+
+static void derive_hold_overrides_eco_heat() {
+  auto s = derive_setpoints(Mode::Heat, 72, 4, true, true, 69);
+  CHECK(s.effective_f == 69 && s.low_f == 69);
+}
+
+static void derive_hold_auto_no_widen() {
+  auto s = derive_setpoints(Mode::Auto, 72, 4, true, true, 69);
+  CHECK(s.low_f == 68 && s.high_f == 70 && s.effective_f == 69);
+}
+
+static void derive_clamps() {
+  auto s = derive_setpoints(Mode::Heat, 95, 20, false, false, 0);
+  CHECK(s.effective_f == 90);
+}
+
+static void derive_eco_offset_clamps() {
+  auto s = derive_setpoints(Mode::Heat, 72, 1, true, false, 0);
+  CHECK(s.low_f == 70);
+  s = derive_setpoints(Mode::Heat, 72, 20, true, false, 0);
+  CHECK(s.low_f == 62);
+  s = derive_setpoints(Mode::Cool, 72, 20, true, false, 0);
+  CHECK(s.high_f == 82 && s.low_f == 80);
+  s = derive_setpoints(Mode::Auto, 72, 1, true, false, 0);
+  CHECK(s.low_f == 69 && s.high_f == 75);
+}
+
+static void derive_input_clamps() {
+  auto s = derive_setpoints(Mode::Heat, 40, 4, false, false, 0);
+  CHECK(s.effective_f == 50);
+  s = derive_setpoints(Mode::Heat, 72, 4, false, true, 95);
+  CHECK(s.low_f == 90 && s.high_f == 92);
+  s = derive_setpoints(Mode::Heat, 72, 4, false, true, 0);
+  CHECK(s.low_f == 50);
+}
+
+static void derive_off_matches_heat() {
+  auto s = derive_setpoints(Mode::Off, 72, 4, true, false, 0);
+  CHECK(s.effective_f == 68 && s.low_f == 68 && s.high_f == 70);
+}
+
+static void derive_output_clamps() {
+  auto s = derive_setpoints(Mode::Heat, 50, 10, true, false, 0);
+  CHECK(s.low_f == 50 && s.effective_f == 50 && s.high_f == 52);
+  s = derive_setpoints(Mode::Cool, 90, 10, true, false, 0);
+  CHECK(s.high_f == 90 && s.effective_f == 90 && s.low_f == 88);
+  s = derive_setpoints(Mode::Auto, 50, 10, true, false, 0);
+  CHECK(s.low_f == 50 && s.high_f == 61 && s.high_f - s.low_f >= 2 && s.effective_f == 50);
+  s = derive_setpoints(Mode::Auto, 90, 10, true, false, 0);
+  CHECK(s.high_f == 90 && s.low_f == 79 && s.high_f - s.low_f >= 2 && s.effective_f == 90);
+}
+
+// HA's Auto range slider: the centre moves by whichever edge moved, in whole °F.
+static void auto_drag_cases() {
+  // High edge dragged one 0.5 °C step (0.9°F) from 73: centre 72 -> 73 (the midpoint, 72.45,
+  // would round back to 72).
+  CHECK(auto_drag_target(72, 71, 73, 71.0f, 73.9f) == 73);
+  CHECK(auto_drag_target(72, 71, 73, 70.1f, 73.0f) == 71);  // low down a step
+  CHECK(auto_drag_target(72, 71, 73, 71.0f, 77.0f) == 76);  // high up 4
+  // Eco band 67-77 around 72: the low edge up a step moves the centre up 1.
+  CHECK(auto_drag_target(72, 67, 77, 67.9f, 77.0f) == 73);
+  // Only one edge sent.
+  CHECK(auto_drag_target(72, 71, 73, NAN, 74.8f) == 74);
+  CHECK(auto_drag_target(72, 71, 73, 69.2f, NAN) == 70);
+  // Nothing moved (HA re-sending the current band, or a sub-half-degree difference).
+  CHECK(auto_drag_target(72, 71, 73, 71.3f, 72.8f) == 72);
+  // Both moved the same way (the whole band dragged): by that amount; differently: the average.
+  CHECK(auto_drag_target(72, 71, 73, 73.0f, 75.0f) == 74);
+  CHECK(auto_drag_target(72, 71, 73, 72.0f, 76.0f) == 74);
+}
+
+static void clamp_setting_cases() {
+  CHECK(clamp_setting(5, 2, 20) == 5);
+  CHECK(clamp_setting(1, 2, 20) == 2);
+  CHECK(clamp_setting(25, 2, 20) == 20);
+  CHECK(clamp_setting(NAN, 2, 20) == 20);
+}
+
+static void conversions() {
+  CHECK_NEAR(f_to_c(72), 22.2222f, 1e-3);
+  CHECK_NEAR(c_to_f(20), 68.0f, 1e-3);
+}
+
+// Spec default week: weekday 6:30 C, 8:30 E, 17:30 C, 22:30 E; weekend 8:00 C, 10:00 C, 17:00 C, 23:00 E.
+static Week default_week() {
+  Week w{};
+  w.weekday[0] = {6 * 60 + 30, false};
+  w.weekday[1] = {8 * 60 + 30, true};
+  w.weekday[2] = {17 * 60 + 30, false};
+  w.weekday[3] = {22 * 60 + 30, true};
+  w.weekend[0] = {8 * 60, false};
+  w.weekend[1] = {10 * 60, false};
+  w.weekend[2] = {17 * 60, false};
+  w.weekend[3] = {23 * 60, true};
+  return w;
+}
+
+static void schedule_basic() {
+  const Week w = default_week();
+  auto s = schedule_at(w, 0, 9 * 60);  // Mon 9:00
+  CHECK(s.period == 1 && s.eco);
+  CHECK(s.key == 0 * 1440 + 8 * 60 + 30);
+  CHECK(s.next_dow == 0 && s.next_min == 17 * 60 + 30);
+  CHECK(std::string(period_name(s.period)) == "Leave");
+}
+
+static void schedule_midnight_carryover() {
+  const Week w = default_week();
+  auto night = schedule_at(w, 0, 23 * 60);  // Mon 23:00
+  auto early = schedule_at(w, 1, 2 * 60);   // Tue 02:00
+  CHECK(night.period == 3 && night.eco);
+  CHECK(early.period == 3 && early.eco);
+  CHECK(night.key == early.key);
+  auto wake = schedule_at(w, 1, 6 * 60 + 30);  // Tue 06:30
+  CHECK(wake.period == 0 && !wake.eco);
+  CHECK(wake.key != early.key);
+  CHECK(early.next_dow == 1 && early.next_min == 6 * 60 + 30);
+}
+
+static void schedule_weekend_boundary() {
+  const Week w = default_week();
+  auto fri = schedule_at(w, 4, 23 * 60);  // Fri 23:00
+  CHECK(fri.period == 3 && fri.eco);
+  CHECK(fri.next_dow == 5 && fri.next_min == 8 * 60);
+  auto mon = schedule_at(w, 0, 5 * 60);  // Mon 05:00 -> Sunday's Sleep
+  CHECK(mon.period == 3 && mon.eco);
+  CHECK(mon.key == 6 * 1440 + 23 * 60);
+  CHECK(mon.next_dow == 0 && mon.next_min == 6 * 60 + 30);
+}
+
+static void schedule_out_of_order_times() {
+  Week w = default_week();
+  w.weekday[1].start_min = 5 * 60;  // Leave before Wake
+  auto a = schedule_at(w, 1, 5 * 60 + 30);
+  CHECK(a.period == 1);
+  auto b = schedule_at(w, 1, 7 * 60);
+  CHECK(b.period == 0);
+  auto c = schedule_at(w, 1, 9 * 60);
+  CHECK(c.period == 0);
+  auto d = schedule_at(w, 1, 17 * 60 + 30);
+  CHECK(d.period == 2);
+  CHECK(a.key != b.key && b.key != d.key && a.key != d.key);
+  CHECK(b.key == c.key);
+  CHECK(a.next_dow == 1 && a.next_min == 6 * 60 + 30);
+}
+
+static void schedule_edges() {
+  const Week w = default_week();
+  // Exactly at a start: that period is in force, next is strictly later.
+  auto s = schedule_at(w, 2, 6 * 60 + 30);
+  CHECK(s.period == 0 && s.next_dow == 2 && s.next_min == 8 * 60 + 30);
+  // After the last start of Sunday: next is Monday's first.
+  s = schedule_at(w, 6, 23 * 60 + 30);
+  CHECK(s.period == 3 && s.next_dow == 0 && s.next_min == 6 * 60 + 30);
+  // Out-of-range input does not crash.
+  s = schedule_at(w, 9, 5000);
+  CHECK(s.period >= 0 && s.period <= 3);
+}
+
+static void format_12h_cases() {
+  CHECK(format_12h(0) == "12:00 am");
+  CHECK(format_12h(390) == "6:30 am");
+  CHECK(format_12h(720) == "12:00 pm");
+  CHECK(format_12h(5) == "12:05 am");
+  CHECK(format_12h(1350) == "10:30 pm");
+  CHECK(format_12h(1439) == "11:59 pm");
+}
+
+// ---- Schedule clock mapping -----------------------------------------------------------
+
+// ESPTime's day_of_week is 1=Sun..7=Sat; the schedule's is 0=Mon..6=Sun.
+static void schedule_dow_all_days() {
+  CHECK(schedule_dow(1) == 6);  // Sunday
+  CHECK(schedule_dow(2) == 0);  // Monday
+  CHECK(schedule_dow(3) == 1);
+  CHECK(schedule_dow(4) == 2);
+  CHECK(schedule_dow(5) == 3);
+  CHECK(schedule_dow(6) == 4);  // Friday
+  CHECK(schedule_dow(7) == 5);  // Saturday
+  CHECK(minute_of_day(0, 0) == 0);
+  CHECK(minute_of_day(6, 30) == 390);
+  CHECK(minute_of_day(23, 59) == 1439);
+  // Saturday and Sunday use the weekend set, Friday the weekday set.
+  Week w{};
+  for (int i = 0; i < 4; i++) {
+    w.weekday[i] = Period{i * 60, false};
+    w.weekend[i] = Period{i * 60, true};
+  }
+  CHECK(!schedule_at(w, schedule_dow(6), 600).eco);
+  CHECK(schedule_at(w, schedule_dow(7), 600).eco);
+  CHECK(schedule_at(w, schedule_dow(1), 600).eco);
+  CHECK(!schedule_at(w, schedule_dow(2), 600).eco);
+}
+
+// ---- Sanity checker -------------------------------------------------------------------
+// The production thresholds (sanity_config) with unit = 1000 ms: stale 2 s, frozen 30 s,
+// recover 5 s, -10..50 C, spike 2 C.
+
+static SanityConfig sanity_cfg() { return sanity_config(1000); }
+
+static void feed_noisy(SanityChecker &s, uint32_t from, uint32_t to, uint32_t step, float base);
+
+static void sanity_production_config() {
+  const SanityConfig c = sanity_config(60000);  // one unit = one real minute
+  CHECK(c.stale_ms == 120000u && c.frozen_ms == 1800000u && c.recover_ms == 300000u);
+  CHECK_NEAR(c.min_c, -10.0, 1e-6);  // 14°F (R19)
+  CHECK_NEAR(c.max_c, 50.0, 1e-6);   // 122°F
+  CHECK_NEAR(c.spike_c, 2.0, 1e-6);
+}
+
+// Feeds one reading per `period_ms` (and a tick in between) from `from` to `to` inclusive.
+static void feed(SanityChecker &s, uint32_t from, uint32_t to, uint32_t period_ms, float c) {
+  for (uint32_t t = from; (uint32_t)(t - from) <= (uint32_t)(to - from); t += period_ms) {
+    s.on_reading(t, c);
+    s.tick(t + period_ms / 2);
+  }
+}
+
+static void sanity_nan_faults_immediately() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 21.0f);
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), 21.0, 1e-6);
+  s.on_reading(100, NAN);
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+}
+
+static void sanity_out_of_range() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 21.0f);
+  s.on_reading(100, 50.1f);
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+  SanityChecker lo(sanity_cfg());
+  lo.on_reading(0, -10.1f);
+  CHECK(lo.fault());
+  // The limits themselves are fine, and so is a freezing or baking house (R19).
+  SanityChecker a(sanity_cfg()), b(sanity_cfg()), cold(sanity_cfg()), hot(sanity_cfg());
+  a.on_reading(0, -10.0f);
+  b.on_reading(0, 50.0f);
+  cold.on_reading(0, 1.0f);
+  hot.on_reading(0, 45.0f);
+  CHECK(!a.fault() && !b.fault() && !cold.fault() && !hot.fault());
+  CHECK_NEAR(a.value(), -10.0, 1e-6);
+  CHECK_NEAR(b.value(), 50.0, 1e-6);
+  CHECK_NEAR(cold.value(), 1.0, 1e-6);
+  CHECK_NEAR(hot.value(), 45.0, 1e-6);
+}
+
+// Readings keep arriving and are in range, but none is ever accepted (each jumps more than the
+// spike limit from both the held reading and the last accepted value): stale, measured from the
+// last ACCEPTED reading. Accepted readings near the old value then recover it as usual.
+static void sanity_never_accepted_goes_stale() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 21.0f);
+  uint32_t t = 250;
+  for (; t <= 2000; t += 250) {
+    s.on_reading(t, (t / 250) % 2 ? 25.0f : 29.0f);
+    s.tick(t);
+  }
+  CHECK(!s.fault());  // exactly stale_ms since the last accepted reading: not yet
+  CHECK_NEAR(s.value(), 21.0, 1e-6);
+  s.on_reading(2250, 25.0f);
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+  // The same through tick() alone.
+  SanityChecker k(sanity_cfg());
+  k.on_reading(0, 21.0f);
+  k.on_reading(1000, 25.0f);
+  k.on_reading(1500, 29.0f);
+  k.tick(2000);
+  CHECK(!k.fault());
+  k.tick(2001);
+  CHECK(k.fault());
+  // Good readings again: the window starts at the first accepted one and clears after 5 s.
+  feed_noisy(s, 3000, 8000, 250, 21.0f);
+  s.tick(7999);
+  CHECK(s.fault());
+  s.on_reading(8000, 21.1f);
+  s.tick(8000);
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), 21.1, 1e-6);
+}
+
+static void sanity_stale() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 21.0f);
+  s.tick(2000);
+  CHECK(!s.fault());
+  s.tick(2001);
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+}
+
+static void sanity_startup() {
+  SanityChecker s(sanity_cfg());
+  CHECK(std::isnan(s.value()));
+  CHECK(!s.fault());
+  s.tick(5000);  // first call; the stale clock starts here
+  s.tick(7000);
+  CHECK(!s.fault());
+  CHECK(std::isnan(s.value()));
+  s.tick(7001);
+  CHECK(s.fault());
+  // A first reading in time means no fault at all.
+  SanityChecker t(sanity_cfg());
+  t.tick(0);
+  t.on_reading(1500, 20.0f);
+  t.tick(3000);
+  CHECK(!t.fault());
+  CHECK_NEAR(t.value(), 20.0, 1e-6);
+  // A bad first reading faults at once.
+  SanityChecker n(sanity_cfg());
+  n.on_reading(0, NAN);
+  CHECK(n.fault());
+}
+
+static void sanity_frozen() {
+  SanityChecker s(sanity_cfg());
+  for (uint32_t t = 0; t <= 30000; t += 500) {
+    if (t % 1000 == 0) s.on_reading(t, 21.5f);
+    s.tick(t);
+  }
+  CHECK(!s.fault());  // exactly frozen_ms: not yet
+  s.tick(30001);
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+
+  // Tiny alternating noise is a live sensor.
+  SanityChecker n(sanity_cfg());
+  for (uint32_t t = 0; t <= 100000; t += 1000) {
+    n.on_reading(t, (t / 1000) % 2 ? 21.5f : 21.51f);
+    n.tick(t + 500);
+    CHECK(!n.fault());
+  }
+}
+
+static void sanity_spike_filtered() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 21.0f);
+  s.on_reading(1000, 31.0f);
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), 21.0, 1e-6);
+  s.on_reading(2000, 21.1f);
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), 21.1, 1e-6);
+  // A second, different spike replaces the first; the held one is dropped. (Readings 500 ms
+  // apart: three unaccepted readings 1 s apart would be 3 s without an accepted one, stale.)
+  SanityChecker d(sanity_cfg());
+  d.on_reading(0, 21.0f);
+  d.on_reading(500, 31.0f);
+  d.on_reading(1000, 40.0f);
+  CHECK_NEAR(d.value(), 21.0, 1e-6);
+  d.on_reading(1500, 21.2f);
+  CHECK(!d.fault());
+  CHECK_NEAR(d.value(), 21.2, 1e-6);
+}
+
+static void sanity_real_jump_accepted() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 21.0f);
+  s.on_reading(1000, 24.0f);
+  CHECK_NEAR(s.value(), 21.0, 1e-6);  // held back for one more reading
+  s.on_reading(2000, 24.1f);
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), 24.1, 1e-6);
+}
+
+static void sanity_recovery_after_5_units() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 21.0f);
+  s.tick(2001);
+  CHECK(s.fault());
+  const uint32_t t = 2001;  // fault starts; the sensor comes back at once
+  for (uint32_t d = 0; d < 5000; d += 250) {
+    s.on_reading(t + d, 21.0f + 0.01f * (d / 250));
+    s.tick(t + d);
+  }
+  s.tick(t + 4999);
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+  s.on_reading(t + 5000, 21.3f);
+  s.tick(t + 5001);
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), 21.3, 1e-6);
+}
+
+static void sanity_recovery_restarts_on_bad() {
+  SanityChecker s(sanity_cfg());
+  const uint32_t t = 10000;
+  s.on_reading(t, NAN);
+  CHECK(s.fault());
+  for (uint32_t d = 250; d <= 3000; d += 250) s.on_reading(t + d, 21.0f + 0.01f * (d / 250));
+  s.on_reading(t + 3250, NAN);  // bad again: the window starts over
+  CHECK(s.fault());
+  for (uint32_t d = 3500; d < 8500; d += 250) {
+    s.on_reading(t + d, 21.0f + 0.01f * (d / 250));
+    s.tick(t + d);
+  }
+  s.tick(t + 8499);
+  CHECK(s.fault());  // would have cleared at t+5250 without the restart
+  s.on_reading(t + 8500, 21.5f);
+  s.tick(t + 8501);
+  CHECK(!s.fault());
+}
+
+static void sanity_millis_wrap() {
+  const uint32_t t0 = 0xFFFFF000u;
+  // Healthy across the wrap, with noise so it is not frozen.
+  SanityChecker s(sanity_cfg());
+  for (uint32_t d = 0; d <= 20000; d += 1000) {
+    s.on_reading(t0 + d, (d / 1000) % 2 ? 21.5f : 21.6f);
+    s.tick(t0 + d + 500);
+    CHECK(!s.fault());
+  }
+  // Stale across the wrap.
+  SanityChecker st(sanity_cfg());
+  st.on_reading(t0, 21.0f);
+  st.tick(t0 + 2000);
+  CHECK(!st.fault());
+  st.tick(t0 + 2001);
+  CHECK(st.fault());
+  // Frozen across the wrap.
+  SanityChecker fr(sanity_cfg());
+  for (uint32_t d = 0; d <= 30000; d += 1000) {
+    fr.on_reading(t0 + d, 21.5f);
+    fr.tick(t0 + d);
+  }
+  CHECK(!fr.fault());
+  fr.tick(t0 + 30001);
+  CHECK(fr.fault());
+  // Recovery across the wrap.
+  SanityChecker rc(sanity_cfg());
+  rc.on_reading(t0 + 3000, NAN);
+  CHECK(rc.fault());
+  for (uint32_t d = 3250; d < 8250; d += 250) {
+    rc.on_reading(t0 + d, 21.0f + 0.01f * ((d / 250) % 5));
+    rc.tick(t0 + d);
+  }
+  rc.tick(t0 + 8248);
+  CHECK(rc.fault());
+  rc.on_reading(t0 + 8250, 21.0f);
+  rc.tick(t0 + 8251);
+  CHECK(!rc.fault());
+}
+
+// ---- Sanity checker: rule interactions -------------------------------------------------
+
+// Readings every `step` ms from `from` up to but not including `to`, alternating
+// around `base` so the sensor never looks frozen. Ticks run at each reading.
+static void feed_noisy(SanityChecker &s, uint32_t from, uint32_t to, uint32_t step, float base) {
+  for (uint32_t t = from; (uint32_t)(t - from) < (uint32_t)(to - from); t += step) {
+    s.on_reading(t, base + ((t / step) % 2 ? 0.05f : 0.0f));
+    s.tick(t);
+  }
+}
+
+// A held-back spike during recovery is not a good reading: the window restarts.
+static void sanity_spike_during_recovery() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 21.0f);
+  s.on_reading(100, NAN);
+  feed_noisy(s, 1000, 3000, 500, 21.0f);  // window starts at 1000
+  s.on_reading(3000, 29.0f);              // spike vs the last accepted value: held, window restarts
+  CHECK(s.fault());
+  feed_noisy(s, 3500, 6000, 500, 21.1f);  // drops the spike; window restarts at 3500
+  s.tick(6000);
+  CHECK(s.fault());                       // the first window would have cleared at 6000
+  feed_noisy(s, 6000, 8500, 500, 21.1f);
+  s.tick(8499);
+  CHECK(s.fault());
+  s.on_reading(8500, 21.2f);
+  s.tick(8500);
+  CHECK(!s.fault());
+}
+
+// A stuck sensor stays faulted while its readings keep arriving, and recovers only after it moves.
+static void sanity_frozen_holds_until_change() {
+  SanityChecker s(sanity_cfg());
+  feed(s, 0, 40000, 1000, 21.5f);
+  CHECK(s.fault());
+  feed(s, 41000, 80000, 1000, 21.5f);
+  CHECK(s.fault());
+  feed_noisy(s, 81000, 86000, 1000, 21.5f);  // it moved: the window starts at 81000 (the first value differs)
+  s.tick(85999);
+  CHECK(s.fault());
+  s.on_reading(86000, 21.7f);
+  s.tick(86000);
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), 21.7, 1e-6);
+}
+
+// A gap between readings is caught by on_reading even without ticks, and the late reading
+// does not clear the fault.
+static void sanity_late_reading_after_gap() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 21.0f);
+  s.on_reading(10000, 21.0f);
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+}
+
+// Stale during recovery restarts the window.
+static void sanity_stale_during_recovery() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, NAN);
+  s.on_reading(500, 21.0f);
+  s.on_reading(1000, 21.1f);
+  s.tick(3001);  // nothing since 1000: stale again
+  CHECK(s.fault());
+  feed_noisy(s, 3500, 8500, 500, 21.1f);  // window restarts at 3500
+  s.tick(8499);
+  CHECK(s.fault());
+  s.on_reading(8500, 21.2f);
+  s.tick(8500);
+  CHECK(!s.fault());
+}
+
+// A bad reading between a held spike and the next reading drops the held one. (Readings 500 ms
+// apart, inside the 2 s stale limit counted from the last accepted reading.)
+static void sanity_bad_drops_held_spike() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 21.0f);
+  s.on_reading(500, 31.0f);  // held
+  s.on_reading(1000, NAN);
+  s.on_reading(1500, 31.1f);  // must not confirm the old held reading
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+  s.on_reading(2000, 31.2f);  // within spike of the new held reading: real change
+  feed_noisy(s, 2500, 7000, 500, 31.2f);
+  s.tick(6999);
+  CHECK(s.fault());
+  s.on_reading(7000, 31.3f);
+  s.tick(7000);
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), 31.3, 1e-6);
+}
+
+// ---- Sanity checker: conditions that outlast 2^31 ms (24.8 days) ------------------------
+
+static SanityConfig sanity_prod_cfg() { return sanity_config(60000); }
+
+// C1: an outage across which the room moved more than spike_c. The first reading back is held
+// against the old (pre-outage) value and the next one confirms it, so the readings are accepted
+// and the fault clears after recover_ms of them, the stale fault notwithstanding. Readings every
+// `step` ms with ticks every `tick` ms in between (test: 250 / 250; production: 10 s / 1 s).
+// Returns the time the fault cleared (0 if it never did).
+static uint32_t outage_then_return(SanityConfig cfg, uint32_t step, uint32_t tick, float before_c,
+                                   float after_c) {
+  SanityChecker s(cfg);
+  for (uint32_t t = 0; t <= 4 * step; t += step) s.on_reading(t, before_c + ((t / step) % 2 ? 0.05f : 0.0f));
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), before_c, 0.06);
+  const uint32_t last = 4 * step;
+  const uint32_t back = last + 3 * cfg.stale_ms;  // the sensor returns well past stale
+  for (uint32_t t = last + tick; t < back; t += tick) s.tick(t);
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+  // The fault may clear only after recover_ms of accepted readings: after a move over spike_c
+  // the first one back is held and the second confirms it and starts the window.
+  const bool held = std::fabs(after_c - before_c) > cfg.spike_c;
+  const uint32_t earliest = back + (held ? step : 0) + cfg.recover_ms;
+  uint32_t cleared = 0;
+  for (uint32_t t = back; t <= back + 4 * cfg.recover_ms && !cleared; t += step) {
+    s.on_reading(t, after_c + ((t / step) % 2 ? 0.05f : 0.0f));
+    if (!s.fault()) cleared = t;
+    for (uint32_t k = t + tick; k < t + step && !cleared; k += tick) {
+      s.tick(k);
+      if (!s.fault()) cleared = k;
+    }
+  }
+  CHECK(cleared != 0);
+  if (cleared) {
+    CHECK(cleared >= earliest);
+    CHECK(cleared <= earliest + step);
+    CHECK_NEAR(s.value(), after_c, 0.06);
+  }
+  return cleared;
+}
+
+static void sanity_recovers_after_outage_with_big_move() {
+  // Test thresholds, readings every 250 ms (the sim in the scenario tests).
+  outage_then_return(sanity_cfg(), 250, 250, 20.0f, 17.0f);
+  outage_then_return(sanity_cfg(), 250, 250, 20.0f, 25.0f);
+  // Production thresholds, readings every 10 s and ticks every second (logic.yaml).
+  outage_then_return(sanity_prod_cfg(), 10000, 1000, 20.0f, 17.0f);
+  outage_then_return(sanity_prod_cfg(), 10000, 1000, 20.0f, 25.0f);
+  // A move within spike_c needs no confirming reading (unchanged behaviour).
+  outage_then_return(sanity_cfg(), 250, 250, 20.0f, 21.5f);
+}
+
+// Finding 6 still holds after an outage: a returning stream that is never accepted (each reading
+// more than spike_c from both the held one and the last accepted value) keeps the fault on.
+static void sanity_outage_then_never_accepted_stays_faulted() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 20.0f);
+  for (uint32_t t = 250; t <= 6000; t += 250) s.tick(t);
+  CHECK(s.fault());
+  bool ever_cleared = false;
+  for (uint32_t t = 6250; t <= 30000; t += 250) {
+    s.on_reading(t, (t / 250) % 2 ? 25.0f : 29.0f);
+    s.tick(t + 125);
+    if (!s.fault() || !std::isnan(s.value())) ever_cleared = true;
+  }
+  CHECK(!ever_cleared);
+}
+
+
+// A dead sensor repeating one value must stay faulted past 2^31 ms, and recover only
+// after the value changes and recover_ms of good readings.
+static void sanity_frozen_stays_faulted_past_25_days() {
+  SanityChecker s(sanity_prod_cfg());
+  const uint32_t t0 = 12345;
+  const uint32_t step = 10000;
+  const uint32_t days26 = 26u * 86400u * 1000u;
+  for (uint32_t d = 0; d <= days26; d += step) {
+    s.on_reading(t0 + d, 21.5f);
+    s.tick(t0 + d + 1000);
+    if (d > 1800000u && !s.fault()) {
+      CHECK(false);
+      break;
+    }
+  }
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+  // The value moves: the window starts at the first changed reading.
+  const uint32_t t1 = t0 + days26 + step;
+  for (uint32_t d = 0; d < 300000; d += step) {
+    s.on_reading(t1 + d, 21.6f + ((d / step) % 2 ? 0.05f : 0.0f));
+    s.tick(t1 + d + 1000);
+  }
+  s.tick(t1 + 299999);
+  CHECK(s.fault());
+  s.on_reading(t1 + 300000, 21.6f);
+  s.tick(t1 + 300001);
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), 21.6, 1e-6);
+}
+
+// No readings at all for more than 2^31 ms: still faulted, and a returning sensor recovers normally.
+static void sanity_stale_stays_faulted_past_25_days() {
+  SanityChecker s(sanity_prod_cfg());
+  s.on_reading(0, 21.0f);
+  const uint32_t days26 = 26u * 86400u * 1000u;
+  bool ok = true;
+  for (uint32_t t = 1000; t <= days26; t += 1000) {
+    s.tick(t);
+    if (t > 120000u && !s.fault()) ok = false;
+  }
+  CHECK(ok);
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+  for (uint32_t d = 0; d < 300000; d += 10000) {
+    s.on_reading(days26 + 10000 + d, 21.0f + ((d / 10000) % 2 ? 0.05f : 0.0f));
+    s.tick(days26 + 10000 + d + 1000);
+  }
+  CHECK(s.fault());
+  // The first returning reading repeats 21.0, so the sensor still counts as frozen until the
+  // next one differs (+10 s); the window then runs from there.
+  s.on_reading(days26 + 310000, 21.0f);
+  s.tick(days26 + 319999);
+  CHECK(s.fault());
+  s.on_reading(days26 + 320000, 21.0f);
+  s.tick(days26 + 320001);
+  CHECK(!s.fault());
+}
+
+int main() {
+  derive_heat_comfort();
+  derive_heat_eco();
+  derive_cool_eco();
+  derive_auto();
+  derive_auto_eco();
+  derive_hold_overrides_eco_heat();
+  derive_hold_auto_no_widen();
+  derive_clamps();
+  derive_eco_offset_clamps();
+  derive_input_clamps();
+  derive_off_matches_heat();
+  derive_output_clamps();
+  clamp_setting_cases();
+  auto_drag_cases();
+  conversions();
+  schedule_basic();
+  schedule_midnight_carryover();
+  schedule_weekend_boundary();
+  schedule_out_of_order_times();
+  schedule_edges();
+  format_12h_cases();
+  schedule_dow_all_days();
+  sanity_production_config();
+  sanity_never_accepted_goes_stale();
+  sanity_nan_faults_immediately();
+  sanity_out_of_range();
+  sanity_stale();
+  sanity_startup();
+  sanity_frozen();
+  sanity_spike_filtered();
+  sanity_real_jump_accepted();
+  sanity_recovery_after_5_units();
+  sanity_recovery_restarts_on_bad();
+  sanity_millis_wrap();
+  sanity_spike_during_recovery();
+  sanity_frozen_holds_until_change();
+  sanity_late_reading_after_gap();
+  sanity_stale_during_recovery();
+  sanity_bad_drops_held_spike();
+  sanity_frozen_stays_faulted_past_25_days();
+  sanity_stale_stays_faulted_past_25_days();
+  sanity_recovers_after_outage_with_big_move();
+  sanity_outage_then_never_accepted_stays_faulted();
+  return CHECK_SUMMARY("test_logic");
+}

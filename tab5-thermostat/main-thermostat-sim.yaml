@@ -1,0 +1,25 @@
+# Host entry for the play / Home Assistant sim: the thermostat packages against the virtual
+# house, with real timers and real-time physics. Runs on ESPHome's host platform (Linux/macOS),
+# so there is no web_server (not available on host); use HA or the native API (port 6053).
+
+esphome:
+  name: main-thermostat-sim
+  friendly_name: "Main Thermostat (Sim)"
+
+packages:
+  sim: !include sim/virtual-house.yaml
+  logic: !include thermostat/logic.yaml
+
+host:
+
+logger:
+
+api:
+  encryption:
+    key: !secret sim_api_encryption_key
+  reboot_timeout: 0s
+
+time:
+  - platform: host
+    id: host_time
+    timezone: America/New_York

@@ -1,0 +1,376 @@
+// Pure thermostat logic: no ESPHome includes, so it compiles on the host for unit tests.
+#pragma once
+
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <string>
+
+namespace chestnut {
+
+enum class Mode { Off, Heat, Cool, Auto };
+
+struct Setpoints {
+  int effective_f;
+  int low_f;
+  int high_f;
+};
+
+namespace detail {
+inline int clamp_int(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+}  // namespace detail
+
+// Derives the climate's setpoints (whole degrees F) from the single Comfort target,
+// the Eco offset and an optional hold. Heat and Off use a 2 degree band above the
+// target, Cool uses a 2 degree band below it, Auto straddles it (widened by Eco).
+// The active heat target is never below 50 and the active cool target never above 90;
+// the companion setpoint may fall outside 50-90 (Heat high up to 92, Cool low down to 48).
+inline Setpoints derive_setpoints(Mode mode, int comfort_f, int eco_offset_f, bool eco, bool hold, int hold_f) {
+  using detail::clamp_int;
+  comfort_f = clamp_int(comfort_f, 50, 90);
+  hold_f = clamp_int(hold_f, 50, 90);
+  const int n = clamp_int(eco_offset_f, 2, 10);
+  const int centre = hold ? hold_f : comfort_f;
+
+  Setpoints s{};
+  switch (mode) {
+    case Mode::Cool:
+      s.high_f = hold ? hold_f : comfort_f + (eco ? n : 0);
+      if (s.high_f > 90) s.high_f = 90;  // the active cool target never exceeds 90
+      s.low_f = s.high_f - 2;
+      s.effective_f = s.high_f;
+      break;
+    case Mode::Auto: {
+      const int widen = (!hold && eco) ? n : 0;
+      s.low_f = centre - 1 - widen;
+      s.high_f = centre + 1 + widen;
+      s.effective_f = centre;
+      // Keep the active targets in range and the band at least 2 wide.
+      if (s.low_f < 50) {
+        s.low_f = 50;
+        if (s.high_f < 52) s.high_f = 52;
+      }
+      if (s.high_f > 90) {
+        s.high_f = 90;
+        if (s.low_f > 88) s.low_f = 88;
+      }
+      break;
+    }
+    case Mode::Heat:
+    case Mode::Off:
+    default:
+      s.low_f = hold ? hold_f : comfort_f - (eco ? n : 0);
+      if (s.low_f < 50) s.low_f = 50;  // the active heat target never drops below 50
+      s.high_f = s.low_f + 2;
+      s.effective_f = s.low_f;
+      break;
+  }
+  return s;
+}
+
+// HA's range slider in Auto: the new centre (°F) for a write of new_low_f / new_high_f (NaN when
+// not sent) against the current band low_f..high_f around centre_f. The centre moves by
+// whichever edge moved, in whole °F (a 0.5 °C slider step is 0.9°F, one degree); if both moved,
+// by the average of the two. The midpoint of the new edges would round a one-step drag back to
+// where it was, and ignore a drag of one edge of a wide (Eco) band.
+inline int auto_drag_target(int centre_f, int low_f, int high_f, float new_low_f, float new_high_f) {
+  const int d_lo = std::isnan(new_low_f) ? 0 : (int) std::lround(new_low_f - low_f);
+  const int d_hi = std::isnan(new_high_f) ? 0 : (int) std::lround(new_high_f - high_f);
+  const int d = d_lo == 0 ? d_hi : (d_hi == 0 ? d_lo : (int) std::lround((d_lo + d_hi) / 2.0));
+  return centre_f + d;
+}
+
+// A restored setting put back in its range [lo, hi]. NaN (no usable value) becomes hi: for the
+// safety timers the longest wait is the safe side.
+inline float clamp_setting(float v, float lo, float hi) {
+  if (std::isnan(v)) return hi;
+  return v < lo ? lo : (v > hi ? hi : v);
+}
+
+inline float f_to_c(float f) { return (f - 32.0f) * 5.0f / 9.0f; }
+inline float c_to_f(float c) { return c * 9.0f / 5.0f + 32.0f; }
+
+// ---- Schedule -------------------------------------------------------------------------
+
+// One schedule period: start minute of day (0-1439) and whether it runs at Eco.
+struct Period {
+  int start_min;
+  bool eco;
+};
+
+// Index 0..3 = Wake, Leave, Return, Sleep. Mon-Fri use weekday, Sat-Sun use weekend.
+struct Week {
+  Period weekday[4];
+  Period weekend[4];
+};
+
+// period: index of the period in force. key: start_dow*1440 + start_min of the occurrence
+// in force, so it changes exactly when a new period instance starts. next_dow/next_min:
+// the next start strictly after the queried minute.
+struct ScheduleState {
+  int period;
+  bool eco;
+  int key;
+  int next_dow;
+  int next_min;
+};
+
+namespace detail {
+inline const Period *day_periods(const Week &w, int dow) { return dow >= 5 ? w.weekend : w.weekday; }
+
+// The period of the day that starts last (ties: highest index). Always valid for 4 periods.
+inline int last_starting(const Period *p) {
+  int best = 0;
+  for (int i = 1; i < 4; i++)
+    if (p[i].start_min >= p[best].start_min) best = i;
+  return best;
+}
+}  // namespace detail
+
+// dow: 0=Mon..6=Sun. Within a day periods apply in start-time order, not index order.
+// Before the day's first start, the previous day's last-starting period is still in force.
+inline ScheduleState schedule_at(const Week &w, int dow, int minute) {
+  using detail::clamp_int;
+  using detail::day_periods;
+  using detail::last_starting;
+  dow = ((dow % 7) + 7) % 7;
+  minute = clamp_int(minute, 0, 1439);
+
+  ScheduleState s{};
+  const Period *today = day_periods(w, dow);
+
+  // Active: latest start <= minute today (ties: highest index), else yesterday's last start.
+  int active = -1;
+  for (int i = 0; i < 4; i++)
+    if (today[i].start_min <= minute && (active < 0 || today[i].start_min >= today[active].start_min)) active = i;
+  int start_dow = dow;
+  if (active < 0) {
+    start_dow = (dow + 6) % 7;
+    active = last_starting(day_periods(w, start_dow));
+    s.eco = day_periods(w, start_dow)[active].eco;
+    s.key = start_dow * 1440 + day_periods(w, start_dow)[active].start_min;
+  } else {
+    s.eco = today[active].eco;
+    s.key = dow * 1440 + today[active].start_min;
+  }
+  s.period = active;
+
+  // Next: earliest start strictly after now, searching today and up to 7 days ahead.
+  s.next_dow = dow;
+  s.next_min = minute;
+  for (int d = 0; d <= 7; d++) {
+    const int nd = (dow + d) % 7;
+    const Period *p = day_periods(w, nd);
+    int best = -1;
+    for (int i = 0; i < 4; i++) {
+      if (d == 0 && p[i].start_min <= minute) continue;
+      if (best < 0 || p[i].start_min < p[best].start_min) best = i;
+    }
+    if (best >= 0) {
+      s.next_dow = nd;
+      s.next_min = p[best].start_min;
+      break;
+    }
+  }
+  return s;
+}
+
+// ESPTime's day_of_week (1=Sun..7=Sat) as the schedule's day (0=Mon..6=Sun).
+inline int schedule_dow(int esp_day_of_week) { return ((esp_day_of_week + 5) % 7 + 7) % 7; }
+
+inline int minute_of_day(int hour, int minute) { return hour * 60 + minute; }
+
+inline const char *period_name(int period) {
+  switch (period) {
+    case 0: return "Wake";
+    case 1: return "Leave";
+    case 2: return "Return";
+    case 3: return "Sleep";
+    default: return "";
+  }
+}
+
+// 0 -> "12:00 am", 390 -> "6:30 am", 720 -> "12:00 pm", 1350 -> "10:30 pm".
+inline std::string format_12h(int minute) {
+  minute = detail::clamp_int(minute, 0, 1439);
+  const int h = minute / 60;
+  const int m = minute % 60;
+  char buf[16];
+  std::snprintf(buf, sizeof buf, "%d:%02d %s", h % 12 == 0 ? 12 : h % 12, m, h < 12 ? "am" : "pm");
+  return std::string(buf);
+}
+
+// ---- Sensor sanity --------------------------------------------------------------------
+
+// Times in ms, temperatures in C.
+struct SanityConfig {
+  uint32_t stale_ms;   // no reading for longer than this is bad
+  uint32_t frozen_ms;  // the identical value for longer than this is bad
+  uint32_t recover_ms; // continuous good readings needed to clear a fault
+  float min_c;
+  float max_c;
+  float spike_c;       // a jump of more than this from the last accepted reading is held back
+};
+
+// The production thresholds (spec, Safety 4), with every time in units of unit_ms (one real
+// minute on the device; the tests shorten it): stale after 2 units without an accepted reading,
+// frozen after 30 units of an identical value, recovered after 5 units of good readings;
+// -10..50 C (14-122°F, ruling R19: only impossible readings, so a freezing or baking house is
+// still heated or cooled back); a jump over 2 C held back for one reading.
+inline SanityConfig sanity_config(uint32_t unit_ms) {
+  return SanityConfig{2u * unit_ms, 30u * unit_ms, 5u * unit_ms, -10.0f, 50.0f, 2.0f};
+}
+
+namespace detail {
+// Wrap-safe time since `then` (uint32 ms, like ESPHome's millis()). A timestamp slightly
+// ahead of `now` counts as zero elapsed rather than ~49 days.
+inline uint32_t elapsed_ms(uint32_t now, uint32_t then) {
+  const uint32_t d = now - then;
+  return d > 0x7FFFFFFFu ? 0 : d;
+}
+}  // namespace detail
+
+// Checks the room temperature before the thermostat sees it. Feed every reading to
+// on_reading() and call tick() at least once a second; publish value() (NaN on a fault)
+// as the thermostat's input and fault() as the problem sensor.
+//
+// Bad: NaN, outside [min, max], no accepted reading for stale_ms (readings that keep arriving
+// but are never believed count as none), or the identical value for frozen_ms. A fault starts
+// at the first bad condition and clears after recover_ms of continuous good readings; any bad
+// condition restarts that window.
+//
+// Spike: a reading more than spike_c from the last accepted one is held back. If the next
+// reading is within spike_c of the held one, both are accepted (a real change); otherwise
+// the held one is dropped and the new reading is judged on its own. A spike is not a fault
+// by itself, but while a fault is clearing a held-back reading is not a good reading, so
+// it restarts the recovery window. A bad reading (NaN, out of range, the frozen value) drops a
+// held one; stale and frozen seen by the clock do not: after an outage across which the room
+// moved more than spike_c, the first reading back is held against the old value and only the
+// next one can confirm it and end the stale fault.
+//
+// Startup: value() is NaN until the first accepted reading, but fault() stays false until
+// stale_ms passes with no accepted reading (the clock starts at the first call).
+class SanityChecker {
+ public:
+  explicit SanityChecker(SanityConfig cfg) : cfg_(cfg) {}
+
+  void on_reading(uint32_t now_ms, float c) {
+    start(now_ms);
+    // A gap since the last accepted reading is caught even if tick() was late.
+    if (time_bad(now_ms)) mark_fault();
+    if (!std::isnan(c)) {
+      if (!have_frozen_ || c != frozen_value_) {
+        frozen_value_ = c;
+        frozen_since_ms_ = now_ms;
+        have_frozen_ = true;
+        frozen_ = false;  // only a changed value ends a frozen condition
+      }
+    }
+    // Still frozen counts too: the identical value keeps arriving but is not good.
+    if (std::isnan(c) || c < cfg_.min_c || c > cfg_.max_c || frozen_) {
+      mark_bad();
+      return;
+    }
+    const bool accepted = accept(c);
+    if (accepted) {
+      last_ok_ms_ = now_ms;
+      stale_ = false;  // stale ends with the next accepted reading
+    }
+    if (fault_) {
+      if (!accepted)
+        good_valid_ = false;
+      else if (!good_valid_) {
+        good_since_ms_ = now_ms;
+        good_valid_ = true;
+      }
+    }
+    maybe_clear(now_ms);
+  }
+
+  void tick(uint32_t now_ms) {
+    start(now_ms);
+    if (time_bad(now_ms)) {
+      mark_fault();
+      return;
+    }
+    maybe_clear(now_ms);
+  }
+
+  bool fault() const { return fault_; }
+  float value() const { return (fault_ || !have_value_) ? NAN : value_; }
+
+ private:
+  void start(uint32_t now_ms) {
+    if (started_) return;
+    started_ = true;
+    last_ok_ms_ = now_ms;
+  }
+
+  // Stale and frozen are latched as state the moment they are seen, so they stay true however
+  // long they last (elapsed_ms saturates to 0 past 2^31 ms, about 24.8 days). stale_ ends with
+  // the next accepted reading, frozen_ only when the value changes.
+  bool time_bad(uint32_t now_ms) {
+    if (detail::elapsed_ms(now_ms, last_ok_ms_) > cfg_.stale_ms) stale_ = true;
+    if (have_frozen_ && detail::elapsed_ms(now_ms, frozen_since_ms_) > cfg_.frozen_ms) frozen_ = true;
+    return stale_ || frozen_;
+  }
+
+  // A fault, and the recovery window restarts.
+  void mark_fault() {
+    fault_ = true;
+    good_valid_ = false;
+  }
+
+  // A bad reading: also drops a held one. Only bad readings do; the stale and frozen conditions
+  // that tick() keeps seeing must not, or a held reading taken while stale could never be
+  // confirmed (each one is dropped before the next arrives) and the fault would never clear.
+  void mark_bad() {
+    mark_fault();
+    held_ = false;
+  }
+
+  // Spike filter for an in-range reading. Returns false if the reading was held back.
+  bool accept(float c) {
+    if (have_value_ && held_ && std::fabs(c - held_value_) <= cfg_.spike_c) {
+      held_ = false;  // a real change: both readings are accepted, c is the newest
+      take(c);
+      return true;
+    }
+    held_ = false;  // not confirmed: the held reading is dropped
+    if (have_value_ && std::fabs(c - value_) > cfg_.spike_c) {
+      held_ = true;
+      held_value_ = c;
+      return false;
+    }
+    take(c);
+    return true;
+  }
+
+  void take(float c) {
+    value_ = c;
+    have_value_ = true;
+  }
+
+  void maybe_clear(uint32_t now_ms) {
+    if (fault_ && good_valid_ && have_value_ && detail::elapsed_ms(now_ms, good_since_ms_) >= cfg_.recover_ms)
+      fault_ = false;
+  }
+
+  SanityConfig cfg_;
+  bool started_ = false;
+  uint32_t last_ok_ms_ = 0;  // the last accepted reading (or the first call)
+  bool stale_ = false;
+  bool frozen_ = false;
+  bool have_frozen_ = false;
+  float frozen_value_ = 0;
+  uint32_t frozen_since_ms_ = 0;
+  bool have_value_ = false;
+  float value_ = 0;
+  bool held_ = false;
+  float held_value_ = 0;
+  bool fault_ = false;
+  bool good_valid_ = false;
+  uint32_t good_since_ms_ = 0;
+};
+
+}  // namespace chestnut

@@ -1,0 +1,1325 @@
+# Thermostat logic (milestone 2): ESPHome's stock thermostat climate `main_thermostat`, wired to
+# the package contract (room_temperature, room_humidity, relay_heat / relay_cool / relay_fan from
+# the sim or hardware package), plus the safety timer settings and read-only call sensors.
+# This is the only package that turns a relay on. relay_ob (O/B) is never touched.
+# The thermostat reads a sanity-checked temperature (checked_temperature_c), never
+# room_temperature directly; sensor_fault, call_wait_reason and action_elapsed report on it.
+# Its low / high setpoints are never set directly: apply_setpoints derives them from the mode,
+# comfort_target, eco_offset, comfort_level and a hold (chestnut::derive_setpoints). set_target
+# and any setpoint write to the climate (HA, the API, the screen) start a hold.
+# The on-device weekly schedule (Wake / Leave / Return / Sleep, weekdays and weekends) switches
+# comfort_level from the device clock (the clock_id time component); a hold lasts until the
+# next period starts.
+# Runs unchanged on the Tab5 and on the host; test-only hooks live in tests/main-thermostat-test.yaml.
+
+substitutions:
+  timer_unit_s: "60"  # seconds per "minute" for every user-facing timer (1 in the tests)
+  # Compile-time minimum timers (= the timer numbers' defaults x timer_unit_s). The numbers
+  # below set them again at boot from their restored values.
+  heat_run_s: "180"
+  heat_off_s: "180"
+  cool_run_s: "300"
+  cool_off_s: "300"
+  min_idle_s: "30"
+  # The thermostat's heat / cool deadband (°C) in Heat and Cool: 0.5 °C = 0.9°F. In Auto it is
+  # auto_deadband_c (ruling R21: zero, so the band edges effective_low / effective_high are the
+  # real start points). sync_changeover sets them per mode, and the Auto changeover lockout
+  # swaps the locked side's deadband for a huge one while it lasts.
+  deadband_c: "0.5"
+  auto_deadband_c: "0.0"
+  # The schedule's clock (a time component; sntp_time on the Tab5) and how often it's read. It
+  # re-evaluates only when the minute changes, so reading it every second costs little, and a
+  # period starts within a second: a hold started just after a period began is then recorded
+  # against the new period, not ended by a late tick. The tests use 24h (test_clock drives them).
+  clock_id: host_time
+  schedule_tick: 1s
+
+esphome:
+  includes:
+    # Resolved next to this file. A list, so it merges with the sim package's includes.
+    - chestnut_logic.h
+  on_boot:
+    # Before anything publishes: every room_temperature reading goes through the sanity checker,
+    # and the thermostat sees only its verdict (value(), NaN while faulted). A NaN makes the
+    # thermostat ask for OFF: no new call starts, and a running call still ends only when its
+    # minimum run allows (ESPHome's idle_action_ready_). The 1 s interval below catches the
+    # faults that come with no reading (stale, frozen) and the recovery.
+    - priority: 800
+      then:
+        - lambda: |-
+            // The production thresholds (chestnut::sanity_config: stale 2 min, frozen 30 min,
+            // recover after 5 min of good readings; -10..50 °C; a jump over 2 °C held back for
+            // one reading), with one "minute" = timer_unit_s seconds.
+            static chestnut::SanityChecker checker(chestnut::sanity_config(1000u * ${timer_unit_s}));
+            id(g_sanity) = &checker;
+            id(g_boot_ms) = millis();  // millis() isn't uptime on the host (monotonic clock)
+            id(room_temperature).add_on_state_callback([](float c) {
+              checker.on_reading(millis(), c);
+              id(checked_temperature_c).publish_state(checker.value());
+            });
+            // Humidity only needs to know when it last arrived (the 1 s interval makes it
+            // unknown once it stops); it never affects control.
+            id(room_humidity).add_on_state_callback([](float h) {
+              if (!std::isnan(h)) id(g_humidity_ms) = millis();
+            });
+    # After every component's setup (the numbers, selects, schedule settings and switch
+    # restored, the climate restored or given its Default preset): from here on, changes to the
+    # target and schedule entities apply and holds can start. A hold never survives a reboot
+    # (the hold flags boot false). The schedule then evaluates once from the real clock, which
+    # re-applies the current period's level and applies the setpoints.
+    - priority: -100
+      then:
+        - lambda: |-
+            id(g_level_eco) = id(comfort_level).current_option() == "Eco";
+            id(g_ready) = true;
+        - script.execute: sync_changeover  # the restored mode's deadbands
+        - script.execute:
+            id: schedule_from_clock
+            force: true
+
+globals:
+  # Interlock fault latch (spec, Safety 3). Not restored: a reboot clears it, and relays boot off.
+  # Also read by call_wait_reason.
+  - id: g_interlock_latched
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  # millis() of the latest trip; the Clear button waits the minimum off time from here.
+  - id: g_interlock_trip_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  # The sensor sanity checker (spec, Safety 4), a chestnut::SanityChecker created and fed in
+  # on_boot above. A void pointer because ESPHome declares globals before it includes
+  # chestnut_logic.h, so a global can't have the checker's type; lambdas cast it back.
+  - id: g_sanity
+    type: void *
+    restore_value: false
+    initial_value: nullptr
+  # millis() of the latest humidity reading (spec, Safety 4: a humidity fault only makes
+  # humidity unknown).
+  - id: g_humidity_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  # millis() at boot, for call_wait_reason's "Starting up".
+  - id: g_boot_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  # action_elapsed: the last climate action seen by on_state (255 = none yet), whole seconds
+  # counted since it began, and the millis() those seconds run up to. Counted in steps of under
+  # 30 s, so an action longer than millis()'s 49.7-day wrap (Off all summer) still adds up.
+  - id: g_last_action
+    type: uint8_t
+    restore_value: false
+    initial_value: "255"
+  - id: g_action_elapsed_s
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  - id: g_action_mark_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  # Auto changeover lockout in seconds (changeover_lockout x timer_unit_s).
+  - id: g_changeover_lockout_s
+    type: uint32_t
+    initial_value: "30 * ${timer_unit_s}"
+
+  # --- Single target, Comfort / Eco, holds (spec "Single target, Comfort, Eco and holds") ---
+  # Set by the last on_boot step: until then, restoring the numbers, the select and the climate
+  # applies nothing and starts no hold.
+  - id: g_ready
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  # Manual holds (ruling R12), shown together as schedule_hold. Not restored: a hold doesn't
+  # survive a reboot. Resume, the next period and turning the schedule off clear both; with the
+  # schedule off none starts.
+  # - Level hold: comfort_level was switched by hand. The chosen level applies with its normal
+  #   derivation (Eco widens Auto), and the schedule leaves the level alone until the next period.
+  # - Temperature hold: set_target (or a setpoint write) at g_hold_f °F, with no Eco widening.
+  #   Any mode change ends it (ruling R13); a level hold under it stays.
+  - id: g_hold_level
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  - id: g_hold_temp
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  - id: g_hold_f
+    type: int
+    restore_value: false
+    initial_value: "72"
+  # The manual target (rulings R20, R23, R24): with the schedule off, set_target (or a setpoint
+  # write) sets the target itself to g_manual_f °F, derived like a temperature hold (no Eco
+  # widening), with no hold and no "until"; comfort_target is untouched. It lasts until
+  # set_target changes it, a level is picked (comfort_level, even the option already on) or the
+  # schedule is turned back on; a mode change keeps it. Shown as manual_target. A setting, so
+  # restored (with the schedule restored off, it applies again after a reboot).
+  - id: g_manual
+    type: bool
+    restore_value: true
+    initial_value: "false"
+  - id: g_manual_f
+    type: int
+    restore_value: true
+    initial_value: "72"
+  # comfort_level as last applied (true = Eco). A template select fires on_value again when set
+  # to the same option; comparing with this keeps a re-tap from starting a hold.
+  - id: g_level_eco
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  # The effective target apply_setpoints derived last (°F). set_target equal to it starts nothing.
+  - id: g_effective_f
+    type: int
+    restore_value: false
+    initial_value: "72"
+  # Set around apply_setpoints' own climate call, so on_control lets it through untouched. Every
+  # climate call made by this package must set it (the Clear script makes none: it only
+  # refresh()es).
+  - id: g_applying
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  # Set while the schedule changes comfort_level, so the change isn't a hold.
+  - id: g_sched_setting
+    type: bool
+    restore_value: false
+    initial_value: "false"
+
+  # --- Schedule (spec "Schedule") ---
+  # The schedule's last inputs (schedule_evaluate): whether the clock was valid, the day
+  # (0=Mon..6=Sun) and minute of day. Entity edits and Resume re-evaluate with them.
+  - id: g_clock_valid
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  - id: g_last_dow
+    type: int
+    restore_value: false
+    initial_value: "0"
+  - id: g_last_min
+    type: int
+    restore_value: false
+    initial_value: "0"
+  # What the last evaluation found: the active period instance's key (chestnut::schedule_at; -1
+  # when the schedule is off or the clock isn't set), the period (0..3 Wake..Sleep, -1 none) and
+  # the next period's start (minute of day).
+  - id: g_sched_key
+    type: int
+    restore_value: false
+    initial_value: "-1"
+  - id: g_sched_period
+    type: int
+    restore_value: false
+    initial_value: "-1"
+  - id: g_sched_next_min
+    type: int
+    restore_value: false
+    initial_value: "0"
+  # The key of the period a hold started in. The hold ends when an evaluation finds another key
+  # (the next period has started). -1: started while the clock wasn't set, so the first valid
+  # evaluation adopts its key instead of ending the hold.
+  - id: g_hold_key
+    type: int
+    restore_value: false
+    initial_value: "-1"
+  # A climate call from outside (HA, the API, the screen) being handled in on_control, and the
+  # mode it will leave the climate in. While set, apply_setpoints writes the derived setpoints
+  # into that call instead of making its own, so a mode and its setpoints change together.
+  - id: g_pending_call
+    type: climate::ClimateCall *
+    restore_value: false
+    initial_value: nullptr
+  - id: g_pending_mode
+    type: climate::ClimateMode
+    restore_value: false
+    initial_value: climate::CLIMATE_MODE_OFF
+
+  # --- Auto changeover lockout (spec, Safety 2) ---
+  # The call that last ended in Auto (0 none, 1 heat, 2 cool) and when the lockout on the other
+  # side ends (millis()). Cleared by the 1 s interval when the lockout ends, so millis()
+  # wrapping can't make an old lockout look active again.
+  - id: g_last_call
+    type: uint8_t
+    restore_value: false
+    initial_value: "0"
+  - id: g_lockout_until_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+
+sensor:
+  # What the thermostat acts on (°C). NaN means "no usable reading".
+  - platform: template
+    id: checked_temperature_c
+    internal: true
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 2
+    update_interval: never
+    on_value:
+      - lambda: id(checked_temperature).publish_state(chestnut::c_to_f(x));
+  # Contract: the checked room temperature in °F, for the screen and HA.
+  - platform: template
+    id: checked_temperature
+    name: "Checked Temperature"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: never
+  # Contract: seconds since the current heating / cooling / idle (or off) action began. Published
+  # at once (0) on each action change and every 30 s after. Seconds, not a timestamp.
+  - platform: template
+    id: action_elapsed
+    name: "Action Elapsed"
+    icon: mdi:timer-sand
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: never
+  # Contract: the temperature being held right now (the screen's big number), and the band
+  # edges in Auto. Published by apply_setpoints.
+  - platform: template
+    id: effective_target
+    name: "Effective Target"
+    icon: mdi:thermometer
+    unit_of_measurement: "°F"
+    device_class: temperature
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: effective_low
+    name: "Effective Low"
+    icon: mdi:thermometer-chevron-down
+    unit_of_measurement: "°F"
+    device_class: temperature
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: effective_high
+    name: "Effective High"
+    icon: mdi:thermometer-chevron-up
+    unit_of_measurement: "°F"
+    device_class: temperature
+    accuracy_decimals: 0
+    update_interval: never
+
+climate:
+  - platform: thermostat
+    id: main_thermostat
+    name: "Main Thermostat"
+    sensor: checked_temperature_c
+    humidity_sensor: room_humidity
+    # After any boot, heat and cool wait out their minimum off times before the first call.
+    startup_delay: true
+    min_idle_time: ${min_idle_s}s
+    min_heating_run_time: ${heat_run_s}s
+    min_heating_off_time: ${heat_off_s}s
+    min_cooling_run_time: ${cool_run_s}s
+    min_cooling_off_time: ${cool_off_s}s
+    # Required with fan mode actions. ESPHome never goes below 1 s for any of its timers.
+    min_fan_mode_switching_time: 1s
+    # Modes: OFF, HEAT, COOL (from the actions) and HEAT_COOL (our "Auto"). No AUTO, no FAN_ONLY.
+    heat_cool_mode: true
+    # Covers 48–92°F: the derived companion setpoint can sit just outside 50–90°F.
+    visual:
+      min_temperature: 8.5
+      max_temperature: 33.5
+      temperature_step: 0.5
+    # Heat and Cool: 0.5 °C (0.9°F) each side (ESPHome's defaults, stated here): a heat target of
+    # 72 starts heating at 71.1 and stops at 72.9. Auto (sync_changeover sets its deadband to
+    # auto_deadband_c, zero): the band 71-73 heats at 71 or below and stops at 71.9, cools at 73
+    # or above and stops at 72.1, so the two never overlap.
+    heat_deadband: ${deadband_c}
+    heat_overrun: 0.5
+    cool_deadband: ${deadband_c}
+    cool_overrun: 0.5
+    # First boot (nothing restored yet): Off, fan Auto. Without the fan mode here the thermostat
+    # would start in fan mode ON (its fallback for an unset fan mode) and run G at boot.
+    default_preset: Default
+    # Every climate call from outside this package (HA, the API, the web page, the screen) passes
+    # through here before the thermostat applies it. The setpoints are always derived, so:
+    # - presets (named or custom) are dropped (ruling R8): "Default" exists only because the
+    #   thermostat needs a boot preset; Comfort / Eco is comfort_level, not a preset;
+    # - a call with a temperature (target, low or high) becomes set_target: a hold at that °F
+    #   (the manual target with the schedule off), or nothing if it equals the effective target.
+    #   Heat reads low (else target), Cool reads high (else target). Auto with low and / or high
+    #   (HA's range slider) moves the centre by whichever edge moved against the derived band,
+    #   in whole °F (chestnut::auto_drag_target); Auto with only a target takes it as the centre;
+    # - a call with a temperature or a mode gets its low / high replaced by the derived values
+    #   for the mode it leaves the climate in. A mode change isn't a hold, and it ends a
+    #   temperature hold (ruling R13; a level hold stays) before the call's own temperature is
+    #   read, so a mode and a target in one call start a new hold;
+    # - fan-mode-only calls keep the current setpoints.
+    # Off until boot is done (the thermostat's own restore call goes through untouched; the
+    # last on_boot step applies the setpoints) and around apply_setpoints' own call (g_applying).
+    on_control:
+      - lambda: |-
+          if (id(g_applying) || !id(g_ready)) return;
+          auto *t = id(main_thermostat);
+          x.set_preset(esphome::optional<climate::ClimatePreset>());  // clears custom presets too
+          // The caller's values, before apply_setpoints overwrites them in the call.
+          const esphome::optional<float> lo = x.get_target_temperature_low();
+          const esphome::optional<float> hi = x.get_target_temperature_high();
+          const esphome::optional<float> tt = x.get_target_temperature();
+          const bool has_temp = lo.has_value() || hi.has_value() || tt.has_value();
+          if (!has_temp && !x.get_mode().has_value()) return;
+          climate::ClimateMode mode = t->mode;
+          if (x.get_mode().has_value() && t->get_traits().supports_mode(*x.get_mode()))
+            mode = *x.get_mode();
+          if (mode != t->mode) id(g_hold_temp) = false;  // R13
+          id(g_pending_call) = &x;
+          id(g_pending_mode) = mode;
+          id(sync_changeover).execute();  // the lockout applies in Auto only
+          id(apply_setpoints).execute();  // the derived setpoints (and effective target) for mode
+          if (has_temp) {
+            float f = NAN;  // the requested target, °F
+            if (mode == climate::CLIMATE_MODE_COOL) {
+              f = chestnut::c_to_f(hi.has_value() ? *hi : (tt.has_value() ? *tt : *lo));
+            } else if (mode == climate::CLIMATE_MODE_HEAT_COOL && (lo.has_value() || hi.has_value())) {
+              // Against the band apply_setpoints just derived for this mode (published above).
+              const float new_lo = lo.has_value() ? chestnut::c_to_f(*lo) : NAN;
+              const float new_hi = hi.has_value() ? chestnut::c_to_f(*hi) : NAN;
+              f = chestnut::auto_drag_target(id(g_effective_f), lroundf(id(effective_low).state),
+                                             lroundf(id(effective_high).state), new_lo, new_hi);
+            } else if (mode == climate::CLIMATE_MODE_HEAT_COOL) {
+              f = chestnut::c_to_f(*tt);
+            } else {  // Heat, and Off (whose setpoints follow Heat's)
+              f = chestnut::c_to_f(lo.has_value() ? *lo : (tt.has_value() ? *tt : *hi));
+            }
+            if (!std::isnan(f)) {
+              // Clamped to set_target's range, which would refuse a value outside it.
+              const int whole = std::max(50, std::min(90, (int) lroundf(f)));
+              id(set_target).make_call().set_value(whole).perform();  // hold, then re-derives into x
+            }
+          }
+          id(g_pending_call) = nullptr;
+    # action_elapsed restarts whenever the action changes. on_state fires on every climate
+    # publish (each reading), so compare with the last action seen.
+    on_state:
+      - lambda: |-
+          if ((uint8_t) x.action != id(g_last_action)) {
+            id(g_last_action) = (uint8_t) x.action;
+            id(g_action_elapsed_s) = 0;
+            id(g_action_mark_ms) = millis();
+            id(action_elapsed).publish_state(0);
+          }
+    preset:
+      - name: Default
+        mode: "OFF"
+        fan_mode: AUTO
+        default_target_temperature_low: 22.2
+        default_target_temperature_high: 23.3
+
+    # Equipment calls (spec): heating W only, cooling Y + G, Fan On G in any mode, O/B never.
+    # Heat and cool turn the opposite relay off before turning theirs on (interlock layer 2).
+    # While the interlock is latched the relays are not turned on (layer 3 guards the actions
+    # as well as cutting the relays); turning them off is always allowed.
+    heat_action:
+      - switch.turn_off: relay_cool
+      - if:
+          condition:
+            lambda: return !id(g_interlock_latched);
+          then:
+            - switch.turn_on: relay_heat
+            - if:
+                condition:
+                  lambda: return id(main_thermostat).fan_mode == climate::CLIMATE_FAN_ON;
+                then:
+                  - switch.turn_on: relay_fan
+                else:
+                  - switch.turn_off: relay_fan  # the furnace runs its own blower
+    cool_action:
+      - switch.turn_off: relay_heat
+      - if:
+          condition:
+            lambda: return !id(g_interlock_latched);
+          then:
+            - switch.turn_on: relay_cool
+            - switch.turn_on: relay_fan  # the air handler needs G for the blower
+    idle_action:
+      # Auto changeover lockout: a heat or cool call ending in Auto starts the lockout on the
+      # other side; one ending in any other mode clears it (that call is the last one now).
+      - lambda: |-
+          const bool w = id(relay_heat).state, y = id(relay_cool).state;
+          if (w || y) {
+            if (id(main_thermostat).mode == climate::CLIMATE_MODE_HEAT_COOL) {
+              id(g_last_call) = w ? 1 : 2;
+              id(g_lockout_until_ms) = millis() + id(g_changeover_lockout_s) * 1000u;
+            } else {
+              id(g_last_call) = 0;
+            }
+          }
+      - script.execute: sync_changeover
+      - switch.turn_off: relay_heat
+      - switch.turn_off: relay_cool
+      - if:
+          condition:
+            lambda: return id(main_thermostat).fan_mode == climate::CLIMATE_FAN_ON;
+          then:
+            - switch.turn_on: relay_fan
+          else:
+            - switch.turn_off: relay_fan
+    fan_mode_on_action:
+      - switch.turn_on: relay_fan
+    fan_mode_auto_action:
+      # A running AC keeps its blower; otherwise G is off.
+      - if:
+          condition:
+            lambda: return id(main_thermostat).action != climate::CLIMATE_ACTION_COOLING;
+          then:
+            - switch.turn_off: relay_fan
+
+# Read-only W / Y / G state for the screen, HA and history. Polled every loop from the relay
+# switches, so they work the same with any relay package.
+binary_sensor:
+  - platform: template
+    id: call_heat
+    name: "Call Heat"
+    device_class: running
+    lambda: return id(relay_heat).state;
+  - platform: template
+    id: call_cool
+    name: "Call Cool"
+    device_class: running
+    lambda: return id(relay_cool).state;
+  - platform: template
+    id: call_fan
+    name: "Call Fan"
+    device_class: running
+    lambda: return id(relay_fan).state;
+  # Contract: the interlock watchdog tripped (W and Y were both on). Stays on until the device
+  # reboots, or until Clear is pressed and the larger minimum off time since the (latest) trip
+  # has passed (clear_interlock).
+  - platform: template
+    id: interlock_fault
+    name: "Interlock Fault"
+    device_class: problem
+    lambda: return id(g_interlock_latched);
+  # Contract: the temperature sensor's readings are bad (spec, Safety 4); calls stopped. Clears
+  # by itself after 5 minutes of good readings.
+  - platform: template
+    id: sensor_fault
+    name: "Sensor Fault"
+    device_class: problem
+    lambda: |-
+      auto *s = static_cast<chestnut::SanityChecker *>(id(g_sanity));
+      return s != nullptr && s->fault();
+  # Contract (R23): the schedule is off and a manual number (set_target or a setpoint write) is
+  # the target; the screen labels the card "Target" while it's on. Off with the schedule on or
+  # once a level is picked.
+  - platform: template
+    id: manual_target
+    name: "Manual Target"
+    icon: mdi:hand-pointing-up
+    lambda: return id(g_manual) && !id(schedule_enabled).state;
+  # Contract: a manual hold is on: a level hold (Comfort / Eco switched by hand) or a
+  # temperature hold (set_target or a setpoint write), or both.
+  - platform: template
+    id: schedule_hold
+    name: "Schedule Hold"
+    icon: mdi:hand-back-right-outline
+    lambda: return id(g_hold_level) || id(g_hold_temp);
+
+# Contract: why the room is off target but nothing is running. Set by the 1 s interval below.
+text_sensor:
+  - platform: template
+    id: call_wait_reason
+    name: "Call Wait Reason"
+    icon: mdi:timer-pause-outline
+    update_interval: never
+  # Contract: the schedule, published by schedule_publish. The period (Wake / Leave / Return /
+  # Sleep) and the next period's start ("10:30 pm") are empty with the schedule off or paused.
+  - platform: template
+    id: schedule_period
+    name: "Schedule Period"
+    icon: mdi:calendar-clock
+    update_interval: never
+  - platform: template
+    id: schedule_next_change
+    name: "Schedule Next Change"
+    icon: mdi:clock-end
+    update_interval: never
+  # "Comfort until 5:30 pm", "Eco until 5:30 pm", "Holding 69° until 10:30 pm", "Holding Eco
+  # until 10:30 pm", "Schedule off" or "Schedule paused: clock not set".
+  - platform: template
+    id: schedule_status
+    name: "Schedule Status"
+    icon: mdi:calendar-text
+    update_interval: never
+
+# Interlock layer 3 (spec, Safety 3): an independent watchdog. The actions never turn W and Y
+# on together (each turns the other relay off first), so both on means something else switched
+# a relay. Cut both at once, ignoring minimum run times, record the trip time and latch. While
+# latched it keeps W and Y off on every tick (whatever the action guards do) and drops G unless
+# the fan mode is On, so a trip mid-cooling doesn't leave the blower running with fan Auto.
+# Written as one lambda so a latched tick that finds nothing to do touches nothing (no log noise).
+interval:
+  - interval: 100ms
+    then:
+      - lambda: |-
+          const bool w = id(relay_heat).state, y = id(relay_cool).state;
+          if (w && y) {
+            id(g_interlock_trip_ms) = millis();  // a re-trip while waiting restarts the wait
+            id(g_interlock_latched) = true;
+            ESP_LOGE("interlock", "W and Y both on: both relays cut, interlock fault latched");
+          }
+          if (id(g_interlock_latched)) {
+            if (id(relay_heat).state) id(relay_heat).turn_off();
+            if (id(relay_cool).state) id(relay_cool).turn_off();
+            if (id(relay_fan).state && id(main_thermostat).fan_mode != climate::CLIMATE_FAN_ON)
+              id(relay_fan).turn_off();
+          }
+
+  # Sensor sanity tick: stale and frozen faults (no reading needed) and recovery. The thermostat
+  # gets a new checked value only when the verdict changes; readings publish their own.
+  - interval: 1s
+    then:
+      - lambda: |-
+          auto *s = static_cast<chestnut::SanityChecker *>(id(g_sanity));
+          if (s == nullptr) return;  // on_boot hasn't created it yet
+          const bool was = s->fault();
+          s->tick(millis());
+          if (s->fault() != was) id(checked_temperature_c).publish_state(s->value());
+      # Humidity: unknown (NaN) after the same 2 "minutes" with no reading, for the climate, the
+      # screen and HA alike (published into room_humidity itself, which they all read). Control
+      # never uses it. Published once; the next reading brings it back.
+      - lambda: |-
+          auto *h = id(room_humidity);
+          if (h->has_state() && !std::isnan(h->state) &&
+              (uint32_t) (millis() - id(g_humidity_ms)) > 2000u * ${timer_unit_s})
+            h->publish_state(NAN);
+      # Auto changeover lockout: when it ends, put Auto's own deadband back and let the
+      # thermostat re-evaluate at once (the held-back call starts within a second). Clearing
+      # g_last_call also keeps millis() wrapping from reviving an old lockout.
+      - lambda: |-
+          if (id(g_last_call) == 0 || (int32_t) (id(g_lockout_until_ms) - millis()) > 0) return;
+          id(g_last_call) = 0;
+          id(sync_changeover).execute();
+          id(main_thermostat).refresh();
+      # call_wait_reason, first match wins. The two faults show whenever they're on (a running
+      # call may still be finishing its minimum run under a sensor fault). The waits show only
+      # when the room is off target (the thermostat wants heat or cool, timers aside, or the
+      # changeover lockout is holding the other side's call back) and nothing is running.
+      # "Nothing is running" comes from the relays (W / Y), never from main_thermostat's action,
+      # which can read HEATING while the interlock latch holds the relays off. Published only
+      # when it changes.
+      - lambda: |-
+          static bool started_up = false;  // latched, so millis() wrapping never re-enters it
+          if (!started_up) {
+            const uint32_t delay_ms =
+                (uint32_t) lroundf(fmaxf(id(heat_min_off).state, id(cool_min_off).state) *
+                                   ${timer_unit_s}) * 1000u;
+            started_up = millis() - id(g_boot_ms) >= delay_ms;
+          }
+          const auto *sanity = static_cast<chestnut::SanityChecker *>(id(g_sanity));
+          const bool running = id(call_heat).state || id(call_cool).state;
+          // What the thermostat would do now if no timer held it (OFF on a NaN reading).
+          const auto wanted = id(main_thermostat)->delayed_climate_action();
+          const bool off_target = wanted == climate::CLIMATE_ACTION_HEATING ||
+                                  wanted == climate::CLIMATE_ACTION_COOLING;
+          const bool waiting = off_target && !running;
+          // The Auto changeover lockout holds the other side's call back by hiding it from the
+          // thermostat (sync_changeover), so `wanted` never shows it: check the room against
+          // that side's normal threshold instead.
+          const auto *th = id(main_thermostat);
+          const float room = th->current_temperature;  // NaN on a fault: no match
+          const bool changeover =
+              th->mode == climate::CLIMATE_MODE_HEAT_COOL &&
+              (int32_t) (id(g_lockout_until_ms) - millis()) > 0 &&
+              ((id(g_last_call) == 1 && room >= th->target_temperature_high + ${auto_deadband_c}) ||
+               (id(g_last_call) == 2 && room <= th->target_temperature_low - ${auto_deadband_c}));
+          const char *reason = "";
+          if (id(g_interlock_latched)) {
+            reason = "Interlock fault";
+          } else if (sanity != nullptr && sanity->fault()) {
+            reason = "Sensor fault";
+          } else if (waiting && !started_up) {
+            reason = "Starting up";  // the boot-time minimum off timers
+          } else if (changeover && !running) {
+            reason = "Changeover wait";  // checked before short-cycle: it's the longer wait
+          } else if (waiting) {
+            reason = "Short-cycle protection";  // a minimum off / idle timer holds the call
+          }
+          auto *t = id(call_wait_reason);
+          if (!t->has_state() || t->state != reason) t->publish_state(reason);
+
+  # action_elapsed between action changes.
+  - interval: 30s
+    then:
+      - lambda: |-
+          if (id(g_last_action) == 255) return;
+          const uint32_t whole_s = (millis() - id(g_action_mark_ms)) / 1000u;
+          id(g_action_elapsed_s) += whole_s;
+          id(g_action_mark_ms) += whole_s * 1000u;
+          id(action_elapsed).publish_state(id(g_action_elapsed_s));
+
+  # The schedule's clock. Evaluates only when the clock's minute (or validity) changes; the
+  # first tick waits one period, as on_boot has just evaluated.
+  - interval: ${schedule_tick}
+    startup_delay: ${schedule_tick}
+    then:
+      - script.execute:
+          id: schedule_from_clock
+          force: false
+
+script:
+  # The deadbands for the mode: deadband_c in Heat and Cool, auto_deadband_c in Auto (R21: the
+  # band edges are the start points). And the Auto changeover lockout (spec, Safety 2): after a
+  # heat call ends in Auto, no cool call for changeover_lockout minutes, and the other way
+  # round. In Auto, while the lockout lasts, the locked side's deadband is set far out of reach,
+  # so the stock thermostat never decides that call: its action stays IDLE (always matching the
+  # relays), no timer is touched, and the other side works as usual. Run at boot (the restored
+  # mode), on every lockout change (idle_action, its end in the interval) and before every mode
+  # change (on_control, with the incoming mode), so a switch into or out of Auto gets that
+  # mode's deadbands before the thermostat re-evaluates. A call already running when the
+  # deadband changes keeps its own hysteresis and finishes.
+  - id: sync_changeover
+    mode: single
+    then:
+      - lambda: |-
+          auto *t = id(main_thermostat);
+          const climate::ClimateMode m = id(g_pending_call) != nullptr ? id(g_pending_mode) : t->mode;
+          const bool is_auto = m == climate::CLIMATE_MODE_HEAT_COOL;
+          const bool on = is_auto && id(g_last_call) != 0 &&
+                          (int32_t) (id(g_lockout_until_ms) - millis()) > 0;
+          static constexpr float LOCKED_C = 1000.0f;  // no room ever gets there
+          const float db = is_auto ? ${auto_deadband_c} : ${deadband_c};
+          t->set_cool_deadband(on && id(g_last_call) == 1 ? LOCKED_C : db);
+          t->set_heat_deadband(on && id(g_last_call) == 2 ? LOCKED_C : db);
+
+  # The one place the climate's setpoints are set. Derives them from the mode, comfort_target,
+  # eco_offset, comfort_level and the hold, publishes the effective target and band (and
+  # set_target, which follows the effective target so − / + step from it), then sets the
+  # climate's low / high: into the outside call being handled (on_control), or with its own
+  # call marked g_applying. Synchronous; runs at boot, on any of those changing and on every
+  # mode change.
+  - id: apply_setpoints
+    mode: single
+    then:
+      - lambda: |-
+          auto *t = id(main_thermostat);
+          climate::ClimateCall *call = id(g_pending_call);
+          const climate::ClimateMode m = call != nullptr ? id(g_pending_mode) : t->mode;
+          const chestnut::Mode mode = m == climate::CLIMATE_MODE_HEAT        ? chestnut::Mode::Heat
+                                      : m == climate::CLIMATE_MODE_COOL      ? chestnut::Mode::Cool
+                                      : m == climate::CLIMATE_MODE_HEAT_COOL ? chestnut::Mode::Auto
+                                                                             : chestnut::Mode::Off;
+          // A manual target (schedule off) derives like a temperature hold; the two never
+          // coexist (with the schedule off no hold starts).
+          const bool manual = id(g_manual) && !id(schedule_enabled).state;
+          const chestnut::Setpoints s = chestnut::derive_setpoints(
+              mode, lroundf(id(comfort_target).state), lroundf(id(eco_offset).state),
+              id(g_level_eco), manual || id(g_hold_temp), manual ? id(g_manual_f) : id(g_hold_f));
+          id(g_effective_f) = s.effective_f;
+          auto publish = [](sensor::Sensor *sens, int f) {
+            if (!sens->has_state() || sens->state != (float) f) sens->publish_state(f);
+          };
+          publish(id(effective_target), s.effective_f);
+          publish(id(effective_low), s.low_f);
+          publish(id(effective_high), s.high_f);
+          // set_target's on_value sees the effective target and starts nothing.
+          if (!id(set_target).has_state() || lroundf(id(set_target).state) != s.effective_f)
+            id(set_target).publish_state(s.effective_f);
+          const float lo = chestnut::f_to_c(s.low_f), hi = chestnut::f_to_c(s.high_f);
+          if (call != nullptr) {
+            call->set_target_temperature_low(lo);
+            call->set_target_temperature_high(hi);
+            call->set_target_temperature(esphome::optional<float>());  // two-point only
+          } else if (t->target_temperature_low != lo || t->target_temperature_high != hi) {
+            id(g_applying) = true;
+            t->make_call().set_target_temperature_low(lo).set_target_temperature_high(hi).perform();
+            id(g_applying) = false;
+          }
+      # Every hold or level change ends here, so the schedule's status follows it.
+      - script.execute: schedule_publish
+
+  # --- Schedule (spec "Schedule") ---
+  # Reads the clock and evaluates the schedule with it: always when forced (boot), otherwise
+  # only when the minute or the clock's validity changed. A clock that isn't valid keeps the
+  # last day and minute.
+  - id: schedule_from_clock
+    mode: single
+    parameters:
+      force: bool
+    then:
+      - lambda: |-
+          // Until boot is done (the last on_boot step forces the first evaluation): on the Tab5
+          // the interval can fire while setup still waits on the network.
+          if (!force && !id(g_ready)) return;
+          const auto now = id(${clock_id}).now();
+          const bool valid = now.is_valid();
+          const int dow = valid ? chestnut::schedule_dow(now.day_of_week) : id(g_last_dow);
+          const int minute = valid ? chestnut::minute_of_day(now.hour, now.minute) : id(g_last_min);
+          if (force || valid != id(g_clock_valid) || dow != id(g_last_dow) ||
+              minute != id(g_last_min))
+            id(schedule_evaluate).execute(valid, dow, minute);
+
+  # Re-evaluates with the last inputs: after a schedule setting, the switch or Resume changes.
+  - id: schedule_rerun
+    mode: single
+    then:
+      - lambda: id(schedule_evaluate).execute(id(g_clock_valid), id(g_last_dow), id(g_last_min));
+
+  # The schedule (spec "Schedule"). Inputs: whether the clock is valid, the day (0=Mon..6=Sun)
+  # and the minute of day (the clock, or test_clock in the tests).
+  # - Off: ends any hold; nothing switches.
+  # - Clock not valid: paused. Nothing changes (the level and any hold stay); heating and
+  #   cooling carry on.
+  # - Otherwise: a hold ends when the period instance it started in is over (another key); with
+  #   no hold, comfort_level follows the period's level (set with g_sched_setting: not a hold).
+  # Then applies the setpoints, which publishes the status.
+  - id: schedule_evaluate
+    mode: single
+    parameters:
+      valid: bool
+      dow: int
+      minute: int
+    then:
+      - lambda: |-
+          id(g_clock_valid) = valid;
+          id(g_last_dow) = dow;
+          id(g_last_min) = minute;
+          id(g_sched_key) = -1;
+          id(g_sched_period) = -1;
+          if (id(schedule_enabled).state) id(g_manual) = false;  // the schedule drops it (R20)
+          if (!id(schedule_enabled).state) {
+            id(g_hold_level) = false;
+            id(g_hold_temp) = false;
+          } else if (valid) {
+            auto period = [](datetime::TimeEntity *t, select::Select *level) {
+              return chestnut::Period{t->hour * 60 + t->minute, level->current_option() == "Eco"};
+            };
+            const chestnut::Week week{
+                {period(id(sched_weekday_wake_time), id(sched_weekday_wake_level)),
+                 period(id(sched_weekday_leave_time), id(sched_weekday_leave_level)),
+                 period(id(sched_weekday_return_time), id(sched_weekday_return_level)),
+                 period(id(sched_weekday_sleep_time), id(sched_weekday_sleep_level))},
+                {period(id(sched_weekend_wake_time), id(sched_weekend_wake_level)),
+                 period(id(sched_weekend_leave_time), id(sched_weekend_leave_level)),
+                 period(id(sched_weekend_return_time), id(sched_weekend_return_level)),
+                 period(id(sched_weekend_sleep_time), id(sched_weekend_sleep_level))}};
+            const chestnut::ScheduleState s = chestnut::schedule_at(week, dow, minute);
+            id(g_sched_key) = s.key;
+            id(g_sched_period) = s.period;
+            id(g_sched_next_min) = s.next_min;
+            if (id(g_hold_level) || id(g_hold_temp)) {
+              if (id(g_hold_key) < 0) {
+                id(g_hold_key) = s.key;  // started while the clock wasn't set
+              } else if (id(g_hold_key) != s.key) {
+                id(g_hold_level) = false;  // the next period has started
+                id(g_hold_temp) = false;
+              }
+            }
+            if (!id(g_hold_level) && !id(g_hold_temp) && s.eco != id(g_level_eco)) {
+              id(g_sched_setting) = true;
+              id(comfort_level).make_call().set_option(s.eco ? "Eco" : "Comfort").perform();
+              id(g_sched_setting) = false;
+            }
+          }
+      - script.execute: apply_setpoints
+
+  # schedule_period, schedule_next_change and schedule_status from the last evaluation and the
+  # holds. Run at the end of every apply_setpoints. Publishes only what changed.
+  - id: schedule_publish
+    mode: single
+    then:
+      - lambda: |-
+          std::string period, next, status;
+          if (!id(schedule_enabled).state) {
+            status = "Schedule off";
+          } else if (!id(g_clock_valid) || id(g_sched_period) < 0) {
+            status = "Schedule paused: clock not set";
+          } else {
+            period = chestnut::period_name(id(g_sched_period));
+            next = chestnut::format_12h(id(g_sched_next_min));
+            const char *level = id(g_level_eco) ? "Eco" : "Comfort";
+            if (id(g_hold_temp))
+              status = "Holding " + std::to_string(id(g_hold_f)) + "° until " + next;
+            else if (id(g_hold_level))
+              status = std::string("Holding ") + level + " until " + next;
+            else
+              status = std::string(level) + " until " + next;
+          }
+          auto publish = [](text_sensor::TextSensor *t, const std::string &v) {
+            if (!t->has_state() || t->state != v) t->publish_state(v);
+          };
+          publish(id(schedule_period), period);
+          publish(id(schedule_next_change), next);
+          publish(id(schedule_status), status);
+
+  # Clear button. Never changes the climate mode. The latch (and interlock_fault) stays on until
+  # the larger of the two minimum off times has passed since the trip: either relay may have been
+  # the forced one, and a compressor must not restart early. Then the latch drops. The
+  # thermostat still believes it is HEATING or COOLING if it wanted a call while latched (its
+  # actions were guarded, or the watchdog cut the relays behind its back) and would never run its
+  # action again, because refresh() does nothing when the computed action is unchanged. So reset
+  # that belief to IDLE and refresh: it re-evaluates and runs the right action (or, if a minimum
+  # run timer is still counting, when that timer ends).
+  - id: clear_interlock
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: return id(g_interlock_latched);
+          then:
+            - wait_until:
+                condition:
+                  lambda: |-
+                    const uint32_t wait_ms =
+                        (uint32_t) lroundf(fmaxf(id(heat_min_off).state, id(cool_min_off).state) *
+                                           ${timer_unit_s}) * 1000u;
+                    return (uint32_t) (millis() - id(g_interlock_trip_ms)) >= wait_ms;
+            - lambda: |-
+                id(g_interlock_latched) = false;
+                auto *t = id(main_thermostat);
+                if ((t->action == climate::CLIMATE_ACTION_HEATING && !id(relay_heat).state) ||
+                    (t->action == climate::CLIMATE_ACTION_COOLING && !id(relay_cool).state)) {
+                  t->action = climate::CLIMATE_ACTION_IDLE;
+                  t->refresh();
+                }
+
+button:
+  - platform: template
+    id: clear_interlock_fault
+    name: "Clear Interlock Fault"
+    icon: mdi:alert-remove-outline
+    on_press:
+      - script.execute: clear_interlock
+  # Contract: end the hold now; the current period's level applies.
+  - platform: template
+    id: resume_schedule
+    name: "Resume Schedule"
+    icon: mdi:calendar-sync
+    on_press:
+      - lambda: |-
+          id(g_hold_level) = false;
+          id(g_hold_temp) = false;
+      - script.execute: schedule_rerun
+
+# Contract: schedule on/off (restored, default on). Off ends any hold; with it off nothing
+# switches and no hold starts: a manual change simply stays (set_target becomes the manual
+# target). Turning it on drops the manual target and applies the current period.
+switch:
+  - platform: template
+    id: schedule_enabled
+    name: "Schedule Enabled"
+    icon: mdi:calendar-check
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - lambda: if (id(g_ready)) id(schedule_rerun).execute();
+    on_turn_off:
+      - lambda: if (id(g_ready)) id(schedule_rerun).execute();
+
+# Safety timers in minutes (spec, Safety 2). Restored; a value outside the range is refused, and
+# a restored value outside it (TemplateNumber doesn't check) is put back in range first.
+# Applied at boot (numbers set up before the climate, so the startup delay already uses the
+# restored values) and on every change (ESPHome stretches or ends a running timer to match).
+# After boot a change is applied in a scheduler dispatch of its own (delay 0s): ESPHome's setter
+# measures a running timer from the current dispatch's start time, so a timer started earlier
+# in the SAME dispatch (an HA script sending a target and then a timer: one API loop pass)
+# would look ~49 days old and end at once, cancelling a minimum run or off. The scheduler
+# refreshes that start time before each dispatch. At boot no timer is running yet.
+number:
+  - platform: template
+    id: heat_min_run
+    name: "Heat Min Run"
+    icon: mdi:timer-outline
+    entity_category: config
+    unit_of_measurement: "min"
+    min_value: 2
+    max_value: 20
+    step: 1
+    initial_value: 3
+    optimistic: true
+    restore_value: true
+    on_value:
+      - if:
+          condition:
+            lambda: return id(g_ready);
+          then:
+            - delay: 0s
+      - lambda: |-
+          auto *n = id(heat_min_run);
+          const float v = chestnut::clamp_setting(x, n->traits.get_min_value(), n->traits.get_max_value());
+          if (v != x) {  // a restored value out of range: set it in range (on_value runs again)
+            n->make_call().set_value(v).perform();
+            return;
+          }
+          id(main_thermostat).set_heating_minimum_run_time_in_sec(lroundf(v * ${timer_unit_s}));
+  - platform: template
+    id: heat_min_off
+    name: "Heat Min Off"
+    icon: mdi:timer-off-outline
+    entity_category: config
+    unit_of_measurement: "min"
+    min_value: 2
+    max_value: 20
+    step: 1
+    initial_value: 3
+    optimistic: true
+    restore_value: true
+    on_value:
+      - if:
+          condition:
+            lambda: return id(g_ready);
+          then:
+            - delay: 0s
+      - lambda: |-
+          auto *n = id(heat_min_off);
+          const float v = chestnut::clamp_setting(x, n->traits.get_min_value(), n->traits.get_max_value());
+          if (v != x) {  // a restored value out of range: set it in range (on_value runs again)
+            n->make_call().set_value(v).perform();
+            return;
+          }
+          id(main_thermostat).set_heating_minimum_off_time_in_sec(lroundf(v * ${timer_unit_s}));
+  - platform: template
+    id: cool_min_run
+    name: "Cool Min Run"
+    icon: mdi:timer-outline
+    entity_category: config
+    unit_of_measurement: "min"
+    min_value: 3
+    max_value: 20
+    step: 1
+    initial_value: 5
+    optimistic: true
+    restore_value: true
+    on_value:
+      - if:
+          condition:
+            lambda: return id(g_ready);
+          then:
+            - delay: 0s
+      - lambda: |-
+          auto *n = id(cool_min_run);
+          const float v = chestnut::clamp_setting(x, n->traits.get_min_value(), n->traits.get_max_value());
+          if (v != x) {  // a restored value out of range: set it in range (on_value runs again)
+            n->make_call().set_value(v).perform();
+            return;
+          }
+          id(main_thermostat).set_cooling_minimum_run_time_in_sec(lroundf(v * ${timer_unit_s}));
+  - platform: template
+    id: cool_min_off
+    name: "Cool Min Off"
+    icon: mdi:timer-off-outline
+    entity_category: config
+    unit_of_measurement: "min"
+    min_value: 5
+    max_value: 20
+    step: 1
+    initial_value: 5
+    optimistic: true
+    restore_value: true
+    on_value:
+      - if:
+          condition:
+            lambda: return id(g_ready);
+          then:
+            - delay: 0s
+      - lambda: |-
+          auto *n = id(cool_min_off);
+          const float v = chestnut::clamp_setting(x, n->traits.get_min_value(), n->traits.get_max_value());
+          if (v != x) {  // a restored value out of range: set it in range (on_value runs again)
+            n->make_call().set_value(v).perform();
+            return;
+          }
+          id(main_thermostat).set_cooling_minimum_off_time_in_sec(lroundf(v * ${timer_unit_s}));
+  - platform: template
+    id: changeover_lockout
+    name: "Changeover Lockout"
+    icon: mdi:swap-horizontal
+    entity_category: config
+    unit_of_measurement: "min"
+    min_value: 10
+    max_value: 120
+    step: 1
+    initial_value: 30
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: |-
+          auto *n = id(changeover_lockout);
+          const float v = chestnut::clamp_setting(x, n->traits.get_min_value(), n->traits.get_max_value());
+          if (v != x) {  // a restored value out of range: set it in range (on_value runs again)
+            n->make_call().set_value(v).perform();
+            return;
+          }
+          id(g_changeover_lockout_s) = lroundf(v * ${timer_unit_s});
+
+  # --- Single target (spec "Single target, Comfort, Eco and holds"), °F, whole degrees ---
+  # The Comfort setting. Changes only here (HA, the web page, later a settings screen), never
+  # through − / + or a setpoint write. Restored.
+  - platform: template
+    id: comfort_target
+    name: "Comfort Target"
+    icon: mdi:home-thermometer-outline
+    unit_of_measurement: "°F"
+    device_class: temperature
+    min_value: 50
+    max_value: 90
+    step: 1
+    initial_value: 72
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: if (id(g_ready)) id(apply_setpoints).execute();
+  # How far Eco drifts from Comfort (down in Heat, up in Cool, both ways in Auto). Restored.
+  - platform: template
+    id: eco_offset
+    name: "Eco Offset"
+    icon: mdi:leaf
+    entity_category: config
+    unit_of_measurement: "°F"
+    min_value: 2
+    max_value: 10
+    step: 1
+    initial_value: 4
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: if (id(g_ready)) id(apply_setpoints).execute();
+  # What − / + and HA writes go to. Shows the effective target (apply_setpoints keeps it there);
+  # a different value starts a hold at it (schedule on) or becomes the manual target (schedule
+  # off); the same value does nothing. Not restored (the manual target is, in g_manual_f).
+  - platform: template
+    id: set_target
+    name: "Set Target"
+    icon: mdi:thermostat
+    unit_of_measurement: "°F"
+    device_class: temperature
+    min_value: 50
+    max_value: 90
+    step: 1
+    initial_value: 72
+    optimistic: true
+    restore_value: false
+    on_value:
+      - lambda: |-
+          if (!id(g_ready)) return;
+          const int f = lroundf(x);
+          if (f == id(g_effective_f)) return;  // already the target: no hold (spec)
+          if (!id(schedule_enabled).state) {
+            // Schedule off (R20): no hold, f is the target itself until changed again, a level
+            // is picked or the schedule is turned on. comfort_target is untouched.
+            id(g_manual) = true;
+            id(g_manual_f) = f;
+            id(apply_setpoints).execute();
+            return;
+          }
+          id(g_hold_temp) = true;  // a temperature hold (R12), until the next period
+          id(g_hold_f) = f;
+          id(g_hold_key) = id(g_sched_key);
+          id(apply_setpoints).execute();
+
+select:
+  # Contract: Comfort / Eco. A manual change starts a level hold (R12) and ends a temperature
+  # hold, but only when the level actually changes (a template select fires on_value again when set
+  # to the same option). The schedule sets it with g_sched_setting: no hold. With the schedule
+  # off a manual change just sets the level, and any pick, even of the option already on, drops
+  # the manual target (R23, R24). Restored (the schedule re-applies its period's level at boot
+  # when it's on and the clock is set).
+  - platform: template
+    id: comfort_level
+    name: "Comfort Level"
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Comfort"
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: |-
+          const bool eco = x == "Eco";
+          if (!id(g_ready)) {  // restored at boot; the last on_boot step applies it
+            id(g_level_eco) = eco;
+            return;
+          }
+          // A pick drops the manual target, even a re-tap of the level already on (R24).
+          const bool dropped = id(g_manual) && !id(schedule_enabled).state;
+          id(g_manual) = false;
+          if (eco == id(g_level_eco) && !dropped) return;
+          id(g_level_eco) = eco;
+          if (!id(g_sched_setting) && id(schedule_enabled).state) {
+            // A level hold (R12) until the next period: the level applies with its normal
+            // derivation, and it replaces any temperature hold.
+            id(g_hold_level) = true;
+            id(g_hold_temp) = false;
+            id(g_hold_key) = id(g_sched_key);
+          }
+          id(apply_setpoints).execute();
+
+  # --- Schedule settings (spec "Schedule"): each period's level. Restored. Any change
+  # re-evaluates the schedule at once. ---
+  - platform: template
+    id: sched_weekday_wake_level
+    name: "Sched Weekday Wake Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Comfort"
+    optimistic: true
+    restore_value: true
+    on_value: &sched_changed
+      - lambda: if (id(g_ready)) id(schedule_rerun).execute();
+  - platform: template
+    id: sched_weekday_leave_level
+    name: "Sched Weekday Leave Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Eco"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekday_return_level
+    name: "Sched Weekday Return Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Comfort"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekday_sleep_level
+    name: "Sched Weekday Sleep Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Eco"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_wake_level
+    name: "Sched Weekend Wake Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Comfort"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_leave_level
+    name: "Sched Weekend Leave Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Comfort"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_return_level
+    name: "Sched Weekend Return Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Comfort"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_sleep_level
+    name: "Sched Weekend Sleep Level"
+    entity_category: config
+    icon: mdi:leaf-circle-outline
+    options: ["Comfort", "Eco"]
+    initial_option: "Eco"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+
+# Schedule settings: each period's start time (weekdays Mon-Fri, weekends Sat-Sun). Restored.
+# Any change re-evaluates the schedule at once.
+datetime:
+  - platform: template
+    id: sched_weekday_wake_time
+    name: "Sched Weekday Wake Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "06:30:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekday_leave_time
+    name: "Sched Weekday Leave Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "08:30:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekday_return_time
+    name: "Sched Weekday Return Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "17:30:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekday_sleep_time
+    name: "Sched Weekday Sleep Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "22:30:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_wake_time
+    name: "Sched Weekend Wake Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "08:00:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_leave_time
+    name: "Sched Weekend Leave Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "10:00:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_return_time
+    name: "Sched Weekend Return Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "17:00:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed
+  - platform: template
+    id: sched_weekend_sleep_time
+    name: "Sched Weekend Sleep Time"
+    type: time
+    entity_category: config
+    icon: mdi:clock-outline
+    initial_value: "23:00:00"
+    optimistic: true
+    restore_value: true
+    on_value: *sched_changed

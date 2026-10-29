@@ -1,0 +1,216 @@
+# Virtual house (milestone 2): stands in for the SHT40 (ENV IV) and the Unit 4-Relay until the
+# bench parts arrive. Provides the package contract ids room_temperature (°C), room_humidity
+# and relay_heat / relay_cool / relay_fan / relay_ob from the physics in house_model.h, plus
+# knobs to play with (outdoor, weather, house) and a break-it-on-purpose fault select.
+# Also runs on the Tab5, so no test-only hooks here (those live in tests/main-thermostat-test.yaml).
+
+substitutions:
+  sim_speed: "1"             # physics time multiplier: each 1 s step advances sim_speed seconds
+  sim_publish_interval: 10s  # how often room_temperature / room_humidity are published
+  clock_id: host_time        # local time for the Winter / Summer day curves (sntp_time on the Tab5)
+
+esphome:
+  includes:
+    # Resolved next to this file, so it works from any entry point's directory. A list, so it
+    # merges with the logic package's includes.
+    - house_model.h
+
+globals:
+  # The true room temperature, °F. A double: at real-time speed a 1 s step near equilibrium
+  # is far below a float's resolution at 68, and a float state would stall there.
+  - id: g_sim_room_f
+    type: double
+    initial_value: "68.0"
+  # The last value published on room_temperature (°C), repeated by the Frozen fault.
+  - id: g_sim_last_c
+    type: float
+    initial_value: "NAN"
+
+# The relays: what the logic package drives. Internal, so only the logic can switch them
+# (no HA or web toggle); the logic package's call_* sensors show their state.
+switch:
+  - platform: template
+    id: relay_heat
+    name: "Relay W (heat)"
+    internal: true
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+  - platform: template
+    id: relay_cool
+    name: "Relay Y (cool)"
+    internal: true
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+  - platform: template
+    id: relay_fan
+    name: "Relay G (fan)"
+    internal: true
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+  # O/B reversing valve: only for a heat pump; the logic never turns it on.
+  - platform: template
+    id: relay_ob
+    name: "Relay OB (reversing valve)"
+    internal: true
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+
+sensor:
+  # Contract: the room temperature as the thermostat sees it (°C, noisy, subject to sim_fault).
+  - platform: template
+    id: room_temperature
+    name: "Room Temperature"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+  # Contract: relative humidity (%).
+  - platform: template
+    id: room_humidity
+    name: "Room Humidity"
+    unit_of_measurement: "%"
+    device_class: humidity
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: never
+  # The true room temperature (°F, no noise, no faults), for the tests and for watching the sim.
+  # Published with room_temperature, from the same value, even while the sensor is faulted.
+  - platform: template
+    id: sim_room_f
+    name: "Sim Room F"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: never
+
+# Knobs, restored across reboots (all but sim_fault). Entity names are chosen so their
+# object_ids match the ids.
+number:
+  - platform: template
+    id: sim_outdoor_f
+    name: "Sim Outdoor F"
+    unit_of_measurement: "°F"
+    min_value: -10
+    max_value: 110
+    step: 1
+    initial_value: 35
+    optimistic: true
+    restore_value: true
+  # House time constant (leakiness): hours to close ~63% of the gap to outdoor.
+  - platform: template
+    id: sim_tau_h
+    name: "Sim Tau H"
+    unit_of_measurement: "h"
+    min_value: 1
+    max_value: 24
+    step: 0.5
+    initial_value: 8
+    optimistic: true
+    restore_value: true
+  - platform: template
+    id: sim_heat_fph
+    name: "Sim Heat FPH"
+    unit_of_measurement: "°F/h"
+    min_value: 0
+    max_value: 40
+    step: 0.5
+    initial_value: 10
+    optimistic: true
+    restore_value: true
+  - platform: template
+    id: sim_cool_fph
+    name: "Sim Cool FPH"
+    unit_of_measurement: "°F/h"
+    min_value: 0
+    max_value: 40
+    step: 0.5
+    initial_value: 5
+    optimistic: true
+    restore_value: true
+  - platform: template
+    id: sim_humidity
+    name: "Sim Humidity"
+    unit_of_measurement: "%"
+    min_value: 20
+    max_value: 80
+    step: 1
+    initial_value: 45
+    optimistic: true
+    restore_value: true
+
+select:
+  # Fixed uses sim_outdoor_f; the day curves follow the local time of day (house_model.h).
+  - platform: template
+    id: sim_weather
+    name: "Sim Weather"
+    options: ["Fixed", "Winter day", "Summer day"]
+    initial_option: "Fixed"
+    optimistic: true
+    restore_value: true
+  # Break the temperature sensor on purpose. Unplugged: nothing is published (temperature or
+  # humidity). Frozen: the last temperature repeats with no noise. Out of range: 60.0 °C.
+  # Spike: one reading 10 °C high, then back to None.
+  # Not restored: it always boots as None, so a fault left on never survives a reboot.
+  - platform: template
+    id: sim_fault
+    name: "Sim Fault"
+    options: ["None", "Unplugged", "Frozen", "Out of range", "Spike"]
+    initial_option: "None"
+    optimistic: true
+    restore_value: false
+
+interval:
+  # Physics: one step per second, advancing 1 × sim_speed seconds of house time.
+  - interval: 1s
+    then:
+      - lambda: |-
+          chestnut::HouseParams p;
+          p.tau_h = id(sim_tau_h).state;
+          p.heat_fph = id(sim_heat_fph).state;
+          p.cool_fph = id(sim_cool_fph).state;
+          const float dt_s = 1.0f * ${sim_speed};
+
+          float outdoor_f = id(sim_outdoor_f).state;
+          const auto weather = id(sim_weather).current_option();
+          chestnut::Weather kind = weather == "Winter day" ? chestnut::Weather::Winter
+                                 : weather == "Summer day" ? chestnut::Weather::Summer
+                                                           : chestnut::Weather::Fixed;
+          const auto now = id(${clock_id}).now();
+          if (kind != chestnut::Weather::Fixed && now.is_valid())
+            outdoor_f = chestnut::weather_outdoor_f(kind, outdoor_f, now.hour * 60 + now.minute);
+
+          const bool w = id(relay_heat).state, y = id(relay_cool).state;
+          // house_step works in float. Step the offset from the equilibrium rather than the
+          // absolute temperature, so a tiny step near equilibrium isn't rounded away:
+          // the equilibrium is where a very long step lands, and with no drive and outdoor 0
+          // house_step just decays the offset toward 0.
+          const float teq = chestnut::house_step(0.0f, outdoor_f, w, y, 1e30f, p);
+          const float off = (float) (id(g_sim_room_f) - teq);
+          id(g_sim_room_f) = teq + (double) chestnut::house_step(off, 0.0f, false, false, dt_s, p);
+
+  # Publishing: the true room temperature, then the sensor (what the thermostat reads).
+  - interval: ${sim_publish_interval}
+    then:
+      - lambda: |-
+          id(sim_room_f).publish_state(id(g_sim_room_f));
+          const auto fault = id(sim_fault).current_option();
+          if (fault == "Unplugged") return;
+          const float noise_c = (random_float() * 2.0f - 1.0f) * 0.05f;
+          const float true_c = (float) ((id(g_sim_room_f) - 32.0) * 5.0 / 9.0);
+          float c;
+          if (fault == "Frozen") {
+            c = std::isnan(id(g_sim_last_c)) ? true_c : id(g_sim_last_c);
+          } else if (fault == "Out of range") {
+            c = 60.0f;
+          } else if (fault == "Spike") {
+            c = true_c + noise_c + 10.0f;
+            id(sim_fault).make_call().set_option("None").perform();
+          } else {
+            c = true_c + noise_c;
+          }
+          id(g_sim_last_c) = c;
+          id(room_temperature).publish_state(c);
+          const float rh_noise = (random_float() * 2.0f - 1.0f) * 0.3f;
+          id(room_humidity).publish_state(id(sim_humidity).state + rh_noise);

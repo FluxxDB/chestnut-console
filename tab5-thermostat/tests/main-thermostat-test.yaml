@@ -1,0 +1,167 @@
+# Host build for the scenario tests (tests/run.sh scenarios): the thermostat packages with
+# short timers, fast physics and test-only hooks. Never flashed; the hooks live only here.
+
+substitutions:
+  # Physics 600x real time (one 1 s step = 10 simulated minutes), readings every 250 ms.
+  sim_speed: "600"
+  sim_publish_interval: 250ms
+  # Timers: one "minute" = 1 s, so the defaults are 3 / 3 / 5 / 5 s and min_idle_time 1 s.
+  timer_unit_s: "1"
+  heat_run_s: "3"
+  heat_off_s: "3"
+  cool_run_s: "5"
+  cool_off_s: "5"
+  min_idle_s: "1"
+  # The schedule reads host_time once at boot; after that test_clock drives it (the 24 h tick
+  # never comes during a test).
+  clock_id: host_time
+  schedule_tick: 24h
+
+esphome:
+  name: main-thermostat-test
+
+packages:
+  sim: !include ../sim/virtual-house.yaml
+  logic: !include ../thermostat/logic.yaml
+
+host:
+
+logger:
+
+api:
+  port: 6053
+  actions:
+    # Test-only: drive the relays directly, bypassing the logic (e.g. both on, for the
+    # interlock watchdog). There is deliberately no O/B argument.
+    - action: test_force_relays
+      variables:
+        heat: bool
+        cool: bool
+      then:
+        - lambda: |-
+            if (heat) id(relay_heat).turn_on(); else id(relay_heat).turn_off();
+            if (cool) id(relay_cool).turn_on(); else id(relay_cool).turn_off();
+    # Test-only: hold every room_temperature reading and every outside climate call for `ms`
+    # before the logic sees it, so the thermostat's decisions (and the timers they start) run
+    # well after their dispatch began, as a slow ESP32 dispatch would. 0 = off.
+    - action: test_set_latency
+      variables:
+        ms: int
+      then:
+        - lambda: id(g_test_latency_ms) = ms;
+    # Test-only: evaluate the schedule at this clock (dow 0=Mon..6=Sun, minute of day), or as
+    # if the clock weren't set (valid false).
+    - action: test_clock
+      variables:
+        dow: int
+        minute: int
+        valid: bool
+      then:
+        - lambda: id(schedule_evaluate).execute(valid, dow, minute);
+
+globals:
+  - id: g_test_latency_ms
+    type: int
+    restore_value: false
+    initial_value: "0"
+
+sensor:
+  # Runs before the logic's own room_temperature callback (registered later, in on_boot).
+  - id: !extend room_temperature
+    on_value:
+      - lambda: if (id(g_test_latency_ms) > 0) delay(id(g_test_latency_ms));
+  # Test-only device timestamps, so duration tests measure on the device instead of from API
+  # arrival times (the API batches states for up to ~100 ms). Each is ms since boot (since
+  # g_boot_ms, set in the logic's first on_boot step; millis() isn't uptime on the host),
+  # published at the moment of the event. One sensor per edge kind, so two different edges
+  # never share a batch slot (the API sends only an entity's latest state per batch).
+  - platform: template
+    id: test_w_on_ms
+    name: "Test W On Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: test_w_off_ms
+    name: "Test W Off Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: test_y_on_ms
+    name: "Test Y On Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: test_y_off_ms
+    name: "Test Y Off Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: test_g_on_ms
+    name: "Test G On Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: test_g_off_ms
+    name: "Test G Off Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  # The interlock watchdog's own trip time (g_interlock_trip_ms, so a re-trip shows too) and
+  # the moment the latch dropped (interlock_fault going off, polled every loop).
+  - platform: template
+    id: test_trip_ms
+    name: "Test Trip Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: test_latch_clear_ms
+    name: "Test Latch Clear Ms"
+    accuracy_decimals: 0
+    update_interval: never
+
+# The climate-call half of test_set_latency (on_control runs before the thermostat applies a
+# call, so the timers that call starts begin `ms` after the dispatch did).
+climate:
+  - id: !extend main_thermostat
+    on_control:
+      - lambda: if (id(g_test_latency_ms) > 0) delay(id(g_test_latency_ms));
+
+# Relay edges (the switches' own triggers fire as the relay changes). Ignored before the logic's
+# first on_boot step (the boot-time OFF publish).
+switch:
+  - id: !extend relay_heat
+    on_turn_on:
+      - lambda: if (id(g_sanity) != nullptr) id(test_w_on_ms).publish_state(millis() - id(g_boot_ms));
+    on_turn_off:
+      - lambda: if (id(g_sanity) != nullptr) id(test_w_off_ms).publish_state(millis() - id(g_boot_ms));
+  - id: !extend relay_cool
+    on_turn_on:
+      - lambda: if (id(g_sanity) != nullptr) id(test_y_on_ms).publish_state(millis() - id(g_boot_ms));
+    on_turn_off:
+      - lambda: if (id(g_sanity) != nullptr) id(test_y_off_ms).publish_state(millis() - id(g_boot_ms));
+  - id: !extend relay_fan
+    on_turn_on:
+      - lambda: if (id(g_sanity) != nullptr) id(test_g_on_ms).publish_state(millis() - id(g_boot_ms));
+    on_turn_off:
+      - lambda: if (id(g_sanity) != nullptr) id(test_g_off_ms).publish_state(millis() - id(g_boot_ms));
+
+binary_sensor:
+  - id: !extend interlock_fault
+    on_release:
+      - lambda: id(test_latch_clear_ms).publish_state(millis() - id(g_boot_ms));
+
+interval:
+  # The watchdog records its trip time in g_interlock_trip_ms; publish each new value.
+  - interval: 20ms
+    then:
+      - lambda: |-
+          static uint32_t seen = 0;
+          const uint32_t t = id(g_interlock_trip_ms);
+          if (t != 0 && t != seen) {
+            seen = t;
+            id(test_trip_ms).publish_state(t - id(g_boot_ms));
+          }
+
+time:
+  - platform: host
+    id: host_time
+    timezone: America/New_York
