@@ -11,15 +11,12 @@
 // disconnectedCallback and start again, once, on reconnect. The e2e tests read `_loops` and
 // `_intervals` (live in the whole window, all instances), `_resolves` and `_historyLoads`.
 import { styles } from './style.js';
+import { TEMPLATE, MODES, FANS, LEVELS, BUCKETS, DASH, esc } from './dashboard-template.js';
 import { Adapter } from './lib/adapter.js';
 import './room-view.js';
 import { statusFor, targetLabel, holdKind, levelShouldSend, dayBar, Debouncer } from './lib/rules.js';
 
 const DEFAULT_DEVICE = 'Main Thermostat';
-const TABS = ['HOME', 'SCHEDULE', 'SIMULATION', 'SYSTEM'];
-const MODES = [['off', 'OFF', 'off'], ['heat', 'HEAT', 'heat'], ['cool', 'COOL', 'cool'], ['auto', 'AUTO', 'heat_cool']];
-const FANS = [['auto', 'AUTO'], ['on', 'ON']];
-const LEVELS = [['comfort', 'COMFORT', 'Comfort'], ['eco', 'ECO', 'Eco']];
 const PERIODS = ['wake', 'leave', 'return', 'sleep'];
 const TARGET_MIN = 50;
 const TARGET_MAX = 90;
@@ -27,17 +24,13 @@ const DEBOUNCE_MS = 1500;
 const PENDING_GIVE_UP_MS = 6000; // show the tapped value this long after the write at most
 const HISTORY_EVERY_MS = 5 * 60 * 1000;
 const HISTORY_HOURS = 12;
-const BUCKETS = 120; // 6-minute bars
 const BUCKET_MS = (HISTORY_HOURS * 3600 * 1000) / BUCKETS;
 const HISTORY_IDS = ['call_heat', 'call_cool', 'call_fan', 'checked_temperature', 'effective_target'];
-const DASH = '—';
 // Live timers across every instance in this window (a leaked loop in a detached element counts).
 const live = { loops: 0, intervals: 0 };
 
-const slugDash = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const deg = (v) => (v == null ? DASH : `${Math.round(v)}°`);
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 function fmtMin(ms) {
   const m = Math.max(0, Math.round(ms / 60000));
@@ -90,142 +83,6 @@ function stepSeries(rows, start) {
   }
   return out;
 }
-
-const SEG = (id, label) => `<button type="button" class="seg" data-testid="${id}" aria-pressed="false">${label}</button>`;
-
-const TEMPLATE = (device) => `
-<style>
-  [hidden] { display: none !important; }
-  .page { min-height: 100%; display: flex; flex-direction: column; }
-  header { border-bottom: 1px solid var(--cn-hairline); }
-  .head { max-width: 1200px; margin: 0 auto; padding: 24px 24px 0; display: flex; flex-direction: column; gap: 16px; }
-  .titlebar { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; }
-  .title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .prompt { font-size: 12px; color: var(--cn-label); }
-  h1 { margin: 0; font-size: 24px; line-height: 1.33; font-weight: 700; }
-  .meta { display: flex; flex-wrap: wrap; gap: 4px 24px; font-size: 12px; color: var(--cn-text-2); }
-  .tabs { display: flex; gap: 24px; overflow-x: auto; font-size: 12px; letter-spacing: 0.08em; }
-  .tab { background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--cn-label); padding: 8px 0 12px; font-size: 12px; letter-spacing: 0.08em; cursor: pointer; white-space: nowrap; }
-  .tab[aria-selected="true"] { border-bottom-color: var(--cn-text); color: var(--cn-text); }
-  .wrap { max-width: 1200px; width: 100%; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
-  .row { display: flex; flex-wrap: wrap; gap: 24px; align-items: stretch; }
-  section { padding: 24px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-  .between { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-  .small { font-size: 12px; color: var(--cn-text-2); }
-  .room { flex: 999 1 560px; }
-  .runtime .totals b { color: var(--cn-text); font-weight: 400; }
-  .thermo { flex: 1 1 340px; background: var(--cn-raised); gap: 20px; }
-  .stepper { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .step { width: 56px; height: 56px; flex: 0 0 56px; background: transparent; border: 1px solid var(--cn-outline); border-radius: 2px; color: var(--cn-text); font-size: 24px; cursor: pointer; }
-  .big { font-size: 64px; line-height: 1; font-weight: 700; letter-spacing: -0.02em; white-space: nowrap; }
-  .center { text-align: center; }
-  .status { display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 44px; }
-  .status .word { font-size: 14px; }
-  .group { display: flex; flex-direction: column; gap: 8px; }
-  .segs { display: flex; gap: 8px; }
-  .seg { flex: 1; min-width: 0; min-height: 44px; padding: 0 8px; background: transparent; color: var(--cn-text); border: 1px solid var(--cn-outline); border-radius: 2px; font-size: 13px; cursor: pointer; }
-  .seg[aria-pressed="true"] { background: var(--cn-text); color: #000000; border-color: var(--cn-text); font-weight: 700; }
-  button:disabled { opacity: 0.4; cursor: default; }
-  .pair { display: flex; gap: 16px; flex-wrap: wrap; }
-  .pair > .group:first-child { flex: 1 1 120px; }
-  .pair > .group:last-child { flex: 1 1 160px; }
-  .foot { border-top: 1px solid var(--cn-hairline); padding-top: 16px; display: flex; flex-direction: column; gap: 12px; }
-  .resume { min-height: 44px; background: var(--cn-ember); color: var(--cn-text); border: none; border-radius: 2px; font-size: 14px; font-weight: 700; cursor: pointer; }
-  .placeholder { flex: 1 1 340px; }
-  .chart { display: block; width: 100%; height: 56px; }
-  .barrow { display: flex; align-items: center; gap: 12px; }
-  .barrow > span { flex: 0 0 64px; font-size: 12px; color: var(--cn-text-2); }
-  .bars { flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 1px; height: 10px; }
-  .bars > i { flex: 1; min-width: 0; height: 2px; background: var(--cn-hairline); }
-  .axis { display: flex; justify-content: space-between; font-size: 12px; color: var(--cn-label); }
-  .runtime .axis { padding-left: 76px; }
-  .totals { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--cn-text-2); }
-  .empty { font-size: 12px; color: var(--cn-label); }
-  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 24px; }
-  .link { background: transparent; border: none; color: var(--cn-text); font-size: 12px; text-decoration: underline; cursor: pointer; padding: 0; }
-  .daybar { display: flex; height: 24px; gap: 1px; }
-  .daybar > span { min-width: 0; overflow: hidden; display: flex; align-items: center; padding-left: 6px; font-size: 11px; }
-  .daybar.off { opacity: 0.4; }
-  .nowrow { position: relative; height: 16px; }
-  .now { position: absolute; top: 0; width: 1px; height: 12px; background: var(--cn-ember); }
-  .kv { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
-  .kv > span:first-child { color: var(--cn-text-2); }
-  @media (max-width: 860px) { .desk { display: none !important; } }
-</style>
-<div class="page">
-<header><div class="head">
-  <div class="titlebar">
-    <div class="title"><span class="prompt">~/chestnut/${esc(slugDash(device))}</span><h1>${esc(device)}</h1></div>
-    <div class="meta"><span id="sched-line">${DASH}</span><span id="clock"></span><span id="conn">○ connecting</span></div>
-  </div>
-  <div class="tabs" role="tablist" aria-label="Dashboard views">
-    ${TABS.map((t) => `<button type="button" role="tab" class="tab${t === 'SIMULATION' ? ' desk' : ''}" data-tab="${t}" aria-selected="false"${t === 'SIMULATION' ? ' hidden' : ''}>${t}</button>`).join('')}
-  </div>
-</div></header>
-<div class="wrap">
-  <div class="row">
-    <chestnut-room-view class="card room desk" data-testid="room" data-views="HOME SIMULATION" role="region" aria-label="Room"></chestnut-room-view>
-    <section class="card thermo" data-views="HOME" aria-label="Thermostat">
-      <div class="between"><span class="label" id="tlabel">TARGET</span><span class="label" style="text-transform:none">set_target</span></div>
-      <div class="stepper">
-        <button type="button" class="step" data-testid="minus" aria-label="Lower target">−</button>
-        <span class="big" data-testid="target" aria-live="polite">${DASH}</span>
-        <button type="button" class="step" data-testid="plus" aria-label="Raise target">+</button>
-      </div>
-      <span class="small center" id="tgt-sub" style="min-height: 20px"></span>
-      <div class="status">
-        <span class="word"><span id="status-mark"></span> <span data-testid="status-word"></span></span>
-        <span class="small center" data-testid="status-sub"></span>
-      </div>
-      <div class="group"><span class="label">MODE</span><div class="segs">${MODES.map(([k, l]) => SEG(`mode-${k}`, l)).join('')}</div></div>
-      <div class="pair">
-        <div class="group"><span class="label">FAN</span><div class="segs">${FANS.map(([k, l]) => SEG(`fan-${k}`, l)).join('')}</div></div>
-        <div class="group"><span class="label">LEVEL</span><div class="segs">${LEVELS.map(([k, l]) => SEG(`level-${k}`, l)).join('')}</div></div>
-      </div>
-      <div class="foot">
-        <div class="between" style="font-size: 12px"><span class="label">SCHEDULE</span><span id="sched-foot">${DASH}</span></div>
-        <button type="button" class="resume" data-testid="resume" hidden>Resume schedule →</button>
-      </div>
-    </section>
-    <section class="card placeholder desk" data-views="SIMULATION" aria-label="Simulation">
-      <div class="between"><span class="label">SIMULATION</span><span class="label">BENCH ONLY</span></div>
-      <span class="small">The simulation controls come next.</span>
-    </section>
-  </div>
-  <section class="card runtime" data-testid="runtime" data-views="HOME SIMULATION" aria-label="Runtime">
-    <div class="between" style="flex-wrap: wrap">
-      <span class="label">LAST 12 HOURS</span>
-      <div class="totals"><span>heat <b id="tot-heat">${DASH}</b></span><span>cool <b id="tot-cool">${DASH}</b></span><span>fan <b id="tot-fan">${DASH}</b></span></div>
-    </div>
-    <span class="empty" id="rt-empty">loading…</span>
-    <div id="rt-chart" hidden>
-      <svg class="chart" viewBox="0 0 120 30" preserveAspectRatio="none" role="img" aria-label="Room temperature over the last 12 hours, with the target dashed">
-        <polyline id="pl-target" fill="none" stroke="#505050" stroke-dasharray="1.5 1.5" vector-effect="non-scaling-stroke"></polyline>
-        <polyline id="pl-room" fill="none" stroke="#eeeeee" vector-effect="non-scaling-stroke"></polyline>
-      </svg>
-      ${[['heat W', 'heat'], ['cool Y', 'cool'], ['fan G', 'fan']].map(([l, k]) => `<div class="barrow"><span>${l}</span><div class="bars" id="bars-${k}">${'<i data-bar></i>'.repeat(BUCKETS)}</div></div>`).join('')}
-      <div class="axis"><span>12h ago</span><span>6h</span><span>now</span></div>
-    </div>
-  </section>
-  <div class="grid2" data-views="HOME">
-    <section class="card" data-testid="today" aria-label="Today">
-      <div class="between"><span class="label" id="today-label">TODAY</span><button type="button" class="link" data-go="SCHEDULE">schedule →</button></div>
-      <div class="daybar" id="daybar"></div>
-      <div class="nowrow"><span class="now" id="now-mark"></span></div>
-      <div class="axis"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span></div>
-    </section>
-    <section class="card" data-testid="status-card" aria-label="Status">
-      <div class="between"><span class="label">STATUS</span><button type="button" class="link" data-go="SYSTEM">system →</button></div>
-      <div class="kv"><span>equipment</span><span id="st-equip">${DASH}</span></div>
-      <div class="kv"><span>interlock</span><span id="st-lock">${DASH}</span></div>
-      <div class="kv"><span>sensor</span><span id="st-sensor">${DASH}</span></div>
-      <div class="kv"><span>home assistant</span><span id="st-ha">${DASH}</span></div>
-    </section>
-  </div>
-  <section class="card" data-views="SCHEDULE" aria-label="Schedule"><span class="label">SCHEDULE</span><span class="small">The schedule editor comes next.</span></section>
-  <section class="card" data-views="SYSTEM" aria-label="System"><span class="label">SYSTEM</span><span class="small">Safety, alerts, wall screen and the device come next.</span></section>
-</div>
-</div>`;
 
 class ChestnutDashboard extends HTMLElement {
   constructor() {
