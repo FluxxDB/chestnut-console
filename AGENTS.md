@@ -33,6 +33,10 @@ Dang is turning an **M5Stack Tab5** (ESP32-P4 + ESP32-C6 Wi-Fi, 5" 720×1280 tou
 docker-compose.yml           HA 2026.10.4 + ESPHome 2026.10.1 (host networking); `esphome-host` and `preview` services (dev profile)
 tools/preview/               desktop preview rig + console tests (test_all.sh, test_device.sh)
 home-assistant/config/       HA config (runtime state gitignored)
+  www/chestnut/              the Chestnut dashboard: custom element (one JS file per tab), self-hosted fonts
+  dashboards/chestnut.yaml   the dashboard (replaces Overview); themes/axiom.yaml = the theme
+  configuration.yaml, automations.yaml   dashboard registration, alert helpers, alert automations
+home-assistant/tests/        run.sh (unit | e2e | all, Docker only): JS unit tests + browser e2e on a throwaway HA (port 8124)
 tab5-thermostat/             ESPHome config dir (mounted at /config in the esphome container)
   tab5-thermostat.yaml       device entry point: Wi-Fi, API, OTA, web page, packages
   main-thermostat-sim.yaml   host entry point: the thermostat logic + virtual house, for HA (API on 6053)
@@ -52,6 +56,7 @@ Validate and compile:
 docker compose run --rm --no-deps esphome config tab5-thermostat.yaml
 docker compose run --rm --no-deps esphome compile tab5-thermostat.yaml
 tab5-thermostat/tests/run.sh all     # milestone 2 tests
+home-assistant/tests/run.sh all      # HA dashboard tests (~7 min; needs ports 8124 and 6053 free)
 ```
 
 ## Hardware facts that bite
