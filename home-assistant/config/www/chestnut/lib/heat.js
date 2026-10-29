@@ -150,3 +150,16 @@ export class HeatField {
     return data;
   }
 }
+
+// The room view's HeatField.step inputs, from a live reading v ({room, sensorFault, heat, cool,
+// air}, or null while the thermostat is offline) and the outdoor value (°F, or null if no source).
+// Non-finite numbers would poison the field for good, so it freezes (keeps the last good view)
+// while offline, on a sensor fault or without a finite room reading. A missing outdoor reading
+// does not freeze it: outdoor then equals the room (no wall leakage), so the live view keeps moving.
+export function fieldInputs(v, outdoorF) {
+  const fin = (x) => typeof x === 'number' && Number.isFinite(x);
+  const roomF = v ? v.room : null;
+  const out = fin(outdoorF) ? outdoorF : roomF;
+  const frozen = !v || !!v.sensorFault || !fin(roomF);
+  return { roomF, outdoorF: out, heat: !!(v && v.heat), cool: !!(v && v.cool), fanOn: !!(v && v.air), frozen };
+}

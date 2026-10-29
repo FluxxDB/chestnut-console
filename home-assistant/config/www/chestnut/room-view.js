@@ -10,7 +10,7 @@
 // The e2e tests read `data-mean` (the field mean), `data-on` on the equipment boxes, `_frames`
 // (requestAnimationFrame callbacks, this instance) and `_loops` (live loops, whole window).
 import { styles } from './style.js';
-import { HeatField, heatColor } from './lib/heat.js';
+import { HeatField, heatColor, fieldInputs } from './lib/heat.js';
 import { statusFor, toF } from './lib/rules.js';
 
 const DASH = '—';
@@ -26,7 +26,6 @@ const COOL = '#2a7fff';
 const live = { loops: 0 };
 
 const deg = (v) => (v == null ? DASH : `${Math.round(v)}°`);
-const finite = (v) => typeof v === 'number' && Number.isFinite(v);
 
 function fmtMin(m) {
   m = Math.max(0, Math.round(m));
@@ -305,13 +304,7 @@ class ChestnutRoomView extends HTMLElement {
   }
 
   _inputs() {
-    const v = this._read();
-    const out = this._outdoor();
-    const roomF = v ? v.room : null;
-    const outdoorF = out.f;
-    // Non-finite inputs would poison the field for good; a sensor fault freezes the last good view.
-    const frozen = !v || v.sensorFault || !finite(roomF) || !finite(outdoorF);
-    return { roomF, outdoorF, heat: !!(v && v.heat), cool: !!(v && v.cool), fanOn: !!(v && v.air), frozen };
+    return fieldInputs(this._read(), this._outdoor().f);
   }
 
   // ── drawing ────────────────────────────────────────────────────────────────────────────
