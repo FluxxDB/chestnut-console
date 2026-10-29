@@ -385,9 +385,10 @@ climate:
               f = chestnut::c_to_f(hi.has_value() ? *hi : (tt.has_value() ? *tt : *lo));
             } else if (mode == climate::CLIMATE_MODE_HEAT_COOL && (lo.has_value() || hi.has_value())) {
               // Against the band apply_setpoints just derived for this mode (published above).
-              f = chestnut::auto_drag_target(
-                  id(g_effective_f), lroundf(id(effective_low).state), lroundf(id(effective_high).state),
-                  lo.has_value() ? chestnut::c_to_f(*lo) : NAN, hi.has_value() ? chestnut::c_to_f(*hi) : NAN);
+              const float new_lo = lo.has_value() ? chestnut::c_to_f(*lo) : NAN;
+              const float new_hi = hi.has_value() ? chestnut::c_to_f(*hi) : NAN;
+              f = chestnut::auto_drag_target(id(g_effective_f), lroundf(id(effective_low).state),
+                                             lroundf(id(effective_high).state), new_lo, new_hi);
             } else if (mode == climate::CLIMATE_MODE_HEAT_COOL) {
               f = chestnut::c_to_f(*tt);
             } else {  // Heat, and Off (whose setpoints follow Heat's)
@@ -494,8 +495,9 @@ binary_sensor:
     name: "Call Fan"
     device_class: running
     lambda: return id(relay_fan).state;
-  # Contract: the interlock watchdog tripped (W and Y were both on). Stays on until the Clear
-  # button is pressed or the device reboots.
+  # Contract: the interlock watchdog tripped (W and Y were both on). Stays on until the device
+  # reboots, or until Clear is pressed and the larger minimum off time since the (latest) trip
+  # has passed (clear_interlock).
   - platform: template
     id: interlock_fault
     name: "Interlock Fault"
@@ -605,9 +607,10 @@ interval:
       # call_wait_reason, first match wins. The two faults show whenever they're on (a running
       # call may still be finishing its minimum run under a sensor fault). The waits show only
       # when the room is off target (the thermostat wants heat or cool, timers aside, or the
-      # changeover lockout is holding the other side's call back) and nothing is running. "Nothing is running" comes from the relays (W / Y), never from
-      # main_thermostat's action, which can read HEATING while the interlock latch holds the
-      # relays off. Published only when it changes.
+      # changeover lockout is holding the other side's call back) and nothing is running.
+      # "Nothing is running" comes from the relays (W / Y), never from main_thermostat's action,
+      # which can read HEATING while the interlock latch holds the relays off. Published only
+      # when it changes.
       - lambda: |-
           static bool started_up = false;  // latched, so millis() wrapping never re-enters it
           if (!started_up) {

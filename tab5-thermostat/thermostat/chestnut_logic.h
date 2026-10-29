@@ -235,8 +235,9 @@ inline uint32_t elapsed_ms(uint32_t now, uint32_t then) {
 // as the thermostat's input and fault() as the problem sensor.
 //
 // Bad: NaN, outside [min, max], no accepted reading for stale_ms (readings that keep arriving
-// but are never believed count as none), or the identical value for frozen_ms. A fault starts at the first bad condition and clears after recover_ms of
-// continuous good readings; any bad condition restarts that window.
+// but are never believed count as none), or the identical value for frozen_ms. A fault starts
+// at the first bad condition and clears after recover_ms of continuous good readings; any bad
+// condition restarts that window.
 //
 // Spike: a reading more than spike_c from the last accepted one is held back. If the next
 // reading is within spike_c of the held one, both are accepted (a real change); otherwise

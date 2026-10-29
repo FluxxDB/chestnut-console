@@ -73,25 +73,29 @@ The Tab5 runs the thermostat itself (ESPHome `thermostat` climate `main_thermost
 | `main-thermostat-sim.yaml` | the same two packages on ESPHome's host platform, for Home Assistant and the tests |
 | `tests/` | `run.sh` plus the unit and scenario tests |
 
-**Playing with the virtual house:** use the Tab5's own web page (see *Phone page*). Next to the thermostat it lists the sim's knobs: **Sim Outdoor F**, **Sim Weather** (Fixed, or a Winter / Summer day curve), **Sim Tau H** (how leaky the house is), **Sim Heat FPH** / **Sim Cool FPH** (how fast the equipment changes the room), **Sim Humidity**, and **Sim Room F** (the true room temperature). **Sim Fault** breaks the temperature sensor on purpose (Unplugged, Frozen, Out of range, Spike) so you can watch the sensor checks react: a lasting fault raises **Sensor Fault** and the thermostat stops calling. A fault never survives a reboot. The relays are internal: nothing but the logic can switch them.
+**Playing with the virtual house:** use the Tab5's own web page (see *Phone page*). Next to the thermostat it lists the sim's knobs: **Sim Outdoor F**, **Sim Weather** (Fixed, or a Winter / Summer day curve), **Sim Tau H** (how leaky the house is), **Sim Heat FPH** / **Sim Cool FPH** (how fast the equipment changes the room), **Sim Humidity**, and **Sim Room F** (the true room temperature). **Sim Fault** breaks the temperature sensor on purpose (Unplugged, Frozen, Out of range, Spike) so you can watch the sensor checks react: a lasting fault raises **Sensor Fault** and the thermostat stops calling (Unplugged also makes the humidity unknown after two minutes). A fault never survives a reboot. The relays are internal: nothing but the logic can switch them.
 
 ### Tests
 
-Docker only, nothing to install (run from the repo root):
+Docker only, nothing to install, and no secrets needed (run from the repo root):
 ```bash
-tab5-thermostat/tests/run.sh all          # unit tests, then the scenario tests on a host build
-tab5-thermostat/tests/run.sh scenarios -k fault   # a subset
+tab5-thermostat/tests/run.sh unit         # the C++ unit tests: seconds
+tab5-thermostat/tests/run.sh all          # unit tests, then the scenario tests on a host build: about 10 minutes
+tab5-thermostat/tests/run.sh scenarios -k fault                              # a subset
+tab5-thermostat/tests/run.sh scenarios tests/scenarios/test_core.py         # one file
 ```
+The first run also builds the test image and compiles the host build, which takes a few minutes more. Each scenario test starts its own device program; durations (minimum run and off times, the changeover lockout, the interlock wait) are measured on the device, from test-only timestamps in `tests/main-thermostat-test.yaml`.
 
 ### Host sim for Home Assistant
 
 The host sim runs the same logic and virtual house as a separate device, **Main Thermostat (Sim)**, with real timers and real-time physics. It's for HA (the tests build their own entry, `tests/main-thermostat-test.yaml`). It has no web page (ESPHome's host platform has none), so play with the knobs on the Tab5's page, or from HA.
 
-Add `sim_api_encryption_key` to `secrets.yaml` (a different key from the Tab5's). Then, from the repo root:
+Add `sim_api_encryption_key` to `secrets.yaml` (a different key from the Tab5's; see `secrets.yaml.example` for how to generate one). Then, from the repo root:
 ```bash
 docker compose --profile dev run --rm esphome-host compile main-thermostat-sim.yaml
 docker compose --profile dev run --rm esphome-host run main-thermostat-sim.yaml
 ```
+`run` stays in the foreground, showing the sim's log, until you press Ctrl-C.
 It uses host networking, with the API on port 6053 (Linux; Docker Desktop on a Mac doesn't expose host-network ports to the Mac). The `esphome-host` service builds without ESPHome's precompiled header, which breaks host builds in 2026.10.1.
 
 To add it to HA: Settings → Devices & services → Add integration → ESPHome → host = the machine running the sim, port 6053, with the `sim_api_encryption_key`.
