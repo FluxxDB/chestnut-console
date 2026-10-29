@@ -854,9 +854,15 @@ switch:
     on_turn_off:
       - lambda: if (id(g_ready)) id(schedule_rerun).execute();
 
-# Safety timers in minutes (spec, Safety 2). Restored; a value outside the range is refused.
+# Safety timers in minutes (spec, Safety 2). Restored; a value outside the range is refused, and
+# a restored value outside it (TemplateNumber doesn't check) is put back in range first.
 # Applied at boot (numbers set up before the climate, so the startup delay already uses the
 # restored values) and on every change (ESPHome stretches or ends a running timer to match).
+# After boot a change is applied in a scheduler dispatch of its own (delay 0s): ESPHome's setter
+# measures a running timer from the current dispatch's start time, so a timer started earlier
+# in the SAME dispatch (an HA script sending a target and then a timer: one API loop pass)
+# would look ~49 days old and end at once, cancelling a minimum run or off. The scheduler
+# refreshes that start time before each dispatch. At boot no timer is running yet.
 number:
   - platform: template
     id: heat_min_run
@@ -871,7 +877,19 @@ number:
     optimistic: true
     restore_value: true
     on_value:
-      - lambda: id(main_thermostat).set_heating_minimum_run_time_in_sec(lroundf(x * ${timer_unit_s}));
+      - if:
+          condition:
+            lambda: return id(g_ready);
+          then:
+            - delay: 0s
+      - lambda: |-
+          auto *n = id(heat_min_run);
+          const float v = chestnut::clamp_setting(x, n->traits.get_min_value(), n->traits.get_max_value());
+          if (v != x) {  // a restored value out of range: set it in range (on_value runs again)
+            n->make_call().set_value(v).perform();
+            return;
+          }
+          id(main_thermostat).set_heating_minimum_run_time_in_sec(lroundf(v * ${timer_unit_s}));
   - platform: template
     id: heat_min_off
     name: "Heat Min Off"
@@ -885,7 +903,19 @@ number:
     optimistic: true
     restore_value: true
     on_value:
-      - lambda: id(main_thermostat).set_heating_minimum_off_time_in_sec(lroundf(x * ${timer_unit_s}));
+      - if:
+          condition:
+            lambda: return id(g_ready);
+          then:
+            - delay: 0s
+      - lambda: |-
+          auto *n = id(heat_min_off);
+          const float v = chestnut::clamp_setting(x, n->traits.get_min_value(), n->traits.get_max_value());
+          if (v != x) {  // a restored value out of range: set it in range (on_value runs again)
+            n->make_call().set_value(v).perform();
+            return;
+          }
+          id(main_thermostat).set_heating_minimum_off_time_in_sec(lroundf(v * ${timer_unit_s}));
   - platform: template
     id: cool_min_run
     name: "Cool Min Run"
@@ -899,7 +929,19 @@ number:
     optimistic: true
     restore_value: true
     on_value:
-      - lambda: id(main_thermostat).set_cooling_minimum_run_time_in_sec(lroundf(x * ${timer_unit_s}));
+      - if:
+          condition:
+            lambda: return id(g_ready);
+          then:
+            - delay: 0s
+      - lambda: |-
+          auto *n = id(cool_min_run);
+          const float v = chestnut::clamp_setting(x, n->traits.get_min_value(), n->traits.get_max_value());
+          if (v != x) {  // a restored value out of range: set it in range (on_value runs again)
+            n->make_call().set_value(v).perform();
+            return;
+          }
+          id(main_thermostat).set_cooling_minimum_run_time_in_sec(lroundf(v * ${timer_unit_s}));
   - platform: template
     id: cool_min_off
     name: "Cool Min Off"
@@ -913,7 +955,19 @@ number:
     optimistic: true
     restore_value: true
     on_value:
-      - lambda: id(main_thermostat).set_cooling_minimum_off_time_in_sec(lroundf(x * ${timer_unit_s}));
+      - if:
+          condition:
+            lambda: return id(g_ready);
+          then:
+            - delay: 0s
+      - lambda: |-
+          auto *n = id(cool_min_off);
+          const float v = chestnut::clamp_setting(x, n->traits.get_min_value(), n->traits.get_max_value());
+          if (v != x) {  // a restored value out of range: set it in range (on_value runs again)
+            n->make_call().set_value(v).perform();
+            return;
+          }
+          id(main_thermostat).set_cooling_minimum_off_time_in_sec(lroundf(v * ${timer_unit_s}));
   - platform: template
     id: changeover_lockout
     name: "Changeover Lockout"
@@ -927,7 +981,14 @@ number:
     optimistic: true
     restore_value: true
     on_value:
-      - lambda: id(g_changeover_lockout_s) = lroundf(x * ${timer_unit_s});
+      - lambda: |-
+          auto *n = id(changeover_lockout);
+          const float v = chestnut::clamp_setting(x, n->traits.get_min_value(), n->traits.get_max_value());
+          if (v != x) {  // a restored value out of range: set it in range (on_value runs again)
+            n->make_call().set_value(v).perform();
+            return;
+          }
+          id(g_changeover_lockout_s) = lroundf(v * ${timer_unit_s});
 
   # --- Single target (spec "Single target, Comfort, Eco and holds"), °F, whole degrees ---
   # The Comfort setting. Changes only here (HA, the web page, later a settings screen), never

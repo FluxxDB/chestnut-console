@@ -245,3 +245,40 @@ async def test_fan_auto_keeps_g_while_cooling(device):
     await device.wait_for("call_fan", is_off, 1)
     assert never_on(device, "call_heat")
 
+
+# A timer number changed in the same API loop pass as a climate call that starts that timer
+# (an HA script setting a target and then a timer): ESPHome's setter measures the running
+# timer against the pass's start time, which is earlier than the timer's own start, so the
+# elapsed time wraps and the timer would end at once. The logic applies the new value in a
+# later dispatch instead. On the host a call takes well under a millisecond, so the test hook
+# holds each climate call 3 ms (as a slower ESP32 dispatch would) to make the gap visible.
+
+async def test_timer_change_with_call_start_keeps_min_run(device):
+    await device.action("test_set_latency", ms=3)
+    await fixed_weather(device, 68)
+    await heat_to(device, 68)  # the 68°F room is on target: idle
+    await device.sleep(HEAT_OFF_S + 1)  # past the startup delay
+    assert True not in device.history("call_heat")
+    # One pass: the target write starts heating (and its minimum run), then the run time changes.
+    await device.climate_and_number("heat_min_run", 6, target_temperature_low=f_to_c(80))
+    await device.wait_for("call_heat", is_on, 2)
+    assert await device.wait_for("heat_min_run", lambda v: v == 6, 2) == 6
+    await heat_to(device, 50)  # no longer wanted: only the minimum run keeps it on
+    on, off = await run_ms(device, "call_heat", 6 + 3)
+    assert_near(off - on, 6, "furnace run with a 6 s minimum run set in the same pass")
+
+
+async def test_timer_change_with_call_stop_keeps_min_off(device):
+    await device.action("test_set_latency", ms=3)
+    await fixed_weather(device, 100)
+    await cool_to(device, 60)
+    await device.wait_for("call_cool", is_on, COOL_OFF_S + 5)
+    await device.sleep(COOL_RUN_S + 0.5)  # past the minimum run: a satisfied target stops it at once
+    # One pass: the target write stops cooling (and starts its minimum off), then the off time
+    # changes.
+    await device.climate_and_number("cool_min_off", 8, target_temperature_high=f_to_c(85))
+    stopped = (await run_ms(device, "call_cool", 2))[1]
+    assert await device.wait_for("cool_min_off", lambda v: v == 8, 2) == 8
+    await cool_to(device, 60)  # wanted again at once: only the minimum off holds it
+    restarted = await device.edge("call_cool", True, stopped, 8 + 3)
+    assert_near(restarted - stopped, 8, "AC off time with an 8 s minimum off set in the same pass")

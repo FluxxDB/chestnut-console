@@ -68,6 +68,13 @@ inline Setpoints derive_setpoints(Mode mode, int comfort_f, int eco_offset_f, bo
   return s;
 }
 
+// A restored setting put back in its range [lo, hi]. NaN (no usable value) becomes hi: for the
+// safety timers the longest wait is the safe side.
+inline float clamp_setting(float v, float lo, float hi) {
+  if (std::isnan(v)) return hi;
+  return v < lo ? lo : (v > hi ? hi : v);
+}
+
 inline float f_to_c(float f) { return (f - 32.0f) * 5.0f / 9.0f; }
 inline float c_to_f(float c) { return c * 9.0f / 5.0f + 32.0f; }
 

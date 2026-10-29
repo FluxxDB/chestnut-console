@@ -83,6 +83,13 @@ static void derive_output_clamps() {
   CHECK(s.high_f == 90 && s.low_f == 79 && s.high_f - s.low_f >= 2 && s.effective_f == 90);
 }
 
+static void clamp_setting_cases() {
+  CHECK(clamp_setting(5, 2, 20) == 5);
+  CHECK(clamp_setting(1, 2, 20) == 2);
+  CHECK(clamp_setting(25, 2, 20) == 20);
+  CHECK(clamp_setting(NAN, 2, 20) == 20);
+}
+
 static void conversions() {
   CHECK_NEAR(f_to_c(72), 22.2222f, 1e-3);
   CHECK_NEAR(c_to_f(20), 68.0f, 1e-3);
@@ -542,6 +549,7 @@ int main() {
   derive_input_clamps();
   derive_off_matches_heat();
   derive_output_clamps();
+  clamp_setting_cases();
   conversions();
   schedule_basic();
   schedule_midnight_carryover();
