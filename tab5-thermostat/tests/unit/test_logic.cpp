@@ -574,6 +574,72 @@ static void sanity_bad_drops_held_spike() {
 
 static SanityConfig sanity_prod_cfg() { return sanity_config(60000); }
 
+// C1: an outage across which the room moved more than spike_c. The first reading back is held
+// against the old (pre-outage) value and the next one confirms it, so the readings are accepted
+// and the fault clears after recover_ms of them, the stale fault notwithstanding. Readings every
+// `step` ms with ticks every `tick` ms in between (test: 250 / 250; production: 10 s / 1 s).
+// Returns the time the fault cleared (0 if it never did).
+static uint32_t outage_then_return(SanityConfig cfg, uint32_t step, uint32_t tick, float before_c,
+                                   float after_c) {
+  SanityChecker s(cfg);
+  for (uint32_t t = 0; t <= 4 * step; t += step) s.on_reading(t, before_c + ((t / step) % 2 ? 0.05f : 0.0f));
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), before_c, 0.06);
+  const uint32_t last = 4 * step;
+  const uint32_t back = last + 3 * cfg.stale_ms;  // the sensor returns well past stale
+  for (uint32_t t = last + tick; t < back; t += tick) s.tick(t);
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+  // The fault may clear only after recover_ms of accepted readings: after a move over spike_c
+  // the first one back is held and the second confirms it and starts the window.
+  const bool held = std::fabs(after_c - before_c) > cfg.spike_c;
+  const uint32_t earliest = back + (held ? step : 0) + cfg.recover_ms;
+  uint32_t cleared = 0;
+  for (uint32_t t = back; t <= back + 4 * cfg.recover_ms && !cleared; t += step) {
+    s.on_reading(t, after_c + ((t / step) % 2 ? 0.05f : 0.0f));
+    if (!s.fault()) cleared = t;
+    for (uint32_t k = t + tick; k < t + step && !cleared; k += tick) {
+      s.tick(k);
+      if (!s.fault()) cleared = k;
+    }
+  }
+  CHECK(cleared != 0);
+  if (cleared) {
+    CHECK(cleared >= earliest);
+    CHECK(cleared <= earliest + step);
+    CHECK_NEAR(s.value(), after_c, 0.06);
+  }
+  return cleared;
+}
+
+static void sanity_recovers_after_outage_with_big_move() {
+  // Test thresholds, readings every 250 ms (the sim in the scenario tests).
+  outage_then_return(sanity_cfg(), 250, 250, 20.0f, 17.0f);
+  outage_then_return(sanity_cfg(), 250, 250, 20.0f, 25.0f);
+  // Production thresholds, readings every 10 s and ticks every second (logic.yaml).
+  outage_then_return(sanity_prod_cfg(), 10000, 1000, 20.0f, 17.0f);
+  outage_then_return(sanity_prod_cfg(), 10000, 1000, 20.0f, 25.0f);
+  // A move within spike_c needs no confirming reading (unchanged behaviour).
+  outage_then_return(sanity_cfg(), 250, 250, 20.0f, 21.5f);
+}
+
+// Finding 6 still holds after an outage: a returning stream that is never accepted (each reading
+// more than spike_c from both the held one and the last accepted value) keeps the fault on.
+static void sanity_outage_then_never_accepted_stays_faulted() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 20.0f);
+  for (uint32_t t = 250; t <= 6000; t += 250) s.tick(t);
+  CHECK(s.fault());
+  bool ever_cleared = false;
+  for (uint32_t t = 6250; t <= 30000; t += 250) {
+    s.on_reading(t, (t / 250) % 2 ? 25.0f : 29.0f);
+    s.tick(t + 125);
+    if (!s.fault() || !std::isnan(s.value())) ever_cleared = true;
+  }
+  CHECK(!ever_cleared);
+}
+
+
 // A dead sensor repeating one value must stay faulted past 2^31 ms, and recover only
 // after the value changes and recover_ms of good readings.
 static void sanity_frozen_stays_faulted_past_25_days() {
@@ -675,5 +741,7 @@ int main() {
   sanity_bad_drops_held_spike();
   sanity_frozen_stays_faulted_past_25_days();
   sanity_stale_stays_faulted_past_25_days();
+  sanity_recovers_after_outage_with_big_move();
+  sanity_outage_then_never_accepted_stays_faulted();
   return CHECK_SUMMARY("test_logic");
 }

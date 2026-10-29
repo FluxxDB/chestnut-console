@@ -105,6 +105,41 @@ async def test_recovery_after_5_units(device):
     assert abs(checked - room_f) < 1, (checked, room_f)
 
 
+async def test_recovers_after_outage_with_big_move(device):
+    # C1: the room moves more than the 2 °C (3.6°F) spike limit while the sensor is unplugged.
+    # The first reading back is held against the last one before the outage and the next
+    # confirms it, so the fault clears after 5 s of good readings and heating resumes; it must
+    # not stay latched until a reboot. The furnace runs before the outage, so its minimum off
+    # applies to the restart.
+    await fixed_weather(device, 0)  # the room cools fast with the furnace off
+    await heat_to(device, 68)
+    await healthy(device)
+    await device.wait_for("call_heat", is_on, HEAT_OFF_S + 5)
+    await device.select("sim_fault", "Unplugged")
+    await device.wait_for("sensor_fault", is_on, 3)
+    _, off = await run_ms(device, "call_heat", HEAT_RUN_S + 2)
+    n = device.updates("call_heat")
+    last_f = [v for v in device.history("checked_temperature") if not is_nan(v)][-1]
+    await device.wait_for("sim_room_f", lambda v: v < last_f - 5, 20)
+    await device.select("sim_fault", "None")
+    t0 = now()
+    await device.wait_for("sensor_fault", is_off, RECOVER_S + 2)
+    recovered = now() - t0
+    assert recovered >= RECOVER_S - 0.5, f"cleared after only {recovered:.2f}s of good readings"
+    room_f = await device.state("sim_room_f")
+    checked = await device.wait_for("checked_temperature", lambda v: not is_nan(v), 1)
+    assert abs(checked - room_f) < 1, (checked, room_f)
+    assert last_f - checked > 3.6, f"the room didn't move past the spike limit: {last_f} -> {checked}"
+    on = await device.edge("call_heat", True, off, 3)
+    assert on - off >= HEAT_OFF_S * 1000 - TOL_MS, f"furnace restarted after only {(on - off) / 1000:.2f}s off"
+    # No call during the outage or while the fault was clearing: the first heat call after the
+    # furnace went off arrives with the fault clearing (the same loop pass, so possibly the same
+    # API batch, in either order) or after it.
+    cleared_at = next(t for t, v in reversed(device.timed_history("sensor_fault")) if v is False)
+    heat_on = [t for t, v in device.timed_history("call_heat")[n:] if v is True]
+    assert heat_on and heat_on[0] >= cleared_at - 0.1, "heat started before the sensor fault cleared"
+
+
 async def cooling_stopped_by_fault(dev):
     """Cooling past its minimum run, then an Out of range fault stops it. Returns the device time
     (ms since boot) Y went off; right after it is seen off, the sensor is healthy again."""

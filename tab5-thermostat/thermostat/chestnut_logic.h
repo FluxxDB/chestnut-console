@@ -243,7 +243,10 @@ inline uint32_t elapsed_ms(uint32_t now, uint32_t then) {
 // reading is within spike_c of the held one, both are accepted (a real change); otherwise
 // the held one is dropped and the new reading is judged on its own. A spike is not a fault
 // by itself, but while a fault is clearing a held-back reading is not a good reading, so
-// it restarts the recovery window. A bad reading drops a held one.
+// it restarts the recovery window. A bad reading (NaN, out of range, the frozen value) drops a
+// held one; stale and frozen seen by the clock do not: after an outage across which the room
+// moved more than spike_c, the first reading back is held against the old value and only the
+// next one can confirm it and end the stale fault.
 //
 // Startup: value() is NaN until the first accepted reading, but fault() stays false until
 // stale_ms passes with no accepted reading (the clock starts at the first call).
@@ -254,7 +257,7 @@ class SanityChecker {
   void on_reading(uint32_t now_ms, float c) {
     start(now_ms);
     // A gap since the last accepted reading is caught even if tick() was late.
-    if (time_bad(now_ms)) mark_bad();
+    if (time_bad(now_ms)) mark_fault();
     if (!std::isnan(c)) {
       if (!have_frozen_ || c != frozen_value_) {
         frozen_value_ = c;
@@ -287,7 +290,7 @@ class SanityChecker {
   void tick(uint32_t now_ms) {
     start(now_ms);
     if (time_bad(now_ms)) {
-      mark_bad();
+      mark_fault();
       return;
     }
     maybe_clear(now_ms);
@@ -312,9 +315,17 @@ class SanityChecker {
     return stale_ || frozen_;
   }
 
-  void mark_bad() {
+  // A fault, and the recovery window restarts.
+  void mark_fault() {
     fault_ = true;
     good_valid_ = false;
+  }
+
+  // A bad reading: also drops a held one. Only bad readings do; the stale and frozen conditions
+  // that tick() keeps seeing must not, or a held reading taken while stale could never be
+  // confirmed (each one is dropped before the next arrives) and the fault would never clear.
+  void mark_bad() {
+    mark_fault();
     held_ = false;
   }
 
