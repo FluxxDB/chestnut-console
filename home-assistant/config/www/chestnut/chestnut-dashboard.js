@@ -1,6 +1,7 @@
 // <chestnut-dashboard>: the Chestnut dashboard, HA's Overview (one panel view).
-// Frame (header, clock, connection, tab bar) and the Home tab: thermostat card, last 12 hours,
-// Today and Status; the room view (room-view.js) on Home and Simulation, animated only while it
+// Frame (header, clock, connection, tab bar), the Home tab (thermostat card, last 12 hours,
+// Today and Status), the Schedule tab (tab-schedule.js) and the Simulation panel
+// (tab-simulation.js, only while the sim entities exist); the room view (room-view.js) on Home and Simulation, animated only while it
 // is on screen (`active`). Layout from docs/design-mockups/ha-dashboard/Main.dc.html; the spec wins
 // where they differ (no supply-air readout, the wall console's status rules, M2 level holds).
 //
@@ -11,13 +12,14 @@
 // disconnectedCallback and start again, once, on reconnect. The e2e tests read `_loops` and
 // `_intervals` (live in the whole window, all instances), `_resolves` and `_historyLoads`.
 import { styles } from './style.js';
-import { TEMPLATE, MODES, FANS, LEVELS, BUCKETS, DASH, esc } from './dashboard-template.js';
+import { TEMPLATE, MODES, FANS, LEVELS, BUCKETS, DASH } from './dashboard-template.js';
+import { ScheduleTab, readPeriods, dayBarHtml, dayType } from './tab-schedule.js';
+import { SimulationTab } from './tab-simulation.js';
 import { Adapter } from './lib/adapter.js';
 import './room-view.js';
-import { statusFor, targetLabel, holdKind, levelShouldSend, dayBar, Debouncer } from './lib/rules.js';
+import { statusFor, targetLabel, holdKind, levelShouldSend, Debouncer } from './lib/rules.js';
 
 const DEFAULT_DEVICE = 'Main Thermostat';
-const PERIODS = ['wake', 'leave', 'return', 'sleep'];
 const TARGET_MIN = 50;
 const TARGET_MAX = 90;
 const DEBOUNCE_MS = 1500;
@@ -287,6 +289,8 @@ class ChestnutDashboard extends HTMLElement {
     for (const [k, , option] of LEVELS) this._el[`level-${k}`].addEventListener('click', () => this._pickLevel(option));
     this._el.resume.addEventListener('click', () => this._call('button', 'press', 'resume_schedule'));
     this._simTab = root.querySelector('[data-tab="SIMULATION"]');
+    this._schedule = new ScheduleTab(root, this);
+    this._simulation = new SimulationTab(root, this);
     this._todayKey = '';
     this._applyTab();
     this._paintRuntime();
@@ -302,6 +306,7 @@ class ChestnutDashboard extends HTMLElement {
     root.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === this._tab)));
     root.querySelectorAll('[data-views]').forEach((n) => { n.hidden = !n.dataset.views.split(' ').includes(this._tab); });
     this._syncRoom();
+    this._dirty = true;
   }
 
   // The room animates only while it is on screen: Home or Simulation, wider than a phone (the
@@ -312,6 +317,15 @@ class ChestnutDashboard extends HTMLElement {
   }
 
   // ── controls ───────────────────────────────────────────────────────────────────────────
+  // For the tab modules: the adapter once resolved (else null), and a service call.
+  adapter() {
+    return this._resolved ? this._adapter : null;
+  }
+
+  call(domain, service, objId, data) {
+    this._call(domain, service, objId, data);
+  }
+
   _call(domain, service, objId, data) {
     if (!this._adapter || !this._resolved) return;
     this._adapter.call(domain, service, objId, data).catch((err) => console.warn('chestnut-dashboard:', service, err));
@@ -391,6 +405,8 @@ class ChestnutDashboard extends HTMLElement {
     if (room.adapter !== roomAdapter) room.adapter = roomAdapter;
     this._renderToday(online ? a : null, now);
     this._renderStatus(v, haUp);
+    if (this._tab === 'SCHEDULE') this._schedule.render(ready ? a : null, now);
+    if (this._tab === 'SIMULATION') this._simulation.render(ready ? a : null);
   }
 
   // Everything the cards show, from live entities only (called only while the climate is online).
@@ -490,14 +506,10 @@ class ChestnutDashboard extends HTMLElement {
   }
 
   _renderToday(a, now) {
-    const day = now.day >= 1 && now.day <= 5 ? 'weekday' : 'weekend';
+    const day = dayType(now.day);
     this._text('today-label', `TODAY · ${day.toUpperCase()}`);
     this._el['now-mark'].style.left = `${(((now.hour * 60 + now.minute) / 1440) * 100).toFixed(1)}%`;
-    let periods = null;
-    if (a) {
-      periods = PERIODS.map((p) => ({ name: p, time: a.str(`sched_${day}_${p}_time`), level: a.str(`sched_${day}_${p}_level`) }));
-      if (periods.some((p) => !/^\d{1,2}:\d{2}/.test(p.time || '') || !['Comfort', 'Eco'].includes(p.level))) periods = null;
-    }
+    const periods = a ? readPeriods(a, day) : null;
     const off = !!a && a.on('schedule_enabled') === false;
     const key = JSON.stringify([periods, off]);
     if (key === this._todayKey) return;
@@ -508,7 +520,7 @@ class ChestnutDashboard extends HTMLElement {
       bar.innerHTML = `<span class="empty" style="padding-left: 0">${DASH}</span>`;
       return;
     }
-    bar.innerHTML = dayBar(periods).map((s) => `<span style="flex: ${s.flex} 1 0; ${s.level === 'Comfort' ? 'background: #eeeeee; color: #000000' : 'background: #3a3a3a; color: #eeeeee'}">${esc(s.label)}</span>`).join('');
+    bar.innerHTML = dayBarHtml(periods);
   }
 
   _renderStatus(v, haUp) {

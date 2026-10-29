@@ -132,10 +132,27 @@ export class Adapter {
     return this.hass.callService(domain, service, { entity_id: this._id(objId), ...data });
   }
 
-  // Writes in the entity's own unit (set_target may be °C).
+  // number.set_value of a °F value, written in the entity's own unit (HA shows a temperature
+  // number such as set_target or comfort_target in °C when it runs metric).
+  setNumberF(objId, f) {
+    return this.call('number', 'set_value', objId, { value: fromF(f, this._unit(objId)) });
+  }
+
   setTargetF(f) {
-    const v = fromF(f, this._unit('set_target'));
-    return this.call('number', 'set_value', 'set_target', { value: v });
+    return this.setNumberF('set_target', f);
+  }
+
+  // A number's min / max / step in °F (converted like num() for a temperature unit), or null.
+  // HA's step in °C says nothing reliable about the device's °F step (M2 uses whole °F), so a
+  // number shown in °C steps by 1 °F.
+  rangeF(objId) {
+    const lo = this.attr(objId, 'min');
+    const hi = this.attr(objId, 'max');
+    const step = this.attr(objId, 'step');
+    if (![lo, hi].every((v) => typeof v === 'number' && Number.isFinite(v))) return null;
+    const unit = this._unit(objId);
+    if (unit !== '°C') return { min: lo, max: hi, step: typeof step === 'number' && step > 0 ? step : 1 };
+    return { min: Math.round(toF(lo, unit)), max: Math.round(toF(hi, unit)), step: 1 };
   }
 
   async history(objIds, hours) {

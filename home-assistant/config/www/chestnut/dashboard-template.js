@@ -2,6 +2,8 @@
 // (chestnut-dashboard.js) finds nodes by id and data-testid and shows the cards whose
 // data-views lists the selected tab.
 import { DASHBOARD_CSS } from './dashboard-style.js';
+import { SCHEDULE_HTML, SCHEDULE_CSS } from './tab-schedule.js';
+import { SIMULATION_HTML, SIMULATION_CSS } from './tab-simulation.js';
 
 export const TABS = ['HOME', 'SCHEDULE', 'SIMULATION', 'SYSTEM'];
 export const MODES = [['off', 'OFF', 'off'], ['heat', 'HEAT', 'heat'], ['cool', 'COOL', 'cool'], ['auto', 'AUTO', 'heat_cool']];
@@ -16,7 +18,7 @@ export const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '
 const SEG = (id, label) => `<button type="button" class="seg" data-testid="${id}" aria-pressed="false">${label}</button>`;
 
 export const TEMPLATE = (device) => `
-<style>${DASHBOARD_CSS}</style>
+<style>${DASHBOARD_CSS}${SCHEDULE_CSS}${SIMULATION_CSS}</style>
 <div class="page">
 <header><div class="head">
   <div class="titlebar">
@@ -52,10 +54,7 @@ export const TEMPLATE = (device) => `
         <button type="button" class="resume" data-testid="resume" hidden>Resume schedule →</button>
       </div>
     </section>
-    <section class="card placeholder desk" data-views="SIMULATION" aria-label="Simulation">
-      <div class="between"><span class="label">SIMULATION</span><span class="label">BENCH ONLY</span></div>
-      <span class="small">The simulation controls come next.</span>
-    </section>
+${SIMULATION_HTML}
   </div>
   <section class="card runtime" data-testid="runtime" data-views="HOME SIMULATION" aria-label="Runtime">
     <div class="between" style="flex-wrap: wrap">
@@ -87,7 +86,7 @@ export const TEMPLATE = (device) => `
       <div class="kv"><span>home assistant</span><span id="st-ha">${DASH}</span></div>
     </section>
   </div>
-  <section class="card" data-views="SCHEDULE" aria-label="Schedule"><span class="label">SCHEDULE</span><span class="small">The schedule editor comes next.</span></section>
+${SCHEDULE_HTML}
   <section class="card" data-views="SYSTEM" aria-label="System"><span class="label">SYSTEM</span><span class="small">Safety, alerts, wall screen and the device come next.</span></section>
 </div>
 </div>`;

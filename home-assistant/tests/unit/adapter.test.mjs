@@ -163,6 +163,23 @@ test('set_target_writes_entity_unit', async () => {
   assert.equal(calls[1].data.value, 70);
 });
 
+test('set_number_f_and_range_f_follow_entity_unit', async () => {
+  const { hass, calls } = makeHass({ states: {
+    'number.main_thermostat_set_target': st('22', { unit_of_measurement: '°C', min: 10, max: 32.2, step: 1 }),
+  } });
+  const a = new Adapter(hass, { deviceName: 'Main Thermostat' });
+  await a.resolve();
+  await a.setNumberF('set_target', 77);
+  assert.ok(Math.abs(calls[0].data.value - 25) < 1e-9);
+  assert.deepEqual(a.rangeF('set_target'), { min: 50, max: 90, step: 1 });
+  hass.states['number.main_thermostat_set_target'] = st('35', { unit_of_measurement: '°F', min: -10, max: 110, step: 0.5 });
+  await a.setNumberF('set_target', 40);
+  assert.equal(calls[1].data.value, 40);
+  assert.deepEqual(a.rangeF('set_target'), { min: -10, max: 110, step: 0.5 });
+  hass.states['number.main_thermostat_set_target'] = st('unavailable', { min: 1, max: 2 });
+  assert.equal(a.rangeF('set_target'), null);
+});
+
 test('call passes entity_id plus data', async () => {
   const { hass, calls } = makeHass();
   const a = new Adapter(hass, { deviceName: 'Main Thermostat' });

@@ -36,7 +36,6 @@ export const DASHBOARD_CSS = `
   .pair > .group:last-child { flex: 1 1 160px; }
   .foot { border-top: 1px solid var(--cn-hairline); padding-top: 16px; display: flex; flex-direction: column; gap: 12px; }
   .resume { min-height: 44px; background: var(--cn-ember); color: var(--cn-text); border: none; border-radius: 2px; font-size: 14px; font-weight: 700; cursor: pointer; }
-  .placeholder { flex: 1 1 340px; }
   .chart { display: block; width: 100%; height: 56px; }
   .barrow { display: flex; align-items: center; gap: 12px; }
   .barrow > span { flex: 0 0 64px; font-size: 12px; color: var(--cn-text-2); }
