@@ -35,6 +35,8 @@ ALIVE_CHECK_S = 0.2  # how often a wait checks that the program is still running
 SET_WAIT_S = 2  # how long set_number/select/switch wait to see the new state
 # Mon 7:00: the weekday Wake period (Comfort), until 8:30 am. As (dow 0=Mon..6=Sun, minute).
 PINNED_CLOCK = (0, 7 * 60)
+# The relay behind each call sensor, as named in the test-only edge sensors (test_w_on_ms, ...).
+RELAY_EDGES = {"call_heat": "w", "call_cool": "y", "call_fan": "g"}
 
 
 def f_to_c(f):
@@ -280,6 +282,31 @@ class Dev:
             if not await self._wait_change(deadline):
                 raise AssertionError(f"{object_id}: condition not met within {timeout_s}s (last value {value!r})")
 
+    # --- device timestamps (test-only sensors in tests/main-thermostat-test.yaml) ---
+
+    def device_times(self, object_id):
+        """Every device timestamp (ms since boot) a test_*_ms sensor has published, in order."""
+        return [v for v in self.history(object_id) if v is not None]
+
+    async def wait_device_time(self, object_id, after_ms=-1.0, timeout_s=2):
+        """The first device timestamp (ms since boot) on a test_*_ms sensor later than after_ms,
+        waiting for it if needed."""
+        def found(_):
+            return any(t > after_ms for t in self.device_times(object_id))
+        await self.wait_for(object_id, found, timeout_s)
+        return next(t for t in self.device_times(object_id) if t > after_ms)
+
+    async def edge(self, call, on, after_ms=-1.0, timeout_s=2):
+        """The device time (ms since boot) of the first `call` relay edge (call_heat / call_cool /
+        call_fan turning on or off) later than after_ms, waiting for it if needed."""
+        relay = RELAY_EDGES[call]
+        return await self.wait_device_time(f"test_{relay}_{'on' if on else 'off'}_ms", after_ms,
+                                           timeout_s)
+
+    def edges(self, call, on):
+        """Every device time (ms since boot) the relay behind `call` turned on (or off)."""
+        return self.device_times(f"test_{RELAY_EDGES[call]}_{'on' if on else 'off'}_ms")
+
     async def next_value(self, object_id, timeout_s):
         """The next state that arrives for the entity after this call."""
         n = self.updates(object_id)
@@ -351,6 +378,20 @@ class Dev:
             target_temperature_high=target_temperature_high,
             custom_preset=custom_preset,
         )
+        await self._sync()
+
+    async def climate_and_number(self, object_id, value, **climate_kwargs):
+        """A climate call and a number command sent back to back, with nothing awaited in
+        between: they reach the device in one read, so its API handles both in the same loop
+        pass (as an HA script setting a mode and a timer would)."""
+        client = self._live_client()
+        client.climate_command(
+            self._climate.key,
+            mode=_enum(ClimateMode, climate_kwargs.pop("mode", None)),
+            fan_mode=_enum(ClimateFanMode, climate_kwargs.pop("fan_mode", None)),
+            **climate_kwargs,
+        )
+        client.number_command(self._info(object_id).key, float(value))
         await self._sync()
 
     async def action(self, name, **kwargs):

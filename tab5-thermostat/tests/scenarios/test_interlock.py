@@ -7,27 +7,33 @@ re-run its action.
 The test hook `test_force_relays` switches the relays directly, which is the only way to reach
 the both-on state: the logic's own actions always turn the opposite relay off first.
 Timers are the test build's: furnace minimum run / off 3 s, AC 5 s, so Clear waits 5 s from the
-trip. Time assertions keep EDGE_SLACK_S for the API's state batching.
+trip. The waits are measured on the device: the watchdog's own trip time (test_trip_ms) and the
+moment the latch dropped (test_latch_clear_ms), both ms since boot.
 """
 from aioesphomeapi import ClimateAction, ClimateMode
 
 from conftest import f_to_c
 
-from test_core import (COOL_OFF_S, EDGE_SLACK_S, HEAT_OFF_S, cool_to, fixed_weather,
-                       heat_to, is_off, is_on, now)
+from test_core import (COOL_OFF_S, HEAT_OFF_S, assert_near, cool_to, fixed_weather, heat_to,
+                       is_off, is_on, now)
 
 CLEAR_WAIT_S = max(HEAT_OFF_S, COOL_OFF_S)  # Clear holds the latch this long after the trip
 
 
 async def trip(dev):
-    """Both relays on, then wait for the watchdog to latch the fault. Returns the time just
-    before the relays were forced (the real trip is never earlier)."""
-    t0 = now()
+    """Both relays on, then wait for the watchdog to latch the fault. Returns the watchdog's trip
+    time on the device (ms since boot). Works for a re-trip while latched too."""
+    before = max(dev.device_times("test_trip_ms"), default=-1)
     await dev.action("test_force_relays", heat=True, cool=True)
     await dev.wait_for("interlock_fault", is_on, 1)
     await dev.wait_for("call_heat", is_off, 1)
     await dev.wait_for("call_cool", is_off, 1)
-    return t0
+    return await dev.wait_device_time("test_trip_ms", before, 1)
+
+
+async def latch_cleared(dev, trip_ms, timeout_s):
+    """Waits for the latch to drop after trip_ms; how long it held (ms, on the device)."""
+    return await dev.wait_device_time("test_latch_clear_ms", trip_ms, timeout_s) - trip_ms
 
 
 async def mode_of(dev):
@@ -93,7 +99,8 @@ async def test_clear_restores(device):
 
 
 async def test_clear_waits_out_min_off_since_trip(device):
-    t0 = await trip(device)
+    t0 = now()
+    trip_ms = await trip(device)
     await fixed_weather(device, 0)
     await heat_to(device, 73)
     await device.press("clear_interlock_fault")  # right after the trip
@@ -102,30 +109,30 @@ async def test_clear_waits_out_min_off_since_trip(device):
     # Nothing changes until the larger minimum off time (cool, 5 s) has passed since the trip.
     assert await device.state("interlock_fault") is True
     assert await device.state("call_heat") is False
-    await device.wait_for("interlock_fault", is_off, CLEAR_WAIT_S + 2 - (now() - t0))
-    held = now() - t0
-    assert held >= CLEAR_WAIT_S - EDGE_SLACK_S, f"latch cleared {held:.2f}s after the trip"
+    assert_near(await latch_cleared(device, trip_ms, CLEAR_WAIT_S + 2), CLEAR_WAIT_S,
+                "latch held after the trip")
     await device.wait_for("call_heat", is_on, 8)
     assert await mode_of(device) == ClimateMode.HEAT
 
 
 async def test_clear_during_wait_is_harmless_when_pressed_twice(device):
-    t0 = await trip(device)
+    trip_ms = await trip(device)
     await device.press("clear_interlock_fault")
     await device.press("clear_interlock_fault")
-    await device.wait_for("interlock_fault", is_off, CLEAR_WAIT_S + 2)
-    assert now() - t0 >= CLEAR_WAIT_S - EDGE_SLACK_S
+    assert_near(await latch_cleared(device, trip_ms, CLEAR_WAIT_S + 2), CLEAR_WAIT_S,
+                "latch held after the trip")
 
 
 async def test_retrip_during_wait_restarts_wait(device):
-    t0 = await trip(device)
+    first = await trip(device)
     await device.press("clear_interlock_fault")
     await device.sleep(2)
-    t1 = now()
-    await device.action("test_force_relays", heat=True, cool=True)  # trips again, still waiting
-    await device.wait_for("call_heat", is_off, 1)
-    await device.wait_for("interlock_fault", is_off, CLEAR_WAIT_S + 3)
-    assert now() - t1 >= CLEAR_WAIT_S - EDGE_SLACK_S, "wait was not restarted by the second trip"
+    second = await trip(device)  # trips again, still waiting
+    assert second - first >= 2000
+    # The wait was restarted by the second trip.
+    assert_near(await latch_cleared(device, second, CLEAR_WAIT_S + 3), CLEAR_WAIT_S,
+                "latch held after the second trip")
+    assert len(device.device_times("test_latch_clear_ms")) == 1, "the latch dropped in between"
 
 
 async def test_mode_change_during_wait_off_is_honoured(device):

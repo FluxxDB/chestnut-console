@@ -9,8 +9,8 @@ from zoneinfo import ZoneInfo
 
 from aioesphomeapi import ClimateFanMode, ClimateMode
 
-from test_core import fixed_weather, is_on, now
-from test_schedule import clock, effective, heat_at_68, level, set_target
+from test_core import assert_near, fixed_weather, is_on, now
+from test_schedule import clock, effective, expected_at, heat_at_68, level, set_target
 
 
 async def test_settings_survive_restart(device_keep_prefs):
@@ -43,10 +43,9 @@ async def test_settings_survive_restart(device_keep_prefs):
     # cooling at once, in a hot outdoor: the call may come only once the delay is over.
     await fixed_weather(dev, 100)
     await dev.set_number("set_target", 55)
-    await dev.sleep(max(0, boot + 7.5 - now()))
-    assert True not in dev.history("call_cool"), "cool call started inside the startup delay"
-    assert True not in dev.history("call_heat")
     await dev.wait_for("call_cool", is_on, max(0.5, boot + 8 + 3 - now()))
+    assert_near(await dev.edge("call_cool", True), 8, "call_cool after boot with an 8 s minimum off")
+    assert True not in dev.history("call_heat")
 
 
 async def test_hold_does_not_survive_restart(device_keep_prefs):
@@ -61,8 +60,11 @@ async def test_hold_does_not_survive_restart(device_keep_prefs):
     dow, minute = now_ny.weekday(), now_ny.hour * 60 + now_ny.minute
     await heat_at_68(dev)  # Heat, the schedule on
     await clock(dev, dow, minute)
-    period_level = await dev.wait_for("comfort_level", lambda v: v is not None, 2)
-    period_target = await dev.wait_for("effective_target", lambda v: v is not None, 2)
+    # The period's level and Heat target (Comfort 72, Eco 68), once the evaluation has arrived
+    # (reading them at once could still see the pinned clock's Comfort).
+    eco = expected_at(dow, minute)[1]
+    period_level = await level(dev, "Eco" if eco else "Comfort")
+    period_target = await effective(dev, 68 if eco else 72)
     other = "Eco" if period_level == "Comfort" else "Comfort"
     await dev.select("comfort_level", other)  # a level hold ...
     await dev.wait_for("schedule_hold", is_on, 2)

@@ -7,13 +7,13 @@ stale 2 s, frozen 30 s, recovery after 5 s of good readings (2-40 Â°C, spike 2 Â
 The sim publishes every 250 ms, so a fault cleared by readings lands about 5.25 s after the
 first good one. On a fault the thermostat asks for OFF: no new call starts, a running call
 still finishes its minimum run (Dang's Q3), and on recovery the minimum off times still apply.
-Timers: furnace minimum run / off 3 s, AC 5 s. Time assertions keep EDGE_SLACK_S for the API's
-state batching.
+Timers: furnace minimum run / off 3 s, AC 5 s. Durations are measured on the device (relay
+edge timestamps, conftest's Dev.edge).
 """
 import math
 
-from test_core import (COOL_OFF_S, COOL_RUN_S, EDGE_SLACK_S, HEAT_OFF_S, HEAT_RUN_S, cool_to,
-                       fixed_weather, heat_to, is_off, is_on, now)
+from test_core import (COOL_OFF_S, COOL_RUN_S, HEAT_OFF_S, HEAT_RUN_S, TOL_MS, assert_near,
+                       cool_to, fixed_weather, heat_to, is_off, is_on, now, run_ms)
 
 RECOVER_S = 5  # 5 "minutes" of good readings
 FROZEN_S = 30  # 30 "minutes" of an identical value
@@ -50,13 +50,11 @@ async def test_fault_mid_run_finishes_min_run(device):
     await fixed_weather(device, 0)
     await heat_to(device, 80)
     await device.wait_for("call_heat", is_on, HEAT_OFF_S + 5)
-    started = now()
     await device.select("sim_fault", "Out of range")
     await device.wait_for("sensor_fault", is_on, 1)
-    await device.wait_for("call_heat", is_off, HEAT_RUN_S + 2)
-    ran = now() - started
-    assert ran >= HEAT_RUN_S - EDGE_SLACK_S, f"furnace cut after {ran:.2f}s, before its minimum run"
-    assert ran <= HEAT_RUN_S + 2, f"furnace ran {ran:.2f}s on a faulted sensor"
+    # Neither cut early nor kept running on the faulted sensor: off when the minimum run ends.
+    on, off = await run_ms(device, "call_heat", HEAT_RUN_S + 2)
+    assert_near(off - on, HEAT_RUN_S, "furnace run under a sensor fault")
     n = device.updates("call_heat")
     await device.sleep(HEAT_OFF_S + 1)  # past its minimum off: still no call while faulted
     assert True not in device.history("call_heat")[n:]
@@ -107,8 +105,8 @@ async def test_recovery_after_5_units(device):
 
 
 async def cooling_stopped_by_fault(dev):
-    """Cooling past its minimum run, then an Out of range fault stops it. Returns the time
-    call_cool was seen off (t0), right after which the sensor is healthy again."""
+    """Cooling past its minimum run, then an Out of range fault stops it. Returns the device time
+    (ms since boot) Y went off; right after it is seen off, the sensor is healthy again."""
     await fixed_weather(dev, 100)
     await cool_to(dev, 60)
     await dev.wait_for("call_cool", is_on, COOL_OFF_S + 5)
@@ -116,16 +114,16 @@ async def cooling_stopped_by_fault(dev):
     await dev.select("sim_fault", "Out of range")
     await dev.wait_for("sensor_fault", is_on, 1)
     await dev.wait_for("call_cool", is_off, 1.5)
-    t0 = now()
     await dev.select("sim_fault", "None")
-    return t0
+    return (await run_ms(dev, "call_cool", 2))[1]
 
 
 async def test_recovery_respects_cool_min_off(device):
-    t0 = await cooling_stopped_by_fault(device)
-    await device.wait_for("call_cool", is_on, 10)
-    off_for = now() - t0
-    assert off_for >= COOL_OFF_S - EDGE_SLACK_S, f"AC restarted after only {off_for:.2f}s off"
+    off = await cooling_stopped_by_fault(device)
+    on = await device.edge("call_cool", True, off, 10)
+    # The recovery (5 s of good readings) and the AC's 5 s minimum off end close together: at
+    # least the minimum off, whichever is later.
+    assert on - off >= COOL_OFF_S * 1000 - TOL_MS, f"AC restarted after only {(on - off) / 1000:.2f}s off"
     assert await device.state("sensor_fault") is False
 
 
@@ -180,14 +178,14 @@ async def test_out_of_range_reading_never_starts_cooling(device):
 
 async def test_recovery_waits_out_longer_cool_min_off(device):
     assert await device.set_number("cool_min_off", 9) == 9
-    t0 = await cooling_stopped_by_fault(device)
+    off = await cooling_stopped_by_fault(device)
+    t0 = now()
     await device.wait_for("sensor_fault", is_off, RECOVER_S + 2)
     recovered = now() - t0
     assert recovered < 9 - 1, f"recovery at {recovered:.2f}s doesn't separate the two waits"
     assert await device.state("call_cool") is False
-    await device.wait_for("call_cool", is_on, t0 + 9 + 3 - now())
-    off_for = now() - t0
-    assert off_for >= 9 - EDGE_SLACK_S, f"AC restarted after {off_for:.2f}s with a 9 s minimum off"
+    on = await device.edge("call_cool", True, off, 9 + 3)
+    assert_near(on - off, 9, "AC off time with a 9 s minimum off")
 
 
 async def test_wait_reason_short_cycle_and_interlock(device):
@@ -213,5 +211,5 @@ async def test_wait_reason_starting_up_lasts_the_longer_min_off(device):
     await device.sleep(boot + HEAT_OFF_S + 1 - now())  # past the furnace's 3 s
     assert await device.state("call_wait_reason") == "Starting up"
     await device.wait_for("call_cool", is_on, boot + STARTUP_S + 3 - now())
-    assert now() - boot >= STARTUP_S - EDGE_SLACK_S
+    assert_near(await device.edge("call_cool", True), STARTUP_S, "call_cool after boot")
     await device.wait_for("call_wait_reason", lambda v: v == "", 1.5)

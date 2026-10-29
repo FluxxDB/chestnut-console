@@ -17,11 +17,12 @@ changeover lockout 30 "minutes" = 30 s.
 from aioesphomeapi import ClimateAction, ClimateMode
 
 from conftest import f_to_c
-from test_core import (COOL_OFF_S, COOL_RUN_S, EDGE_SLACK_S, HEAT_OFF_S, HEAT_RUN_S, cool_to,
-                       fixed_weather, heat_to, is_off, is_on, now)
+from test_core import (COOL_OFF_S, COOL_RUN_S, HEAT_OFF_S, HEAT_RUN_S, assert_near, cool_to,
+                       fixed_weather, heat_to, is_off, is_on, now, run_ms)
 from test_schedule import expected_now
 
 LOCKOUT_S = 30  # changeover_lockout default, 30 x timer_unit_s
+LOCKOUT_LATE_MS = 1150  # the lockout's end is seen by a 1 s interval tick
 DEADBAND_F = 0.9  # 0.5 °C
 C_TOL = 0.1  # °C, for climate setpoints read back over the API
 
@@ -376,12 +377,10 @@ async def auto_heat_then_cool_wanted(dev):
 
 async def test_auto_changeover_lockout(device):
     await auto_heat_then_cool_wanted(device)
-    heat_off = now()
+    heat_off = (await run_ms(device, "call_heat", 2))[1]
     await device.wait_for("call_wait_reason", lambda v: v == "Changeover wait", 3)
-    await device.wait_for("call_cool", is_on, LOCKOUT_S + 5)
-    waited = now() - heat_off
-    assert waited >= LOCKOUT_S - EDGE_SLACK_S, f"AC started {waited:.2f}s after heat ended"
-    assert waited <= LOCKOUT_S + 3, f"AC started {waited:.2f}s after heat ended: late"
+    cool_on = await device.edge("call_cool", True, heat_off, LOCKOUT_S + 5)
+    assert_near(cool_on - heat_off, LOCKOUT_S, "AC start after heat ended", late_ms=LOCKOUT_LATE_MS)
     # The reported action matches the relays: never COOLING while Y was off, over the whole wait.
     assert actions_before(device, "call_cool", ClimateAction.COOLING) == []
     st = await device.wait_for("main_thermostat", lambda v: v.action == ClimateAction.COOLING, 1)
@@ -398,11 +397,11 @@ async def test_auto_changeover_lockout_after_cooling(device):
     await device.wait_for("call_cool", is_on, COOL_OFF_S + 3)
     assert await device.set_number("set_target", 75) == 75  # band 74-76: now it's cold
     await device.wait_for("call_cool", is_off, 5 + 3)
-    cool_off = now()
+    cool_off = (await run_ms(device, "call_cool", 2))[1]
     await device.wait_for("call_wait_reason", lambda v: v == "Changeover wait", 3)
-    await device.wait_for("call_heat", is_on, LOCKOUT_S + 5)
-    waited = now() - cool_off
-    assert LOCKOUT_S - EDGE_SLACK_S <= waited <= LOCKOUT_S + 3, f"heat after {waited:.2f}s"
+    heat_on = await device.edge("call_heat", True, cool_off, LOCKOUT_S + 5)
+    assert_near(heat_on - cool_off, LOCKOUT_S, "heat start after cooling ended",
+                late_ms=LOCKOUT_LATE_MS)
     assert actions_before(device, "call_heat", ClimateAction.HEATING) == []
 
 
@@ -410,19 +409,21 @@ async def test_leaving_auto_ends_the_changeover_wait(device):
     await auto_heat_then_cool_wanted(device)
     await device.wait_for("call_wait_reason", lambda v: v == "Changeover wait", 3)
     await device.sleep(2)
-    switched = now()
     await device.climate(mode="COOL")  # manual: no lockout, only the AC's own timers
-    await device.wait_for("call_cool", is_on, COOL_OFF_S + 3)
-    assert now() - switched < COOL_OFF_S + 2
+    heat_off = (await run_ms(device, "call_heat", 2))[1]
+    cool_on = await device.edge("call_cool", True, heat_off, COOL_OFF_S + 3)
+    # The AC's 5 s minimum off had run out (2 s of waiting + the switch): it starts at once.
+    assert cool_on - heat_off < (COOL_OFF_S + 2) * 1000, f"AC started {(cool_on - heat_off) / 1000:.2f}s after heat"
 
 
 async def test_manual_heat_to_cool_no_lockout(device):
     await auto_heat_then_cool_wanted(device)
-    heat_off = now()
+    heat_off = (await run_ms(device, "call_heat", 2))[1]
     await device.climate(mode="COOL")  # the room is above the 72 target
-    await device.wait_for("call_cool", is_on, COOL_OFF_S + 3)
-    waited = now() - heat_off
-    assert waited < COOL_OFF_S + 2, f"AC waited {waited:.2f}s after a manual switch"
+    cool_on = await device.edge("call_cool", True, heat_off, COOL_OFF_S + 3)
+    # Only the AC's own minimum off (5 s, started at boot) can hold it, never the 30 s lockout.
+    waited = (cool_on - heat_off) / 1000
+    assert waited < COOL_OFF_S + 1, f"AC waited {waited:.2f}s after a manual switch"
     await device.wait_for("call_wait_reason", lambda v: v == "", 1.5)  # a 1 s tick
 
 
@@ -438,9 +439,8 @@ async def test_mode_change_mid_run_finishes(device):
     assert now() - started < HEAT_RUN_S - 1, "switched too late to see the run finish"
     assert st.action == ClimateAction.HEATING
     assert await device.state("call_heat") is True
-    await device.wait_for("call_heat", is_off, HEAT_RUN_S + 2)
-    ran = now() - started
-    assert ran >= HEAT_RUN_S - EDGE_SLACK_S, f"furnace cut after {ran:.2f}s"
+    on, off = await run_ms(device, "call_heat", HEAT_RUN_S + 2)
+    assert_near(off - on, HEAT_RUN_S, "furnace run across a mode change")
     st = await device.wait_for("main_thermostat", lambda v: v.action == ClimateAction.IDLE, 1)
     assert st.mode == ClimateMode.COOL
     assert True not in device.history("call_cool")  # cool to 80 in a cold room: nothing to do
@@ -459,11 +459,9 @@ async def test_heat_min_run_holds_with_dispatch_latency(device):
     assert True not in device.history("call_heat")
     await fixed_weather(device, 0)  # the next readings fall below 67.1: heat starts on one
     await device.wait_for("call_heat", is_on, 10)
-    started = now()
     await heat_to(device, 50)
-    await device.wait_for("call_heat", is_off, HEAT_RUN_S + 3)
-    ran = now() - started
-    assert ran >= HEAT_RUN_S - EDGE_SLACK_S, f"furnace ran only {ran:.2f}s"
+    on, off = await run_ms(device, "call_heat", HEAT_RUN_S + 3)
+    assert_near(off - on, HEAT_RUN_S, "furnace run")
 
 
 async def test_cool_min_run_holds_with_dispatch_latency(device):
@@ -474,8 +472,6 @@ async def test_cool_min_run_holds_with_dispatch_latency(device):
     assert True not in device.history("call_cool")
     await fixed_weather(device, 100)
     await device.wait_for("call_cool", is_on, 10)
-    started = now()
     await cool_to(device, 85)
-    await device.wait_for("call_cool", is_off, COOL_RUN_S + 3)
-    ran = now() - started
-    assert ran >= COOL_RUN_S - EDGE_SLACK_S, f"AC ran only {ran:.2f}s"
+    on, off = await run_ms(device, "call_cool", COOL_RUN_S + 3)
+    assert_near(off - on, COOL_RUN_S, "AC run")

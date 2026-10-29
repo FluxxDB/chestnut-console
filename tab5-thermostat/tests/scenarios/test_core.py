@@ -17,13 +17,26 @@ HEAT_RUN_S = 3
 HEAT_OFF_S = 3
 COOL_RUN_S = 5
 COOL_OFF_S = 5
-# How much shorter than the device's own timer a measured gap may look. Both edges are seen
-# over the API, which batches states (batch_delay 100 ms, counted from the first item queued
-# in a batch; the sim's 250 ms publishes often leave a batch already open), so each edge
-# arrives 0 to ~120 ms late. A late start edge plus an early end edge can shave up to that
-# much off a gap. Without the timer the gap would be ~0-1 s against 3-5 s thresholds, so
-# 0.3 s still catches a broken timer.
-EDGE_SLACK_S = 0.3
+# Durations are measured on the device: the test entry publishes each relay edge's device time
+# (ms since boot; conftest's Dev.edge), so API batching doesn't blur them. A timer-bound edge
+# lands within one loop pass of the timer's end, so +-150 ms is plenty around the configured
+# value, and still far from the ~0-1 s a broken timer would give against 3-5 s.
+TOL_MS = 150
+
+
+def assert_near(ms, expected_s, what, tol_ms=TOL_MS, late_ms=None):
+    """ms (a device-measured duration) is expected_s seconds, within -tol_ms / +late_ms
+    (late_ms defaults to tol_ms)."""
+    lo, hi = expected_s * 1000 - tol_ms, expected_s * 1000 + (tol_ms if late_ms is None else late_ms)
+    assert lo <= ms <= hi, f"{what}: {ms / 1000:.3f}s, expected {expected_s}s (-{tol_ms} / +{hi - expected_s * 1000:.0f} ms)"
+
+
+async def run_ms(dev, call, timeout_s):
+    """Waits for the call's relay to go off; returns (on, off), the device times (ms since boot)
+    of the last on edge before that off edge and of the off edge."""
+    on = dev.edges(call, True)[-1] if dev.edges(call, True) else await dev.edge(call, True)
+    off = await dev.edge(call, False, on, timeout_s)
+    return on, off
 
 
 def now():
@@ -76,8 +89,8 @@ async def test_boot_no_calls_during_startup_delay(device):
     assert sent < HEAT_OFF_S - 0.5, f"Heat sent {sent:.2f}s after launch: too late to see the delay"
     await fixed_weather(device, 0)
     await device.wait_for("call_heat", is_on, boot + HEAT_OFF_S + 3 - now())
-    on_after = now() - boot
-    assert on_after >= 2.5, f"call_heat came on {on_after:.2f}s after launch"
+    # Wanted from the start: W comes on when the boot-time minimum off ends.
+    assert_near(await device.edge("call_heat", True), HEAT_OFF_S, "call_heat after boot")
     # All relays start off; nothing but W came on.
     for oid in ("call_heat", "call_cool", "call_fan"):
         assert device.history(oid)[0] is False, (oid, device.history(oid))
@@ -151,11 +164,9 @@ async def test_min_run_holds_call(device):
     await fixed_weather(device, 0)
     await heat_to(device, 80)
     await device.wait_for("call_heat", is_on, HEAT_OFF_S + 5)
-    started = now()
     await heat_to(device, 50)  # far below the room: heating is no longer wanted
-    await device.wait_for("call_heat", is_off, HEAT_RUN_S + 3)
-    ran = now() - started
-    assert ran >= HEAT_RUN_S - EDGE_SLACK_S, f"furnace ran only {ran:.2f}s"
+    on, off = await run_ms(device, "call_heat", HEAT_RUN_S + 3)
+    assert_near(off - on, HEAT_RUN_S, "furnace run")
 
 
 async def test_min_off_blocks_restart(device):
@@ -163,12 +174,10 @@ async def test_min_off_blocks_restart(device):
     await cool_to(device, 60)
     await device.wait_for("call_cool", is_on, COOL_OFF_S + 5)
     await cool_to(device, 85)  # satisfied: the AC stops when its minimum run ends
-    await device.wait_for("call_cool", is_off, COOL_RUN_S + 3)
-    stopped = now()
+    _, stopped = await run_ms(device, "call_cool", COOL_RUN_S + 3)
     await cool_to(device, 60)  # wanted again at once
-    await device.wait_for("call_cool", is_on, COOL_OFF_S + 4)
-    off_for = now() - stopped
-    assert off_for >= COOL_OFF_S - EDGE_SLACK_S, f"AC restarted after only {off_for:.2f}s off"
+    restarted = await device.edge("call_cool", True, stopped, COOL_OFF_S + 4)
+    assert_near(restarted - stopped, COOL_OFF_S, "AC off time")
 
 
 async def test_timer_number_clamps(device):
@@ -186,13 +195,11 @@ async def test_timer_number_extends_running_min_run(device):
     await fixed_weather(device, 0)
     await heat_to(device, 80)
     await device.wait_for("call_heat", is_on, HEAT_OFF_S + 5)
-    started = now()
     # ESPHome stretches a running timer when its duration changes.
     assert await device.set_number("heat_min_run", 6) == 6
     await heat_to(device, 50)
-    await device.wait_for("call_heat", is_off, 6 + 3)
-    ran = now() - started
-    assert ran >= 6 - EDGE_SLACK_S, f"furnace ran only {ran:.2f}s with a 6 s minimum run"
+    on, off = await run_ms(device, "call_heat", 6 + 3)
+    assert_near(off - on, 6, "furnace run with a 6 s minimum run")
 
 
 async def test_startup_delay_uses_restored_timer(device_keep_prefs):
@@ -204,8 +211,7 @@ async def test_startup_delay_uses_restored_timer(device_keep_prefs):
     await heat_to(dev, 80)
     await fixed_weather(dev, 0)
     await dev.wait_for("call_heat", is_on, boot + 8 + 3 - now())
-    on_after = now() - boot
-    assert on_after >= 7.5, f"call_heat came on {on_after:.2f}s after launch with an 8 s minimum off"
+    assert_near(await dev.edge("call_heat", True), 8, "call_heat after boot with an 8 s minimum off")
 
 
 async def test_fan_on_with_heat_and_idle(device):
@@ -238,3 +244,4 @@ async def test_fan_auto_keeps_g_while_cooling(device):
     await device.wait_for("call_cool", is_off, COOL_RUN_S + 3)
     await device.wait_for("call_fan", is_off, 1)
     assert never_on(device, "call_heat")
+

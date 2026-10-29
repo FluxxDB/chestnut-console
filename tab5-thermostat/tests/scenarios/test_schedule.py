@@ -58,8 +58,11 @@ async def heat_at_68(dev):
 def expected_now(weekday=WEEKDAY, weekend=WEEKEND):
     """(period name, eco) the schedule gives for the real clock now, in New York."""
     now = datetime.datetime.now(ZoneInfo("America/New_York"))
-    dow, minute = now.weekday(), now.hour * 60 + now.minute
+    return expected_at(now.weekday(), now.hour * 60 + now.minute, weekday, weekend)
 
+
+def expected_at(dow, minute, weekday=WEEKDAY, weekend=WEEKEND):
+    """(period name, eco) the schedule gives at this day (0=Mon..6=Sun) and minute of day."""
     def day(d):
         return weekend if d >= 5 else weekday
 

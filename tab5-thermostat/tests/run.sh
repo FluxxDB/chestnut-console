@@ -4,6 +4,7 @@
 #   tests/run.sh unit                  C++ unit tests (tests/unit/*.cpp)
 #   tests/run.sh build                 compile the scenario-test host build only
 #   tests/run.sh scenarios [-k expr]   compile it once, then run tests/scenarios with pytest
+#                                      (or only the test paths given, e.g. tests/scenarios/test_core.py)
 #   tests/run.sh all                   unit, then scenarios
 set -euo pipefail
 
@@ -79,9 +80,12 @@ run_scenarios() {
   run_in_container "$build_test_entry"'
     set -euo pipefail
     build
+    # The whole suite, unless test paths were given (e.g. tests/scenarios/test_core.py::test_x).
+    paths=tests/scenarios
+    for a in "$@"; do case "$a" in tests/*) paths= ;; esac; done
     PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider -o asyncio_mode=auto -o asyncio_default_fixture_loop_scope=function \
       -W "ignore::DeprecationWarning:pytest_asyncio.plugin" \
-      tests/scenarios "$@"
+      $paths "$@"
   ' "$@"
 }
 

@@ -41,9 +41,9 @@ api:
         - lambda: |-
             if (heat) id(relay_heat).turn_on(); else id(relay_heat).turn_off();
             if (cool) id(relay_cool).turn_on(); else id(relay_cool).turn_off();
-    # Test-only: hold every room_temperature reading for `ms` before the logic sees it, so the
-    # thermostat's decisions run well after their dispatch began (as a slow ESP32 dispatch
-    # would). 0 = off.
+    # Test-only: hold every room_temperature reading and every outside climate call for `ms`
+    # before the logic sees it, so the thermostat's decisions (and the timers they start) run
+    # well after their dispatch began, as a slow ESP32 dispatch would. 0 = off.
     - action: test_set_latency
       variables:
         ms: int
@@ -70,6 +70,96 @@ sensor:
   - id: !extend room_temperature
     on_value:
       - lambda: if (id(g_test_latency_ms) > 0) delay(id(g_test_latency_ms));
+  # Test-only device timestamps, so duration tests measure on the device instead of from API
+  # arrival times (the API batches states for up to ~100 ms). Each is ms since boot (since
+  # g_boot_ms, set in the logic's first on_boot step; millis() isn't uptime on the host),
+  # published at the moment of the event. One sensor per edge kind, so two different edges
+  # never share a batch slot (the API sends only an entity's latest state per batch).
+  - platform: template
+    id: test_w_on_ms
+    name: "Test W On Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: test_w_off_ms
+    name: "Test W Off Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: test_y_on_ms
+    name: "Test Y On Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: test_y_off_ms
+    name: "Test Y Off Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: test_g_on_ms
+    name: "Test G On Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: test_g_off_ms
+    name: "Test G Off Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  # The interlock watchdog's own trip time (g_interlock_trip_ms, so a re-trip shows too) and
+  # the moment the latch dropped (interlock_fault going off, polled every loop).
+  - platform: template
+    id: test_trip_ms
+    name: "Test Trip Ms"
+    accuracy_decimals: 0
+    update_interval: never
+  - platform: template
+    id: test_latch_clear_ms
+    name: "Test Latch Clear Ms"
+    accuracy_decimals: 0
+    update_interval: never
+
+# The climate-call half of test_set_latency (on_control runs before the thermostat applies a
+# call, so the timers that call starts begin `ms` after the dispatch did).
+climate:
+  - id: !extend main_thermostat
+    on_control:
+      - lambda: if (id(g_test_latency_ms) > 0) delay(id(g_test_latency_ms));
+
+# Relay edges (the switches' own triggers fire as the relay changes). Ignored before the logic's
+# first on_boot step (the boot-time OFF publish).
+switch:
+  - id: !extend relay_heat
+    on_turn_on:
+      - lambda: if (id(g_sanity) != nullptr) id(test_w_on_ms).publish_state(millis() - id(g_boot_ms));
+    on_turn_off:
+      - lambda: if (id(g_sanity) != nullptr) id(test_w_off_ms).publish_state(millis() - id(g_boot_ms));
+  - id: !extend relay_cool
+    on_turn_on:
+      - lambda: if (id(g_sanity) != nullptr) id(test_y_on_ms).publish_state(millis() - id(g_boot_ms));
+    on_turn_off:
+      - lambda: if (id(g_sanity) != nullptr) id(test_y_off_ms).publish_state(millis() - id(g_boot_ms));
+  - id: !extend relay_fan
+    on_turn_on:
+      - lambda: if (id(g_sanity) != nullptr) id(test_g_on_ms).publish_state(millis() - id(g_boot_ms));
+    on_turn_off:
+      - lambda: if (id(g_sanity) != nullptr) id(test_g_off_ms).publish_state(millis() - id(g_boot_ms));
+
+binary_sensor:
+  - id: !extend interlock_fault
+    on_release:
+      - lambda: id(test_latch_clear_ms).publish_state(millis() - id(g_boot_ms));
+
+interval:
+  # The watchdog records its trip time in g_interlock_trip_ms; publish each new value.
+  - interval: 20ms
+    then:
+      - lambda: |-
+          static uint32_t seen = 0;
+          const uint32_t t = id(g_interlock_trip_ms);
+          if (t != 0 && t != seen) {
+            seen = t;
+            id(test_trip_ms).publish_state(t - id(g_boot_ms));
+          }
 
 time:
   - platform: host
