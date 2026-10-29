@@ -68,6 +68,18 @@ inline Setpoints derive_setpoints(Mode mode, int comfort_f, int eco_offset_f, bo
   return s;
 }
 
+// HA's range slider in Auto: the new centre (°F) for a write of new_low_f / new_high_f (NaN when
+// not sent) against the current band low_f..high_f around centre_f. The centre moves by
+// whichever edge moved, in whole °F (a 0.5 °C slider step is 0.9°F, one degree); if both moved,
+// by the average of the two. The midpoint of the new edges would round a one-step drag back to
+// where it was, and ignore a drag of one edge of a wide (Eco) band.
+inline int auto_drag_target(int centre_f, int low_f, int high_f, float new_low_f, float new_high_f) {
+  const int d_lo = std::isnan(new_low_f) ? 0 : (int) std::lround(new_low_f - low_f);
+  const int d_hi = std::isnan(new_high_f) ? 0 : (int) std::lround(new_high_f - high_f);
+  const int d = d_lo == 0 ? d_hi : (d_hi == 0 ? d_lo : (int) std::lround((d_lo + d_hi) / 2.0));
+  return centre_f + d;
+}
+
 // A restored setting put back in its range [lo, hi]. NaN (no usable value) becomes hi: for the
 // safety timers the longest wait is the safe side.
 inline float clamp_setting(float v, float lo, float hi) {

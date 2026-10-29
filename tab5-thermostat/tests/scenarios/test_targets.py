@@ -336,15 +336,42 @@ async def test_ha_single_target_write_in_cool(device):
     await setpoints_f(device, 73, 75)
 
 
-async def test_ha_auto_range_write_uses_midpoint(device):
+async def test_ha_auto_range_write_moves_by_the_dragged_edge(device):
     await ready(device)
     await device.climate(mode="HEAT_COOL")
     await setpoints_f(device, 71, 73)
-    # HA's range slider: the high end dragged from 73 to 77 -> centre 74, band 73-75.
+    # HA's range slider: the high end dragged from 73 to 77 -> the centre moves by 4, to 76.
     await device.climate(target_temperature_low=f_to_c(71), target_temperature_high=f_to_c(77))
-    await device.wait_for("set_target", lambda v: v == 74, 2)
-    await effective(device, 74, 73, 75)
-    await setpoints_f(device, 73, 75)
+    await device.wait_for("set_target", lambda v: v == 76, 2)
+    await effective(device, 76, 75, 77)
+    await setpoints_f(device, 75, 77)
+
+
+async def test_ha_auto_range_one_step_drag_sticks(device):
+    # One 0.5 °C step of the slider (0.9°F) moves the centre one degree; the midpoint (72.45)
+    # used to round straight back to 72.
+    await ready(device)
+    await device.climate(mode="HEAT_COOL")
+    await setpoints_f(device, 71, 73)
+    await device.climate(target_temperature_low=f_to_c(71), target_temperature_high=f_to_c(73) + 0.5)
+    await device.wait_for("set_target", lambda v: v == 73, 2)
+    await device.wait_for("schedule_hold", is_on, 2)
+    await effective(device, 73, 72, 74)
+    # And the low end down a step from there.
+    await device.climate(target_temperature_low=f_to_c(72) - 0.5, target_temperature_high=f_to_c(74))
+    await effective(device, 72, 71, 73)
+
+
+async def test_ha_auto_eco_low_edge_drag(device):
+    # Auto + Eco (band 67-77): the low end up a step moves the centre to 73, a temperature hold
+    # (the plain ±1 band, as any hold in Auto); the midpoint (72.45) used to change nothing.
+    await ready(device)
+    await device.climate(mode="HEAT_COOL")
+    await device.select("comfort_level", "Eco")
+    await effective(device, 72, 67, 77)
+    await device.climate(target_temperature_low=f_to_c(67) + 0.5, target_temperature_high=f_to_c(77))
+    await device.wait_for("set_target", lambda v: v == 73, 2)
+    await effective(device, 73, 72, 74)
 
 
 async def test_ha_mode_and_target_in_one_call(device):

@@ -348,9 +348,11 @@ climate:
     # through here before the thermostat applies it. The setpoints are always derived, so:
     # - presets (named or custom) are dropped (ruling R8): "Default" exists only because the
     #   thermostat needs a boot preset; Comfort / Eco is comfort_level, not a preset;
-    # - a call with a temperature (target, low or high) becomes set_target: a hold at that °F,
-    #   or nothing if it equals the effective target. Heat reads low (else target), Cool reads
-    #   high (else target), Auto the midpoint of low and high (else whichever is given);
+    # - a call with a temperature (target, low or high) becomes set_target: a hold at that °F
+    #   (the manual target with the schedule off), or nothing if it equals the effective target.
+    #   Heat reads low (else target), Cool reads high (else target). Auto with low and / or high
+    #   (HA's range slider) moves the centre by whichever edge moved against the derived band,
+    #   in whole °F (chestnut::auto_drag_target); Auto with only a target takes it as the centre;
     # - a call with a temperature or a mode gets its low / high replaced by the derived values
     #   for the mode it leaves the climate in. A mode change isn't a hold, and it ends a
     #   temperature hold (ruling R13; a level hold stays) before the call's own temperature is
@@ -378,18 +380,23 @@ climate:
           id(sync_changeover).execute();  // the lockout applies in Auto only
           id(apply_setpoints).execute();  // the derived setpoints (and effective target) for mode
           if (has_temp) {
-            float c = NAN;
-            if (mode == climate::CLIMATE_MODE_COOL)
-              c = hi.has_value() ? *hi : (tt.has_value() ? *tt : *lo);
-            else if (mode == climate::CLIMATE_MODE_HEAT_COOL)
-              c = (lo.has_value() && hi.has_value()) ? (*lo + *hi) / 2.0f
-                  : (lo.has_value() ? *lo : (hi.has_value() ? *hi : *tt));
-            else  // Heat, and Off (whose setpoints follow Heat's)
-              c = lo.has_value() ? *lo : (tt.has_value() ? *tt : *hi);
-            if (!std::isnan(c)) {
+            float f = NAN;  // the requested target, °F
+            if (mode == climate::CLIMATE_MODE_COOL) {
+              f = chestnut::c_to_f(hi.has_value() ? *hi : (tt.has_value() ? *tt : *lo));
+            } else if (mode == climate::CLIMATE_MODE_HEAT_COOL && (lo.has_value() || hi.has_value())) {
+              // Against the band apply_setpoints just derived for this mode (published above).
+              f = chestnut::auto_drag_target(
+                  id(g_effective_f), lroundf(id(effective_low).state), lroundf(id(effective_high).state),
+                  lo.has_value() ? chestnut::c_to_f(*lo) : NAN, hi.has_value() ? chestnut::c_to_f(*hi) : NAN);
+            } else if (mode == climate::CLIMATE_MODE_HEAT_COOL) {
+              f = chestnut::c_to_f(*tt);
+            } else {  // Heat, and Off (whose setpoints follow Heat's)
+              f = chestnut::c_to_f(lo.has_value() ? *lo : (tt.has_value() ? *tt : *hi));
+            }
+            if (!std::isnan(f)) {
               // Clamped to set_target's range, which would refuse a value outside it.
-              const int f = std::max(50, std::min(90, (int) lroundf(chestnut::c_to_f(c))));
-              id(set_target).make_call().set_value(f).perform();  // hold, then re-derives into x
+              const int whole = std::max(50, std::min(90, (int) lroundf(f)));
+              id(set_target).make_call().set_value(whole).perform();  // hold, then re-derives into x
             }
           }
           id(g_pending_call) = nullptr;

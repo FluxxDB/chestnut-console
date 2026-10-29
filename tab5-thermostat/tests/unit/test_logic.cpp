@@ -83,6 +83,25 @@ static void derive_output_clamps() {
   CHECK(s.high_f == 90 && s.low_f == 79 && s.high_f - s.low_f >= 2 && s.effective_f == 90);
 }
 
+// HA's Auto range slider: the centre moves by whichever edge moved, in whole °F.
+static void auto_drag_cases() {
+  // High edge dragged one 0.5 °C step (0.9°F) from 73: centre 72 -> 73 (the midpoint, 72.45,
+  // would round back to 72).
+  CHECK(auto_drag_target(72, 71, 73, 71.0f, 73.9f) == 73);
+  CHECK(auto_drag_target(72, 71, 73, 70.1f, 73.0f) == 71);  // low down a step
+  CHECK(auto_drag_target(72, 71, 73, 71.0f, 77.0f) == 76);  // high up 4
+  // Eco band 67-77 around 72: the low edge up a step moves the centre up 1.
+  CHECK(auto_drag_target(72, 67, 77, 67.9f, 77.0f) == 73);
+  // Only one edge sent.
+  CHECK(auto_drag_target(72, 71, 73, NAN, 74.8f) == 74);
+  CHECK(auto_drag_target(72, 71, 73, 69.2f, NAN) == 70);
+  // Nothing moved (HA re-sending the current band, or a sub-half-degree difference).
+  CHECK(auto_drag_target(72, 71, 73, 71.3f, 72.8f) == 72);
+  // Both moved the same way (the whole band dragged): by that amount; differently: the average.
+  CHECK(auto_drag_target(72, 71, 73, 73.0f, 75.0f) == 74);
+  CHECK(auto_drag_target(72, 71, 73, 72.0f, 76.0f) == 74);
+}
+
 static void clamp_setting_cases() {
   CHECK(clamp_setting(5, 2, 20) == 5);
   CHECK(clamp_setting(1, 2, 20) == 2);
@@ -628,6 +647,7 @@ int main() {
   derive_off_matches_heat();
   derive_output_clamps();
   clamp_setting_cases();
+  auto_drag_cases();
   conversions();
   schedule_basic();
   schedule_midnight_carryover();
