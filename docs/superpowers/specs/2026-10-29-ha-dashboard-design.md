@@ -1,6 +1,6 @@
 # Chestnut dashboard in Home Assistant (M2 addendum)
 
-*Design, 2026-10-29. Owner: pc-chestnut-console. Status: mockup approved by Dang. Builder check by mac-chestnut-console done (8 points, settled below). Document waiting for Dang's approval.*
+*Design, 2026-10-29. Owner: pc-chestnut-console. Status: mockup approved by Dang. Builder check by mac-chestnut-console done (8 points, settled below). Document approved by Dang 2026-10-29.*
 
 Marks: **Dang** = he decided it; **PC call** = my default, open to change.
 
