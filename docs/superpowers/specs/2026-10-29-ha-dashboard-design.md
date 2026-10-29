@@ -10,7 +10,7 @@ Dang wants one page on his phone and PC to watch and control the Main Thermostat
 
 ## Goals
 
-1. A custom **"Chestnut" dashboard** in Home Assistant, used as the default page, laid out like the approved mockup: Home, Schedule, Simulation and System tabs.
+1. A custom **"Chestnut" dashboard** that **replaces HA's Overview** (Dang: opening HA, app or browser, lands on it, with no stock dashboard left over), laid out like the approved mockup: Home, Schedule, Simulation and System tabs.
 2. A **room view** with a live 2D heat-flow animation, driven by the thermostat's real state. It's honest: the field's average always equals the measured room temperature.
 3. **Every control a user needs** that the Tab5's own page exposes (list below). Debug-only entities stay off the page.
 4. **HA itself in Axiom**: sidebar, settings pages, more-info pop-ups and dialogs.
@@ -40,7 +40,7 @@ Dang wants one page on his phone and PC to watch and control the Main Thermostat
 
 ### Frame
 
-The Chestnut dashboard is one HA dashboard with a single panel view, hosting one custom element that draws the whole page from the mockup: header, `~/chestnut/main-thermostat` prompt, title (no blinking cursor, **Dang**), schedule line, clock, connection state, and its own tab bar. **PC call:** one panel card, so the tabs, the phone hiding and the layout can match the mockup exactly; HA's native view tabs can't hide a tab by screen width. HA's own sidebar and app bar stay HA's, themed.
+The Chestnut dashboard **is HA's main (Overview) dashboard**, in YAML mode from the repo, with a single panel view hosting one custom element that draws the whole page from the mockup: header, `~/chestnut/main-thermostat` prompt, title (no blinking cursor, **Dang**), schedule line, clock, connection state, and its own tab bar. **PC call:** one panel card, so the tabs, the phone hiding and the layout can match the mockup exactly; HA's native view tabs can't hide a tab by screen width. HA's own sidebar and app bar stay HA's, themed.
 
 ### Responsive (Dang)
 
