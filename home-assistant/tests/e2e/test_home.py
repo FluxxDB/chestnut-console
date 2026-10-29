@@ -296,3 +296,81 @@ def test_status_paused_on_sensor_fault(page, ha, sim_fault):
     ha.call("select", "select_option", {"entity_id": sim_fault, "option": "Out of range"})
     expect(tid(page, "status-word")).to_have_text("PAUSED", timeout=10_000)
     expect(tid(page, "status-card")).to_contain_text("⚠", timeout=10_000)
+
+
+def heat_hold_start(ha, hi=84):
+    """Heat mode, schedule on with no hold; returns (set_target entity, its °F, rounded), kept <= hi."""
+    climate = ha.sim_climate()
+    ha.call("climate", "set_hvac_mode", {"entity_id": climate, "hvac_mode": "heat"})
+    set_schedule_on_no_hold(ha)
+    st = eid(ha, "number", "set_target")
+    start = target_f(ha, st)
+    if start > hi:
+        set_target_f(ha, st, 80)
+        wait_until(lambda: target_f(ha, st) == 80, 10, message="set_target 80")
+        start = 80
+    return st, start
+
+
+def test_second_burst_before_confirm_is_written(context, ha, request_log):
+    """+2 is written; -2 tapped before the device's effective_target confirms the 2 must be
+    written too (back to the start), not compared against the stale device value and dropped.
+    The page never hears effective_target change (filtered from HA's websocket), which holds
+    the window open as long as the test needs."""
+    st, start = heat_hold_start(ha)
+    eff_id = eid(ha, "sensor", "effective_target")
+
+    def strip(node):
+        if isinstance(node, list):
+            for n in node:
+                strip(n)
+        elif isinstance(node, dict):
+            ev = node.get("event")
+            if isinstance(ev, dict) and isinstance(ev.get("c"), dict):
+                ev["c"].pop(eff_id, None)
+
+    def route(ws):
+        server = ws.connect_to_server()
+
+        def from_server(message):
+            try:
+                data = json.loads(message)
+            except (TypeError, ValueError):
+                ws.send(message)
+                return
+            strip(data)
+            ws.send(json.dumps(data))
+
+        server.on_message(from_server)
+
+    context.route_web_socket("**/api/websocket", route)
+    page = open_dashboard(context, ha, request_log)
+    ready(page)
+    expect(tid(page, "target")).to_have_text(f"{start}°", timeout=15_000)
+    # The filter runs in this (sync Playwright) thread: wait with page.wait_for_timeout, which
+    # keeps forwarding HA's messages, never with time.sleep.
+    def wait_target(f, message):
+        deadline = time.monotonic() + 6
+        while target_f(ha, st) != f:
+            assert time.monotonic() < deadline, f"timed out waiting for {message}"
+            page.wait_for_timeout(250)
+
+    plus, minus = tid(page, "plus"), tid(page, "minus")
+    plus.click()
+    plus.click()
+    wait_target(start + 2, f"set_target {start + 2}")
+    minus.click()
+    minus.click()
+    expect(tid(page, "target")).to_have_text(f"{start}°", timeout=1_000)
+    wait_target(start, f"set_target back to {start}")
+
+
+def test_detach_mid_burst_still_writes(page, ha):
+    """A tap still in its 1.5 s debounce when the element detaches (HA rebuilding the view on a
+    reconnect) is sent, not silently dropped."""
+    st, start = heat_hold_start(ha)
+    ready(page)
+    expect(tid(page, "target")).to_have_text(f"{start}°", timeout=15_000)
+    tid(page, "plus").click()
+    dash(page).evaluate("el => el.remove()")
+    wait_until(lambda: target_f(ha, st) == start + 1, 6, message=f"set_target {start + 1} after detach")

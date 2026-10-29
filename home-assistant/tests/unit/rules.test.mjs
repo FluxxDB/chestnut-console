@@ -1,7 +1,7 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  statusFor, targetLabel, holdKind, levelShouldSend, countdown, dayBar, toF, fromF, Debouncer, safetyRows, eventText,
+  statusFor, targetLabel, holdKind, levelShouldSend, countdown, dayBar, toF, fromF, Debouncer, TargetTaps, safetyRows, eventText,
 } from '../../config/www/chestnut/lib/rules.js';
 
 const eq = assert.equal;
@@ -123,6 +123,94 @@ test('debounce_cancel', () => {
     const d = new Debouncer(1500, v => fired.push(v));
     d.tap(80, 72); d.cancel(); mock.timers.tick(5000);
     eq(fired.length, 0);
+  } finally { mock.timers.reset(); }
+});
+
+// --- − / + taps on the target (TargetTaps: the debouncer plus the base a burst is compared to) ---
+function taps(written) {
+  return new TargetTaps({ ms: 1500, giveUpMs: 6000, min: 50, max: 90, write: v => written.push(v) });
+}
+test('taps_second_burst_back_to_start_is_written', () => {
+  // 70 -> +2 is written; -2 before the device confirms 72 must write 70, not compare against
+  // the stale device value (70) and send nothing (the device would stay on 72, a hold undone).
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const written = [];
+    const t = taps(written);
+    let now = 0;
+    t.step(1, 70, now); t.step(1, 70, now);
+    mock.timers.tick(1500); now += 1500;
+    assert.deepEqual(written, [72]);
+    t.settle(70, now);           // the device hasn't reported 72 yet
+    t.step(-1, 70, now); t.step(-1, 70, now);
+    eq(t.pending, 70);
+    mock.timers.tick(1500); now += 1500;
+    assert.deepEqual(written, [72, 70]);
+    t.settle(72, now); eq(t.pending, 70);   // the first write landing doesn't end the second
+    t.settle(70, now); eq(t.pending, null);
+  } finally { mock.timers.reset(); }
+});
+test('taps_net_zero_after_unconfirmed_write', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const written = [];
+    const t = taps(written);
+    t.step(2, 70, 0);
+    mock.timers.tick(1500);
+    t.step(1, 70, 1500); t.step(-1, 70, 1500);   // back to the written 72: nothing new to send
+    mock.timers.tick(1500);
+    assert.deepEqual(written, [72]);
+  } finally { mock.timers.reset(); }
+});
+test('taps_base_returns_to_device_after_confirm_or_give_up', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const written = [];
+    const t = taps(written);
+    t.step(2, 70, 0); mock.timers.tick(1500);
+    t.settle(72, 1500); eq(t.pending, null);
+    t.step(-2, 72, 1600); mock.timers.tick(1500);
+    assert.deepEqual(written, [72, 70]);
+    t.settle(null, 1600 + 7600);                   // never confirmed: give up
+    eq(t.pending, null);
+    t.step(1, 74, 10000); mock.timers.tick(1500);  // base is the device again
+    assert.deepEqual(written, [72, 70, 75]);
+  } finally { mock.timers.reset(); }
+});
+test('taps_detach_flushes_when_bound', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const written = [];
+    const t = taps(written);
+    t.step(1, 70, 0); t.step(1, 70, 0);
+    t.detach(true);
+    assert.deepEqual(written, [72]);
+    eq(t.pending, 72);                             // still shown until the device reports it
+    mock.timers.tick(5000);
+    assert.deepEqual(written, [72]);
+  } finally { mock.timers.reset(); }
+});
+test('taps_detach_drops_when_unbound', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const written = [];
+    const t = taps(written);
+    t.step(1, 70, 0);
+    t.detach(false);
+    eq(t.pending, null);                           // the display doesn't keep a value nobody sends
+    mock.timers.tick(5000);
+    assert.deepEqual(written, []);
+  } finally { mock.timers.reset(); }
+});
+test('taps_detach_net_zero_sends_nothing', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const written = [];
+    const t = taps(written);
+    t.step(1, 70, 0); t.step(-1, 70, 0);
+    t.detach(true);
+    mock.timers.tick(5000);
+    assert.deepEqual(written, []);
   } finally { mock.timers.reset(); }
 });
 

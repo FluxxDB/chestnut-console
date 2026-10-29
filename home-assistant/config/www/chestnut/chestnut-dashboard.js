@@ -18,7 +18,7 @@ import { SimulationTab } from './tab-simulation.js';
 import { SystemTab } from './tab-system.js';
 import { Adapter } from './lib/adapter.js';
 import './room-view.js';
-import { statusFor, targetLabel, holdKind, levelShouldSend, Debouncer } from './lib/rules.js';
+import { statusFor, targetLabel, holdKind, levelShouldSend, TargetTaps } from './lib/rules.js';
 
 const DEFAULT_DEVICE = 'Main Thermostat';
 const TARGET_MIN = 50;
@@ -33,7 +33,6 @@ const HISTORY_IDS = ['call_heat', 'call_cool', 'call_fan', 'checked_temperature'
 const live = { loops: 0, intervals: 0 };
 
 const deg = (v) => (v == null ? DASH : `${Math.round(v)}°`);
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 function fmtMin(ms) {
   const m = Math.max(0, Math.round(ms / 60000));
@@ -99,8 +98,6 @@ class ChestnutDashboard extends HTMLElement {
     this._resolved = false;
     this._gen = 0;
     this._tab = 'HOME';
-    this._pending = null;
-    this._pendingUntil = 0;
     this._history = null; // null = not loaded yet; {empty: true} or the computed chart
     this._dirty = true;
     this._raf = null;
@@ -113,7 +110,10 @@ class ChestnutDashboard extends HTMLElement {
     this._onReady = () => this._resolve();
     this._narrow = window.matchMedia('(max-width: 860px)');
     this._onNarrow = () => this._syncRoom();
-    this._debouncer = new Debouncer(DEBOUNCE_MS, (f) => this._writeTarget(f));
+    this._taps = new TargetTaps({
+      ms: DEBOUNCE_MS, giveUpMs: PENDING_GIVE_UP_MS, min: TARGET_MIN, max: TARGET_MAX,
+      write: (f) => this._writeTarget(f),
+    });
   }
 
   setConfig(config) {
@@ -146,6 +146,8 @@ class ChestnutDashboard extends HTMLElement {
   disconnectedCallback() {
     this._narrow.removeEventListener('change', this._onNarrow);
     this._stop();
+    // A − / + burst still in its debounce: send it now while the adapter is bound, else drop it.
+    this._taps.detach(!!(this._adapter && this._resolved));
     this._unbind();
   }
 
@@ -345,9 +347,7 @@ class ChestnutDashboard extends HTMLElement {
     if (!a || !this._resolved || !a.online()) return;
     const base = this._baseTarget();
     if (base == null) return;
-    this._pending = clamp((this._pending ?? base) + delta, TARGET_MIN, TARGET_MAX);
-    this._pendingUntil = Date.now() + DEBOUNCE_MS + PENDING_GIVE_UP_MS;
-    this._debouncer.tap(this._pending, base);
+    this._taps.step(delta, base, Date.now());
     this._dirty = true;
     this._render();
   }
@@ -356,7 +356,7 @@ class ChestnutDashboard extends HTMLElement {
     if (!this._adapter) return;
     this._adapter.setTargetF(f).catch((err) => {
       console.warn('chestnut-dashboard: set_target failed', err);
-      this._pending = null;
+      this._taps.failed();
       this._dirty = true;
     });
   }
@@ -396,10 +396,8 @@ class ChestnutDashboard extends HTMLElement {
     if (!sim && this._tab === 'SIMULATION') this._pickTab('HOME');
 
     // The tapped value shows until the device reports it (or gives up); never mid-burst.
-    if (this._pending != null && !this._debouncer.timer) {
-      const eff = online ? a.num('effective_target') : null;
-      if ((eff != null && Math.round(eff) === this._pending) || Date.now() > this._pendingUntil) this._pending = null;
-    }
+    const eff = online ? a.num('effective_target') : null;
+    this._taps.settle(eff != null ? Math.round(eff) : null, Date.now());
     const v = online ? this._read(a) : null;
     this._renderThermostat(v, ready);
     const room = this._el.room;
@@ -419,9 +417,9 @@ class ChestnutDashboard extends HTMLElement {
     const eff = a.num('effective_target');
     const lo = a.num('effective_low');
     const hi = a.num('effective_high');
-    const band = mode === 'heat_cool' && this._pending == null && lo != null && hi != null && hi - lo > 2.5;
+    const band = mode === 'heat_cool' && this._taps.pending == null && lo != null && hi != null && hi - lo > 2.5;
     let targetText;
-    if (this._pending != null) targetText = `${this._pending}°`;
+    if (this._taps.pending != null) targetText = `${this._taps.pending}°`;
     else if (band) targetText = `${Math.round(lo)}–${Math.round(hi)}°`;
     else targetText = deg(eff);
     let actionTarget = targetText;
@@ -455,7 +453,7 @@ class ChestnutDashboard extends HTMLElement {
       sensorFaultRaw: a.on('sensor_fault'),
       interlockFaultRaw: a.on('interlock_fault'),
       status: statusFor(s),
-      display: mode === 'off' && this._pending == null ? 'OFF' : targetText,
+      display: mode === 'off' && this._taps.pending == null ? 'OFF' : targetText,
       level: a.str('comfort_level'),
       hold: a.on('schedule_hold') === true,
       manual: a.on('manual_target') === true,

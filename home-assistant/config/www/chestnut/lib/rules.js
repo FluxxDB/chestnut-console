@@ -151,3 +151,73 @@ export class Debouncer {
     this.timer = null;
   }
 }
+
+// The − / + taps on the target. A burst of taps becomes one write of its final value, `ms`
+// after the last tap. `pending` is the value to show: from the first tap until the device
+// reports it (`settle`), or `giveUpMs` after the write at most.
+// The base a burst is compared against (and starts from) is the last value written that the
+// device hasn't confirmed yet, else the device's own target. So a burst that backs out of an
+// unconfirmed write is itself written, and one that returns to it sends nothing.
+export class TargetTaps {
+  constructor({ ms, giveUpMs, min, max, write }) {
+    this.ms = ms;
+    this.giveUpMs = giveUpMs;
+    this.min = min;
+    this.max = max;
+    this.write = write;
+    this.pending = null;
+    this.written = null; // the last value sent, until the device reports it or we give up
+    this.until = 0;
+    this.base = null;
+    this.debouncer = new Debouncer(ms, (v) => this._send(v));
+  }
+
+  get busy() {
+    return this.debouncer.timer != null;
+  }
+
+  _send(v) {
+    this.written = v;
+    this.write(v);
+  }
+
+  // One tap; `deviceBase` is the device's current target (rounded °F). Returns the new pending value.
+  step(delta, deviceBase, now) {
+    const base = this.written ?? deviceBase;
+    if (base == null) return null;
+    this.base = base;
+    this.pending = Math.min(this.max, Math.max(this.min, (this.pending ?? base) + delta));
+    this.until = now + this.ms + this.giveUpMs;
+    this.debouncer.tap(this.pending, base);
+    return this.pending;
+  }
+
+  // Every render: drop the shown value once the device reports it, or after the give-up time
+  // (never mid-burst). `deviceTarget` is the device's target (rounded °F), null while offline.
+  settle(deviceTarget, now) {
+    if (this.busy || (this.pending == null && this.written == null)) return;
+    const shown = this.pending ?? this.written;
+    if ((deviceTarget != null && deviceTarget === shown) || now > this.until) {
+      this.pending = null;
+      this.written = null;
+    }
+  }
+
+  // The write failed: show the device's value again.
+  failed() {
+    this.pending = null;
+    this.written = null;
+  }
+
+  // The element is going away mid-burst: send the burst now if it can still be written
+  // (`canWrite`: an adapter is bound), else drop it so the number doesn't show a value nobody sends.
+  detach(canWrite) {
+    if (!this.busy) return;
+    this.debouncer.cancel();
+    if (canWrite && this.pending !== this.base) {
+      this._send(this.pending);
+    } else if (!canWrite) {
+      this.pending = null;
+    }
+  }
+}
