@@ -152,6 +152,7 @@ Final names are the builder's, but the ids are fixed so the PC can build the scr
 | `comfort_level` | select: Comfort / Eco | the current level; a manual change starts a hold, **but only when the value actually changes**. A template select fires `on_value` again when it's set to the same option, so re-tapping the lit pill must not start a hold. The same goes for `set_target` set to the current effective target. |
 | `schedule_enabled` | switch | schedule on/off |
 | `schedule_hold` | binary_sensor | a manual hold is active |
+| `manual_target` | binary_sensor | on while the schedule is off and a manual − / + number is in force (the screen labels the card "Target"); picking Comfort or Eco drops it, even re-picking the current level *(R23, R24)* |
 | `schedule_period` | text_sensor | Wake / Leave / Return / Sleep (empty with the schedule off or paused) |
 | `schedule_next_change` | text_sensor | next period's start, 12-hour, e.g. "10:30 pm" |
 | `schedule_status` | text_sensor | ready-made text, e.g. "Eco until 5:30 pm", "Holding 69° until 10:30 pm", "Schedule paused: clock not set" |
