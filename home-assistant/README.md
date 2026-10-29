@@ -41,7 +41,9 @@ Three switches on the System tab (`input_boolean.chestnut_alert_sensor_fault`, `
 | Interlock fault | the heat/cool interlock tripped: the heat and cool relays were found on at the same time (a stuck relay or wiring fault), so both were cut. Clear it on the System tab once it's checked; it won't clear until the minimum off time has passed (or the device reboots). |
 | Offline | HA has had no contact with the thermostat for 10 minutes. It keeps running on its own. |
 
-Each alert also sends a "cleared" notice when the problem goes away (for offline, only if the offline alert had already fired).
+Each alert also sends a "cleared" notice when the problem goes away, but only if that alert actually fired. A fault that is first seen as the thermostat reconnects (it was unavailable, then reports the fault) still alerts; a fault that was already alerted and is still there after a reconnect doesn't alert again. A fault that is on, or a thermostat that is still offline, when HA starts alerts again (HA's notifications don't survive a restart); for offline that is 10 minutes after HA starts. An alert's notification is always removed when the problem clears, even if its switch was turned off meanwhile.
+
+What each alert remembers between its alert and its "cleared" notice lives in three more helpers, `input_boolean.chestnut_sensor_fault_alerted`, `..._interlock_fault_alerted` and `input_boolean.chestnut_offline_alerted` (off at every HA start). They are internal: don't toggle them by hand.
 
 **Check the entity ids once on the real install.** `config/automations.yaml` hard-codes the real Tab5's ids:
 
@@ -61,7 +63,7 @@ home-assistant/tests/run.sh e2e    # browser tests against a throwaway HA + the 
 home-assistant/tests/run.sh all    # both, about 7 minutes
 ```
 
-Docker only. The e2e HA runs on port **8124** with its own temporary config and never touches the dev HA on 8123; ports **8124** and **6053** (the sim's API) must be free, so stop any other host sim first.
+Docker only. The e2e HA runs on port **8124** with its own temporary config (the alerts pointed at the sim, the offline alert's 10 minutes shortened to 30 s) and never touches the dev HA on 8123; ports **8124** and **6053** (the sim's API) must be free, so stop any other host sim first.
 
 ### Fonts
 

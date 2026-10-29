@@ -10,8 +10,9 @@
 # e2e never touches the dev HA (container `homeassistant`, port 8123, config/.storage) or the
 # Tab5. It runs:
 #   1. a temp copy of the hand-written HA config (configuration/automations/scripts/scenes.yaml,
-#      dashboards/, themes/, www/) plus the ha-test/ overlay (port 8124 via ha.env, and the
-#      dashboard's device_name switched to the sim);
+#      dashboards/, themes/, www/) plus the ha-test/ overlay (port 8124 via ha.env, the
+#      dashboard's device_name and the alerts' entity ids switched to the sim, and the offline
+#      alert's 10 minutes shortened to 30 s);
 #   2. a temp copy of the host sim's config with a fresh random API key in its own secrets.yaml
 #      (tab5-thermostat/secrets.yaml is never read or written);
 #   3. containers chestnut-e2e-sim (the sim, API on 6053) and chestnut-e2e-ha (HA on 8124), host
@@ -133,11 +134,20 @@ fi
 # The alert automations name the real install's entity ids; point them at the sim device's.
 auto="$tmp/ha/automations.yaml"
 sed -i -E \
-  -e "s/\b(binary_sensor\.main_thermostat)_(sensor_fault|interlock_fault)\b/\1_sim_\2/" \
-  -e "s/\bclimate\.main_thermostat_main_thermostat\b/climate.main_thermostat_sim_main_thermostat/" "$auto"
+  -e "s/\b(binary_sensor\.main_thermostat)_(sensor_fault|interlock_fault)\b/\1_sim_\2/g" \
+  -e "s/\bclimate\.main_thermostat_main_thermostat\b/climate.main_thermostat_sim_main_thermostat/g" "$auto"
 for e in binary_sensor.main_thermostat_sim_sensor_fault binary_sensor.main_thermostat_sim_interlock_fault climate.main_thermostat_sim_main_thermostat; do
   grep -qF "$e" "$auto" || die "overlay: $e missing from automations.yaml after the entity id rewrite"
 done
+if grep -nE "binary_sensor\.main_thermostat_(sensor|interlock)_fault|climate\.main_thermostat_main_thermostat" "$auto"; then
+  die "overlay: a real-install entity id is left in automations.yaml after the rewrite"
+fi
+# The offline alert's 10 minutes (its `for:` and the wait after HA starts) shrink to
+# OFFLINE_TEST_DELAY, so the e2e tests can wait for it (e2e/test_alerts.py reads the same value).
+OFFLINE_TEST_DELAY="00:00:30"
+sed -i -E "s/\"00:10:00\"/\"$OFFLINE_TEST_DELAY\"/g" "$auto"
+grep -qF "\"00:10:00\"" "$auto" && die "overlay: a 10 minute delay is left in automations.yaml"
+grep -qF "\"$OFFLINE_TEST_DELAY\"" "$auto" || die "overlay: no offline delay found to shorten in automations.yaml"
 
 # 2. The sim's config, with its own secrets.yaml holding a fresh key (never the real one).
 mkdir -p "$tmp/esphome"
@@ -183,6 +193,8 @@ docker run --rm --name "$RUNNER_CT" --network host \
   -e SIM_KEY="$SIM_KEY" \
   -e SIM_PORT="$SIM_PORT" \
   -e SIM_CONTAINER="$SIM_CT" \
+  -e HA_CONTAINER="$HA_CT" \
+  -e OFFLINE_TEST_DELAY="$OFFLINE_TEST_DELAY" \
   -e SIM_DEVICE_NAME="$SIM_DEVICE_NAME" \
   -e E2E_WORK=/work \
   -v /var/run/docker.sock:/var/run/docker.sock \

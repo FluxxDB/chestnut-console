@@ -11,20 +11,39 @@
         name: axiom
         name_dark: axiom
 
+# Fault and offline alerts. Each alert is gated by its System-tab switch
+# (input_boolean.chestnut_alert_*). Each also remembers that it fired
+# (input_boolean.chestnut_*_alerted, reset to off when HA starts, as persistent notifications
+# are): a fault seen again after a Tab5 reconnect (on -> unavailable -> on) doesn't alert twice,
+# and "cleared" is sent only after an alert actually fired. The fault notification itself is
+# always dismissed on recovery, even if the switch was turned off meanwhile.
 - id: chestnut_alert_sensor_fault
   alias: "Chestnut: alert, sensor fault"
   description: "Notifies when the temperature sensor faults (while its alert switch is on)."
   mode: queued
   triggers:
+    # From off, or from unavailable/unknown (a fault first seen as the Tab5 reconnects).
     - trigger: state
       entity_id: binary_sensor.main_thermostat_sensor_fault
-      from: "off"
       to: "on"
+      not_from: "on"
+    # Already on when HA starts (its notifications don't survive a restart).
+    - trigger: homeassistant
+      event: start
   conditions:
+    - condition: state
+      entity_id: binary_sensor.main_thermostat_sensor_fault
+      state: "on"
     - condition: state
       entity_id: input_boolean.chestnut_alert_sensor_fault
       state: "on"
+    - condition: state
+      entity_id: input_boolean.chestnut_sensor_fault_alerted
+      state: "off"
   actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.chestnut_sensor_fault_alerted
     - action: persistent_notification.create
       data:
         notification_id: chestnut_alert_sensor_fault
@@ -43,18 +62,25 @@
   description: "Replaces the sensor fault alert with a recovery notice."
   mode: queued
   triggers:
+    # From on, or from unavailable/unknown (the fault gone when the Tab5 comes back).
     - trigger: state
       entity_id: binary_sensor.main_thermostat_sensor_fault
-      from: "on"
       to: "off"
-  conditions:
-    - condition: state
-      entity_id: input_boolean.chestnut_alert_sensor_fault
-      state: "on"
+      not_from: "off"
   actions:
     - action: persistent_notification.dismiss
       data:
         notification_id: chestnut_alert_sensor_fault
+    # The notice only after an alert fired (not after a plain reconnect), and only while the switch is on.
+    - condition: state
+      entity_id: input_boolean.chestnut_sensor_fault_alerted
+      state: "on"
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.chestnut_sensor_fault_alerted
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_sensor_fault
+      state: "on"
     - action: persistent_notification.create
       data:
         notification_id: chestnut_alert_sensor_fault_cleared
@@ -71,15 +97,28 @@
   description: "Notifies when the heat/cool interlock trips (while its alert switch is on)."
   mode: queued
   triggers:
+    # From off, or from unavailable/unknown (a fault first seen as the Tab5 reconnects).
     - trigger: state
       entity_id: binary_sensor.main_thermostat_interlock_fault
-      from: "off"
       to: "on"
+      not_from: "on"
+    # Already on when HA starts (its notifications don't survive a restart).
+    - trigger: homeassistant
+      event: start
   conditions:
+    - condition: state
+      entity_id: binary_sensor.main_thermostat_interlock_fault
+      state: "on"
     - condition: state
       entity_id: input_boolean.chestnut_alert_interlock_fault
       state: "on"
+    - condition: state
+      entity_id: input_boolean.chestnut_interlock_fault_alerted
+      state: "off"
   actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.chestnut_interlock_fault_alerted
     - action: persistent_notification.create
       data:
         notification_id: chestnut_alert_interlock_fault
@@ -98,18 +137,25 @@
   description: "Replaces the interlock fault alert with a recovery notice."
   mode: queued
   triggers:
+    # From on, or from unavailable/unknown (the latch clears on a Tab5 reboot: on -> unavailable -> off).
     - trigger: state
       entity_id: binary_sensor.main_thermostat_interlock_fault
-      from: "on"
       to: "off"
-  conditions:
-    - condition: state
-      entity_id: input_boolean.chestnut_alert_interlock_fault
-      state: "on"
+      not_from: "off"
   actions:
     - action: persistent_notification.dismiss
       data:
         notification_id: chestnut_alert_interlock_fault
+    # The notice only after an alert fired (not after a plain reconnect), and only while the switch is on.
+    - condition: state
+      entity_id: input_boolean.chestnut_interlock_fault_alerted
+      state: "on"
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.chestnut_interlock_fault_alerted
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_interlock_fault
+      state: "on"
     - action: persistent_notification.create
       data:
         notification_id: chestnut_alert_interlock_fault_cleared
@@ -130,11 +176,34 @@
       entity_id: climate.main_thermostat_main_thermostat
       to: "unavailable"
       for: "00:10:00"
-  conditions:
+    # HA starting with the thermostat already unavailable: there is no transition to wait for
+    # (and a pending `for:` doesn't survive a restart), so wait the 10 minutes from the start.
+    - trigger: homeassistant
+      event: start
+      id: start
+  actions:
+    - if:
+        - condition: trigger
+          id: start
+        - condition: state
+          entity_id: climate.main_thermostat_main_thermostat
+          state: "unavailable"
+      then:
+        - delay: "00:10:00"
+    # Unavailable for the whole 10 minutes (since before HA's start, on the start path).
+    - condition: state
+      entity_id: climate.main_thermostat_main_thermostat
+      state: "unavailable"
+      for: "00:10:00"
     - condition: state
       entity_id: input_boolean.chestnut_alert_offline
       state: "on"
-  actions:
+    - condition: state
+      entity_id: input_boolean.chestnut_offline_alerted
+      state: "off"
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.chestnut_offline_alerted
     - action: persistent_notification.create
       data:
         notification_id: chestnut_alert_offline
@@ -157,20 +226,21 @@
       entity_id: climate.main_thermostat_main_thermostat
       from: "unavailable"
       not_to: "unknown"
-  conditions:
-    - condition: state
-      entity_id: input_boolean.chestnut_alert_offline
-      state: "on"
-    # Only after the 10 minute alert actually fired (not for a short blip): it triggered after the
-    # thermostat went unavailable.
-    - condition: template
-      value_template: >-
-        {{ as_timestamp(state_attr('automation.chestnut_alert_offline', 'last_triggered'), 0)
-           > as_timestamp(trigger.from_state.last_changed, 0) }}
   actions:
     - action: persistent_notification.dismiss
       data:
         notification_id: chestnut_alert_offline
+    # The notice only after the 10 minute alert actually fired (not for a short blip), and only
+    # while the switch is on.
+    - condition: state
+      entity_id: input_boolean.chestnut_offline_alerted
+      state: "on"
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.chestnut_offline_alerted
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_offline
+      state: "on"
     - action: persistent_notification.create
       data:
         notification_id: chestnut_alert_offline_cleared
