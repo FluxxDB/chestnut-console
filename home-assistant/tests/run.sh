@@ -130,6 +130,15 @@ if [ -f "$dash" ]; then
   grep -qF "device_name: \"$SIM_DEVICE_NAME\"" "$dash" || die "overlay: no device_name: \"Main Thermostat\" in dashboards/chestnut.yaml"
 fi
 
+# The alert automations name the real install's entity ids; point them at the sim device's.
+auto="$tmp/ha/automations.yaml"
+sed -i -E \
+  -e "s/\b(binary_sensor\.main_thermostat)_(sensor_fault|interlock_fault)\b/\1_sim_\2/" \
+  -e "s/\bclimate\.main_thermostat_main_thermostat\b/climate.main_thermostat_sim_main_thermostat/" "$auto"
+for e in binary_sensor.main_thermostat_sim_sensor_fault binary_sensor.main_thermostat_sim_interlock_fault climate.main_thermostat_sim_main_thermostat; do
+  grep -qF "$e" "$auto" || die "overlay: $e missing from automations.yaml after the entity id rewrite"
+done
+
 # 2. The sim's config, with its own secrets.yaml holding a fresh key (never the real one).
 mkdir -p "$tmp/esphome"
 cp -r "$sim_src/main-thermostat-sim.yaml" "$sim_src/sim" "$sim_src/thermostat" "$tmp/esphome/"

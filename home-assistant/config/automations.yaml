@@ -10,3 +10,174 @@
       data:
         name: axiom
         name_dark: axiom
+
+- id: chestnut_alert_sensor_fault
+  alias: "Chestnut: alert, sensor fault"
+  description: "Notifies when the temperature sensor faults (while its alert switch is on)."
+  mode: queued
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.main_thermostat_sensor_fault
+      from: "off"
+      to: "on"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_sensor_fault
+      state: "on"
+  actions:
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_sensor_fault
+        title: "Chestnut"
+        message: "Main Thermostat: temperature sensor problem. Heating and cooling paused."
+    # Phone push through whatever `notify.notify` is set up to reach (HA's default notify group,
+    # empty until the Companion app is added). continue_on_error: no notify service yet is not a failure.
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat: temperature sensor problem. Heating and cooling paused."
+
+- id: chestnut_alert_sensor_fault_cleared
+  alias: "Chestnut: alert, sensor fault cleared"
+  description: "Replaces the sensor fault alert with a recovery notice."
+  mode: queued
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.main_thermostat_sensor_fault
+      from: "on"
+      to: "off"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_sensor_fault
+      state: "on"
+  actions:
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_sensor_fault
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_sensor_fault_cleared
+        title: "Chestnut"
+        message: "Main Thermostat: temperature sensor problem cleared."
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat: temperature sensor problem cleared."
+
+- id: chestnut_alert_interlock_fault
+  alias: "Chestnut: alert, interlock fault"
+  description: "Notifies when the heat/cool interlock trips (while its alert switch is on)."
+  mode: queued
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.main_thermostat_interlock_fault
+      from: "off"
+      to: "on"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_interlock_fault
+      state: "on"
+  actions:
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_interlock_fault
+        title: "Chestnut"
+        message: "Main Thermostat: heat and cool were both requested, so the system stopped. Clear it once it's checked."
+    # Phone push through whatever `notify.notify` is set up to reach (HA's default notify group,
+    # empty until the Companion app is added). continue_on_error: no notify service yet is not a failure.
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat: heat and cool were both requested, so the system stopped. Clear it once it's checked."
+
+- id: chestnut_alert_interlock_fault_cleared
+  alias: "Chestnut: alert, interlock fault cleared"
+  description: "Replaces the interlock fault alert with a recovery notice."
+  mode: queued
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.main_thermostat_interlock_fault
+      from: "on"
+      to: "off"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_interlock_fault
+      state: "on"
+  actions:
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_interlock_fault
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_interlock_fault_cleared
+        title: "Chestnut"
+        message: "Main Thermostat: interlock fault cleared."
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat: interlock fault cleared."
+
+- id: chestnut_alert_offline
+  alias: "Chestnut: alert, offline"
+  description: "Notifies when the thermostat has been unavailable for 10 minutes."
+  mode: queued
+  triggers:
+    - trigger: state
+      entity_id: climate.main_thermostat_main_thermostat
+      to: "unavailable"
+      for: "00:10:00"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_offline
+      state: "on"
+  actions:
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_offline
+        title: "Chestnut"
+        message: "Main Thermostat is offline (no contact for 10 minutes). It keeps running on its own."
+    # Phone push through whatever `notify.notify` is set up to reach (HA's default notify group,
+    # empty until the Companion app is added). continue_on_error: no notify service yet is not a failure.
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat is offline (no contact for 10 minutes). It keeps running on its own."
+
+- id: chestnut_alert_offline_cleared
+  alias: "Chestnut: alert, offline cleared"
+  description: "Replaces the offline alert with a recovery notice."
+  mode: queued
+  triggers:
+    - trigger: state
+      entity_id: climate.main_thermostat_main_thermostat
+      from: "unavailable"
+      not_to: "unknown"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_offline
+      state: "on"
+    # Only after the 10 minute alert actually fired (not for a short blip): it triggered after the
+    # thermostat went unavailable.
+    - condition: template
+      value_template: >-
+        {{ as_timestamp(state_attr('automation.chestnut_alert_offline', 'last_triggered'), 0)
+           > as_timestamp(trigger.from_state.last_changed, 0) }}
+  actions:
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_offline
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_offline_cleared
+        title: "Chestnut"
+        message: "Main Thermostat: offline cleared."
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat: offline cleared."
