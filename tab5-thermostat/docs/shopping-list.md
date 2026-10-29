@@ -2,7 +2,9 @@
 
 Parts for the bench prototype and beyond. Prices are USD, checked 2026-10-29. A `~` marks a price seen only in a search result, which may be out of date. Check items off as they're bought.
 
-## Bench rig: buy together (about $90–100 plus shipping, before the USB-C meter)
+## Buy first (about $25 plus shipping, plus the USB-C meter)
+
+These are the parts the real thermostat needs. All four M5Stack parts go into the final install.
 
 ### M5Stack parts (about $25)
 
@@ -13,18 +15,25 @@ Buy these from **Mouser** (US stock, arrives in days, but may add a tariff surch
 - [ ] **M5Stack Grove Hub** (1-to-3; U006, Mouser 170-U006). Lets the sensor and relays share the Tab5's single Port A. $3.50 ([store](https://shop.m5stack.com/products/mini-hub-module)).
 - [ ] **Grove cable, 50 cm, 2-pack** (A034-C). Keeps the sensor away from the Tab5's heat. $1.95 ([store](https://shop.m5stack.com/products/4pin-buckled-grove-cable)).
 
-### Furnace stand-in and wiring (about $65–70)
+### USB-C power meter
+
+- [ ] **USB-C power meter**, any inline model that shows watts (one that logs energy is handy). Measures the Tab5's draw, including while it charges its battery. That figure sizes the 24 V AC → DC supply for the house (see "Later").
+
+## Optional: a fake furnace for the desk (about $65–70)
+
+A stand-in furnace, so the relays switch real 24 V AC on the desk before anything touches the house: the lamps light up as heat, cool and fan come on. **Not required.** The thermostat logic is already tested against M2's simulated house, and a multimeter in continuity mode (see "Before the house visit") can confirm each relay switches.
 
 - [ ] **24 V AC plug-in transformer**, 40 VA, screw terminals: Jameco ReliaPro **MGT-2440** (#2230627), ~$13.95 ([Jameco](https://www.jameco.com/z/MGT-2440-Jameco-ReliaPro-24-VAC-1600-mA-40-Watt-Wall-Adapter-Transformer_2230627.html)). Stands in for the furnace transformer. **The label must say 24V AC**; many look-alikes are DC. Alternative: Hammond BPE2G (internal fuse), ~$21–29 at Jameco or Digi-Key.
 - [ ] **24 V AC/DC indicator lamps**: BAOMAIN AD16-22D 5-color pack (22 mm, screw terminals), $9.99 ([Amazon](https://www.amazon.com/dp/B01MEEIYAM)). Red = heat, blue = cool, green = fan, yellow = O/B. They stand in for the furnace.
 - [ ] **Wago 221 lever connectors**: about ten each of 221-412 and 221-413, ~$13 ([Digi-Key](https://www.digikey.com/en/products/detail/wago-corporation/221-413/13549610)), or an Amazon assortment.
 - [ ] **18/5 thermostat wire**: Southwire 50 ft, ~$19 ([Home Depot](https://homedepot.com/p/Southwire-50-ft-18-5-Brown-Solid-CU-CL2-Thermostat-Wire-64169640/204862207)), or Cimple Co 25 ft, ~$25 ([Amazon](https://www.amazon.com/dp/B07T6LJD6M)).
-- [ ] **Inline fuse holder + 1 A fuses**: Littelfuse 01500274Z holder (5×20 mm) + 0216001.MXP fuses, ~$8 (Mouser or [Digi-Key](https://www.digikey.com/en/products/detail/littelfuse-inc/0216001-MXP/777492)). Goes in the R lead from the transformer.
-- [ ] **USB-C power meter**, any inline model that shows watts (one that logs energy is handy). Measures the Tab5's draw, including while it charges its battery.
+- [ ] **Inline fuse holder + 1 A fuses**: Littelfuse 01500274Z holder (5×20 mm) + 0216001.MXP fuses, ~$8 (Mouser or [Digi-Key](https://www.digikey.com/en/products/detail/littelfuse-inc/0216001-MXP/777492)). Goes in the R lead from the transformer. Optional even with the fake furnace: the transformer above is a power-limited "Class 2" type.
+
+Thermostat wire is sold in rolls, but the fake furnace needs only a few feet. Many hardware stores sell it by the foot, and any similar wire works.
 
 ## Before the house visit
 
-- [ ] **Multimeter** with AC volts and continuity, for the site survey. Pick a model when the visit is planned.
+- [ ] **Multimeter** with AC volts and continuity, for the site survey. Pick a model when the visit is planned. On the bench, its continuity mode also confirms each relay switches.
 
 ## Later: don't buy yet
 
