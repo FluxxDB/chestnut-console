@@ -84,14 +84,14 @@
       data:
         notification_id: chestnut_alert_interlock_fault
         title: "Chestnut"
-        message: "Main Thermostat: heat and cool were both requested, so the system stopped. Clear it once it's checked."
+        message: "Main Thermostat: the heat and cool relays were found on together, so both were cut. Clear it once it's checked."
     # Phone push through whatever `notify.notify` is set up to reach (HA's default notify group,
     # empty until the Companion app is added). continue_on_error: no notify service yet is not a failure.
     - action: notify.notify
       continue_on_error: true
       data:
         title: "Chestnut"
-        message: "Main Thermostat: heat and cool were both requested, so the system stopped. Clear it once it's checked."
+        message: "Main Thermostat: the heat and cool relays were found on together, so both were cut. Clear it once it's checked."
 
 - id: chestnut_alert_interlock_fault_cleared
   alias: "Chestnut: alert, interlock fault cleared"

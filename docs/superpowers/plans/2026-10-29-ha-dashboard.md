@@ -308,7 +308,7 @@ test('countdown_from_action_elapsed', () => { /* running, elapsed 60 s published
 - Entity ids in the automations: the test overlay templates them for the sim device. On the real install, the README documents checking them once. **PC call:** automations can't do registry lookup by object id, so they use the real install's entity ids, and the e2e overlay rewrites them.
 - Exact copy:
   - sensor fault: "Main Thermostat: temperature sensor problem. Heating and cooling paused.";
-  - interlock fault: "Main Thermostat: heat and cool were both requested, so the system stopped. Clear it once it's checked.";
+  - interlock fault: "Main Thermostat: the heat and cool relays were found on together, so both were cut. Clear it once it's checked.";
   - offline: "Main Thermostat is offline (no contact for 10 minutes). It keeps running on its own.";
   - recovery: "Main Thermostat: <thing> cleared."
 

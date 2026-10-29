@@ -38,10 +38,10 @@ Three switches on the System tab (`input_boolean.chestnut_alert_sensor_fault`, `
 | Alert | Fires when |
 |---|---|
 | Sensor fault | the thermostat reports a temperature sensor problem (bad or missing reading). It has stopped calling for heat/cool. |
-| Interlock fault | the heat/cool interlock has latched (both were asked for at once). Clear it on the System tab. |
+| Interlock fault | the heat/cool interlock tripped: the heat and cool relays were found on at the same time (a stuck relay or wiring fault), so both were cut. Clear it on the System tab once it's checked; it won't clear until the minimum off time has passed (or the device reboots). |
 | Offline | HA has had no contact with the thermostat for 10 minutes. It keeps running on its own. |
 
-Each alert also sends a "cleared" notice when the problem goes away.
+Each alert also sends a "cleared" notice when the problem goes away (for offline, only if the offline alert had already fired).
 
 **Check the entity ids once on the real install.** `config/automations.yaml` hard-codes the real Tab5's ids:
 

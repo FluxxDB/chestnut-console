@@ -16,7 +16,7 @@ from test_home import eid
 from test_system import state
 
 SENSOR_TEXT = "Main Thermostat: temperature sensor problem. Heating and cooling paused."
-INTERLOCK_TEXT = ("Main Thermostat: heat and cool were both requested, so the system stopped. "
+INTERLOCK_TEXT = ("Main Thermostat: the heat and cool relays were found on together, so both were cut. "
                   "Clear it once it's checked.")
 OFFLINE_TEXT = "Main Thermostat is offline (no contact for 10 minutes). It keeps running on its own."
 GATES = {
