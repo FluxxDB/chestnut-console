@@ -1,6 +1,7 @@
 // <chestnut-dashboard>: the Chestnut dashboard, HA's Overview (one panel view).
 // Frame (header, clock, connection, tab bar) and the Home tab: thermostat card, last 12 hours,
-// Today and Status. Layout from docs/design-mockups/ha-dashboard/Main.dc.html; the spec wins
+// Today and Status; the room view (room-view.js) on Home and Simulation, animated only while it
+// is on screen (`active`). Layout from docs/design-mockups/ha-dashboard/Main.dc.html; the spec wins
 // where they differ (no supply-air readout, the wall console's status rules, M2 level holds).
 //
 // Lifecycle: HA sets `hass` many times a second. The element keeps one Adapter per websocket
@@ -11,6 +12,7 @@
 // `_intervals` (live in the whole window, all instances), `_resolves` and `_historyLoads`.
 import { styles } from './style.js';
 import { Adapter } from './lib/adapter.js';
+import './room-view.js';
 import { statusFor, targetLabel, holdKind, levelShouldSend, dayBar, Debouncer } from './lib/rules.js';
 
 const DEFAULT_DEVICE = 'Main Thermostat';
@@ -110,10 +112,8 @@ const TEMPLATE = (device) => `
   section { padding: 24px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .between { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
   .small { font-size: 12px; color: var(--cn-text-2); }
-  .room { flex: 999 1 560px; gap: 16px; }
-  .room .num { font-size: 48px; line-height: 1; font-weight: 700; }
-  .room .readouts { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--cn-label); }
-  .room .readouts b, .runtime .totals b { color: var(--cn-text); font-weight: 400; }
+  .room { flex: 999 1 560px; }
+  .runtime .totals b { color: var(--cn-text); font-weight: 400; }
   .thermo { flex: 1 1 340px; background: var(--cn-raised); gap: 20px; }
   .stepper { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .step { width: 56px; height: 56px; flex: 0 0 56px; background: transparent; border: 1px solid var(--cn-outline); border-radius: 2px; color: var(--cn-text); font-size: 24px; cursor: pointer; }
@@ -164,15 +164,7 @@ const TEMPLATE = (device) => `
 </div></header>
 <div class="wrap">
   <div class="row">
-    <section class="card room desk" data-testid="room" data-views="HOME SIMULATION" aria-label="Room">
-      <span class="label" id="room-label">ROOM</span>
-      <span class="num" id="room-num">${DASH}</span>
-      <div class="readouts">
-        <span>room avg <b id="ro-room">${DASH}</b></span><span>target <b id="ro-target">${DASH}</b></span>
-        <span>airflow <b id="ro-air">${DASH}</b></span><span>humidity <b id="ro-hum">${DASH}</b></span>
-      </div>
-      <span class="small">The room view comes next.</span>
-    </section>
+    <chestnut-room-view class="card room desk" data-testid="room" data-views="HOME SIMULATION" role="region" aria-label="Room"></chestnut-room-view>
     <section class="card thermo" data-views="HOME" aria-label="Thermostat">
       <div class="between"><span class="label" id="tlabel">TARGET</span><span class="label" style="text-transform:none">set_target</span></div>
       <div class="stepper">
@@ -259,6 +251,8 @@ class ChestnutDashboard extends HTMLElement {
     this._resolves = 0;
     this._historyLoads = 0;
     this._onReady = () => this._resolve();
+    this._narrow = window.matchMedia('(max-width: 860px)');
+    this._onNarrow = () => this._syncRoom();
     this._debouncer = new Debouncer(DEBOUNCE_MS, (f) => this._writeTarget(f));
   }
 
@@ -283,11 +277,14 @@ class ChestnutDashboard extends HTMLElement {
 
   connectedCallback() {
     if (!this._built) this._build();
+    this._narrow.addEventListener('change', this._onNarrow);
+    this._syncRoom();
     this._start();
     this._bind();
   }
 
   disconnectedCallback() {
+    this._narrow.removeEventListener('change', this._onNarrow);
     this._stop();
     this._unbind();
   }
@@ -447,6 +444,14 @@ class ChestnutDashboard extends HTMLElement {
     const root = this.shadowRoot;
     root.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === this._tab)));
     root.querySelectorAll('[data-views]').forEach((n) => { n.hidden = !n.dataset.views.split(' ').includes(this._tab); });
+    this._syncRoom();
+  }
+
+  // The room animates only while it is on screen: Home or Simulation, wider than a phone (the
+  // room view itself also pauses while the page is hidden or the element is detached).
+  _syncRoom() {
+    const room = this._el && this._el.room;
+    if (room) room.active = !room.hidden && !this._narrow.matches;
   }
 
   // ── controls ───────────────────────────────────────────────────────────────────────────
@@ -524,7 +529,9 @@ class ChestnutDashboard extends HTMLElement {
     }
     const v = online ? this._read(a) : null;
     this._renderThermostat(v, ready);
-    this._renderRoom(v);
+    const room = this._el.room;
+    const roomAdapter = ready ? a : null;
+    if (room.adapter !== roomAdapter) room.adapter = roomAdapter;
     this._renderToday(online ? a : null, now);
     this._renderStatus(v, haUp);
   }
@@ -623,16 +630,6 @@ class ChestnutDashboard extends HTMLElement {
     const val = String(!!on);
     if (n.getAttribute('aria-pressed') !== val) n.setAttribute('aria-pressed', val);
     n.disabled = !enabled;
-  }
-
-  _renderRoom(v) {
-    const room = v ? v.room : null;
-    this._text('room-num', room == null ? DASH : `${room.toFixed(1)}°`);
-    this._text('ro-room', room == null ? DASH : `${room.toFixed(1)}°F`);
-    this._text('ro-target', v ? deg(v.eff) : DASH);
-    this._text('ro-air', v ? (v.callHeat || v.callCool || v.callFan ? 'on' : 'still') : DASH);
-    this._text('ro-hum', v && v.humidity != null ? `${Math.round(v.humidity)}%` : DASH);
-    this._text('room-label', this._adapter && this._resolved && this._adapter.simPresent() ? 'ROOM · SIM' : 'ROOM');
   }
 
   _renderToday(a, now) {
