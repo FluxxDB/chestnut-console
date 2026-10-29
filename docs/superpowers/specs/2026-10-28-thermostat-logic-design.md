@@ -82,7 +82,7 @@ Dang did not ask for a fast-forward mode for playing with it: the browser sim ru
 - The climate's internal low/high setpoints are always **derived from the effective target and the mode** (Mac call; the builder may refine the exact values within these rules):
   - **Heat:** heat to the effective target.
   - **Cool:** cool to the effective target.
-  - **Auto:** low = target − 1°F, high = target + 1°F. In Eco without a hold, both move out by N. Each side keeps a small deadband and overrun, so a target of 72°F reads as "heat below about 71, cool above about 73" (PC relaying Dang).
+  - **Auto:** low = target − 1°F, high = target + 1°F. In Eco without a hold, both move out by N. **Heating starts once the room is at or below `low`, cooling at or above `high`** — for a 72°F target, heat at 71 and cool at 73 *(Dang, final review: confirmed "below 71, above 73"; the deadband in Auto is made negligible so the published band edges are the real start points)*.
 - **A mode change mid-run** (ESPHome behaviour, kept; the screen's "Finishing up" line relies on it):
   - `main_thermostat` reports the new mode at once, but the action stays HEATING (or COOLING) until that call's minimum run ends. Switching to Off works the same way.
   - Then it passes through IDLE (for `min_idle_time`). The new call starts at the next update once its own minimum off time allows; `call_wait_reason` names the wait meanwhile.
@@ -98,7 +98,7 @@ Dang did not ask for a fast-forward mode for playing with it: the browser sim ru
 - Default times and levels: weekdays Wake 6:30 Comfort, Leave 8:30 Eco, Return 17:30 Comfort, Sleep 22:30 Eco. Weekends Wake 8:00 Comfort, Leave 10:00 Comfort, Return 17:00 Comfort, Sleep 23:00 Eco.
 - The schedule **only switches Comfort ↔ Eco**. It never changes the mode or the Comfort target. Off stays Off.
 - **Schedule on/off** switch (default on, restored).
-- **Hold:** a manual temperature change (see above) or a manual Comfort/Eco switch starts a hold. The hold ends when the next period starts, which then applies its own level. A **Resume schedule** button ends the hold early. With the schedule off, a manual change simply stays: there is no hold and no "until".
+- **Hold:** a manual temperature change (see above) or a manual Comfort/Eco switch starts a hold. The hold ends when the next period starts, which then applies its own level. A **Resume schedule** button ends the hold early. With the schedule off, a manual change simply stays: there is no hold and no "until". **− / + (set_target) then sets the target directly**: that number is the target until it's changed again or the schedule is turned back on; the Comfort setting is untouched *(Dang, final review)*.
 - **What the screen needs as data, not just text** (from the PC's screen spec): the current period name, its level, the next period's start time, whether a hold is on, and the held temperature. A ready-made status text also exists for HA and the web page, e.g. "Eco until 5:30 pm" or "Holding 69° until 10:30 pm". Times use 12-hour format.
 - **Clock:** the schedule uses the device clock (on the Tab5, the battery-backed RTC, then SNTP; on the host, the system clock), in America/New_York. If the clock isn't valid, the schedule pauses at the current level and says so in its status. Heating and cooling carry on regardless.
 - **After a reboot** the schedule re-applies the current period's level. A hold doesn't survive a reboot. (Mac call: simplest, and a reboot is rare.)
@@ -124,7 +124,7 @@ Dang did not ask for a fast-forward mode for playing with it: the browser sim ru
    - All `relay_*` switches are `internal: true`, in both the sim and hardware packages (a contract addition). Nothing but the logic package can drive them: no HA toggle, no web page toggle. Read-only "call" sensors (below) show their state.
 4. **Sensor sanity** (thresholds are a Mac call, tunable in one place). The logic package feeds the thermostat a *checked* temperature, not `room_temperature` directly. A reading counts as bad when:
    - it's NaN or missing, or no new reading has arrived for 2 minutes;
-   - it's outside 2–40°C (36–104°F);
+   - it's outside −10–50°C (14–122°F). *(Dang, final review: widened from 2–40°C so a freezing or baking house still gets heated or cooled back after an outage; only impossible readings count.)*
    - it hasn't changed at all for 30 minutes. (The SHT40 always has a little noise, so an identical value for that long means a stuck sensor. The sim adds similar noise.)
 
    A single-reading jump of more than 2°C is held back for one more reading before it's believed: a spike is filtered, a real change gets through. On a bad reading:
