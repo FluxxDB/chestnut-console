@@ -208,3 +208,19 @@ test('logbook returns newest first', async () => {
   assert.deepEqual(l.map((e) => e.t), [3000, 2000, 1000]);
   assert.equal(l[0].msg, 'turned off');
 });
+
+test('attr and updatedMs read the state object; null when absent or unavailable', async () => {
+  const { hass } = makeHass({ states: {
+    'climate.main_thermostat_main_thermostat': { state: 'heat', attributes: { hvac_action: 'heating', fan_modes: ['on', 'auto'] }, last_updated: '2026-10-29T12:00:00.000Z' },
+  } });
+  const a = new Adapter(hass, { deviceName: 'Main Thermostat' });
+  await a.resolve();
+  assert.equal(a.attr('main_thermostat', 'hvac_action'), 'heating');
+  assert.deepEqual(a.attr('main_thermostat', 'fan_modes'), ['on', 'auto']);
+  assert.equal(a.attr('main_thermostat', 'nope'), null);
+  assert.equal(a.attr('call_heat', 'x'), null);
+  assert.equal(a.updatedMs('main_thermostat'), Date.parse('2026-10-29T12:00:00.000Z'));
+  assert.equal(a.updatedMs('call_heat'), null);
+  hass.states['climate.main_thermostat_main_thermostat'] = { state: 'unavailable', attributes: { hvac_action: 'heating' } };
+  assert.equal(a.attr('main_thermostat', 'hvac_action'), null);
+});

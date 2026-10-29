@@ -94,6 +94,22 @@ export class Adapter {
     return null;
   }
 
+  // An attribute of a live entity (null when absent, unavailable or unknown), e.g. the
+  // climate's hvac_action / fan_mode / fan_modes.
+  attr(objId, name) {
+    const s = this._state(objId);
+    if (!s || DEAD.has(s.state) || !s.attributes) return null;
+    return s.attributes[name] ?? null;
+  }
+
+  // When HA last wrote the entity's state (ms), e.g. to interpolate action_elapsed.
+  updatedMs(objId) {
+    const s = this._state(objId);
+    if (!s) return null;
+    const v = s.last_updated ?? s.last_changed;
+    return v == null ? null : toMs(v);
+  }
+
   online() {
     const s = this._state('main_thermostat');
     return !!s && s.state !== 'unavailable';
