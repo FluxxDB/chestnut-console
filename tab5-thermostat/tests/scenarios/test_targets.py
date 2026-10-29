@@ -6,8 +6,10 @@ mode, comfort_target, eco_offset, comfort_level and a hold. Two kinds of hold (r
 R13), both shown as schedule_hold: switching comfort_level by hand is a level hold (the level
 applies normally, Eco widening included); set_target and setpoint writes to the climate (HA, the
 API) are a temperature hold (no Eco widening), which any mode change ends. Defaults: comfort 72°F, Eco
-offset 4, Comfort, mode Off. The thermostat's deadband and overrun are 0.5 °C (0.9°F), so a
-heat target of 68 starts heating at 67.1 and a cool target of 76 starts cooling at 76.9.
+offset 4, Comfort, mode Off. In Heat and Cool the thermostat's deadband and overrun are 0.5 °C
+(0.9°F), so a heat target of 68 starts heating at 67.1 and a cool target of 76 starts cooling at
+76.9. In Auto (ruling R21) the deadband is zero: the band edges are the start points, so a 72
+target heats at 71 and cools at 73; the 0.5 °C overrun still sets the stop points.
 
 Physics: one 1 s step = 10 simulated minutes. With the default 8 h house the room moves about
 2% of the gap to outdoor per step; a 1 h house (sim_tau_h) moves it about 15%, which the tests
@@ -108,26 +110,45 @@ async def test_eco_cool_band(device):
 async def test_auto_single_target(device):
     await ready(device)
     await room_near(device, 74, 71.5)  # inside the 71-73 band
-    await fixed_weather(device, 60)
+    await fixed_weather(device, 66)  # drifts down about 0.1°F a step
     await device.climate(mode="HEAT_COOL")
     await effective(device, 72, 71, 73)
     await setpoints_f(device, 71, 73)
     assert (await climate(device)).mode == ClimateMode.HEAT_COOL
     assert await device.state("schedule_hold") is False
+    # R21: heating starts once the room is at or below 71 (not at 71.5, not only at 70.1).
     at = await reading_when_on(device, "call_heat")
-    assert 69.5 < at <= 71 - DEADBAND_F + 0.05, f"heating started at {at:.2f}°F"
+    assert 70.6 < at <= 71 + 0.1, f"heating started at {at:.2f}°F"
     assert True not in device.history("call_cool")
 
 
 async def test_auto_cools_above(device):
     await ready(device)
     await room_near(device, 74, 71.5)
-    await fixed_weather(device, 85)
+    await fixed_weather(device, 78)  # rises about 0.1°F a step
     await device.climate(mode="HEAT_COOL")
     await effective(device, 72, 71, 73)
+    # R21: cooling starts once the room is at or above 73 (not at 72.5, not only at 73.9).
     at = await reading_when_on(device, "call_cool")
-    assert 73 + DEADBAND_F - 0.05 <= at < 75, f"cooling started at {at:.2f}°F"
+    assert 73 - 0.1 <= at < 73.4, f"cooling started at {at:.2f}°F"
     assert True not in device.history("call_heat")
+
+
+async def test_auto_heat_stops_at_overrun_without_cooling(device):
+    # The stop point keeps Auto from flip-flopping: heating that started at 71 stops once the
+    # room passes 71.9 (the 0.5 °C overrun), well short of the 73 where cooling would start.
+    # A weak furnace (2°F/h, about +0.2°F a step net) so the 3 s minimum run ends first.
+    await ready(device)
+    await room_near(device, 74, 71.5)
+    await device.set_number("sim_heat_fph", 2)
+    await fixed_weather(device, 66)
+    await device.climate(mode="HEAT_COOL")
+    await device.wait_for("call_heat", is_on, 30)
+    await device.wait_for("call_heat", is_off, 30)
+    at = await device.state("checked_temperature")
+    assert 71.8 <= at < 72.5, f"heating stopped at {at:.2f}°F"
+    await device.sleep(2)
+    assert True not in device.history("call_cool")
 
 
 async def test_auto_eco_band(device):
@@ -367,12 +388,12 @@ async def auto_heat_then_cool_wanted(dev):
     minimum run carries the room past the band's top, so cooling is wanted the moment heat ends.
     Returns when call_heat goes off."""
     await ready(dev)
-    await fixed_weather(dev, 90)  # about +0.45°F a step: still below 70.1 when heat may start
+    await fixed_weather(dev, 90)  # about +0.45°F a step: still below 71 when heat may start
     await dev.climate(mode="HEAT_COOL")
     await dev.wait_for("call_heat", is_on, HEAT_OFF_S + 3)
     await dev.wait_for("call_heat", is_off, HEAT_RUN_S + 3)
     # The room keeps rising toward 90: cooling is wanted now or within a step or two.
-    await dev.wait_for("checked_temperature", lambda v: v > 73 + DEADBAND_F + 0.1, 3)
+    await dev.wait_for("checked_temperature", lambda v: v > 73 + 0.2, 3)
 
 
 async def test_auto_changeover_lockout(device):

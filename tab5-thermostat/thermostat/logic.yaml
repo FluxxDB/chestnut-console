@@ -21,9 +21,12 @@ substitutions:
   cool_run_s: "300"
   cool_off_s: "300"
   min_idle_s: "30"
-  # The thermostat's heat / cool deadband (°C): 0.5 °C = 0.9°F. The Auto changeover lockout
-  # swaps the locked side's deadband for a huge one while it lasts (see sync_changeover).
+  # The thermostat's heat / cool deadband (°C) in Heat and Cool: 0.5 °C = 0.9°F. In Auto it is
+  # auto_deadband_c (ruling R21: zero, so the band edges effective_low / effective_high are the
+  # real start points). sync_changeover sets them per mode, and the Auto changeover lockout
+  # swaps the locked side's deadband for a huge one while it lasts.
   deadband_c: "0.5"
+  auto_deadband_c: "0.0"
   # The schedule's clock (a time component; sntp_time on the Tab5) and how often it's read. It
   # re-evaluates only when the minute changes, so reading it every second costs little, and a
   # period starts within a second: a hold started just after a period began is then recorded
@@ -64,6 +67,7 @@ esphome:
         - lambda: |-
             id(g_level_eco) = id(comfort_level).current_option() == "Eco";
             id(g_ready) = true;
+        - script.execute: sync_changeover  # the restored mode's deadbands
         - script.execute:
             id: schedule_from_clock
             force: true
@@ -304,9 +308,10 @@ climate:
       min_temperature: 8.5
       max_temperature: 33.5
       temperature_step: 0.5
-    # 0.5 °C (0.9°F) each side (ESPHome's defaults, stated here): a heat target of 72 starts
-    # heating at 71.1 and stops at 72.9; the Auto band 71-73 heats below about 70 and cools
-    # above about 74, and the two never overlap.
+    # Heat and Cool: 0.5 °C (0.9°F) each side (ESPHome's defaults, stated here): a heat target of
+    # 72 starts heating at 71.1 and stops at 72.9. Auto (sync_changeover sets its deadband to
+    # auto_deadband_c, zero): the band 71-73 heats at 71 or below and stops at 71.9, cools at 73
+    # or above and stops at 72.1, so the two never overlap.
     heat_deadband: ${deadband_c}
     heat_overrun: 0.5
     cool_deadband: ${deadband_c}
@@ -541,7 +546,7 @@ interval:
           const bool was = s->fault();
           s->tick(millis());
           if (s->fault() != was) id(checked_temperature_c).publish_state(s->value());
-      # Auto changeover lockout: when it ends, put the normal deadband back and let the
+      # Auto changeover lockout: when it ends, put Auto's own deadband back and let the
       # thermostat re-evaluate at once (the held-back call starts within a second). Clearing
       # g_last_call also keeps millis() wrapping from reviving an old lockout.
       - lambda: |-
@@ -578,8 +583,8 @@ interval:
           const bool changeover =
               th->mode == climate::CLIMATE_MODE_HEAT_COOL &&
               (int32_t) (id(g_lockout_until_ms) - millis()) > 0 &&
-              ((id(g_last_call) == 1 && room >= th->target_temperature_high + ${deadband_c}) ||
-               (id(g_last_call) == 2 && room <= th->target_temperature_low - ${deadband_c}));
+              ((id(g_last_call) == 1 && room >= th->target_temperature_high + ${auto_deadband_c}) ||
+               (id(g_last_call) == 2 && room <= th->target_temperature_low - ${auto_deadband_c}));
           const char *reason = "";
           if (id(g_interlock_latched)) {
             reason = "Interlock fault";
@@ -615,32 +620,36 @@ interval:
           force: false
 
 script:
-  # The one place the climate's setpoints are set. Derives them from the mode, comfort_target,
-  # eco_offset, comfort_level and the hold, publishes the effective target and band (and
-  # set_target, which follows the effective target so − / + step from it), then sets the
-  # climate's low / high: into the outside call being handled (on_control), or with its own
-  # call marked g_applying. Synchronous; runs at boot, on any of those changing and on every
-  # mode change.
-  # Auto changeover lockout (spec, Safety 2): after a heat call ends in Auto, no cool call for
-  # changeover_lockout minutes, and the other way round. In Auto, while the lockout lasts, the
-  # locked side's deadband is set far out of reach, so the stock thermostat never decides that
-  # call: its action stays IDLE (always matching the relays), no timer is touched, and the
-  # other side works as usual. Run on every lockout change (idle_action, its end in the
-  # interval) and before every mode change (on_control, with the incoming mode), so a manual
-  # switch out of Auto gets the normal deadbands back before the thermostat re-evaluates. A
-  # call already running when the deadband changes keeps its own hysteresis and finishes.
+  # The deadbands for the mode: deadband_c in Heat and Cool, auto_deadband_c in Auto (R21: the
+  # band edges are the start points). And the Auto changeover lockout (spec, Safety 2): after a
+  # heat call ends in Auto, no cool call for changeover_lockout minutes, and the other way
+  # round. In Auto, while the lockout lasts, the locked side's deadband is set far out of reach,
+  # so the stock thermostat never decides that call: its action stays IDLE (always matching the
+  # relays), no timer is touched, and the other side works as usual. Run at boot (the restored
+  # mode), on every lockout change (idle_action, its end in the interval) and before every mode
+  # change (on_control, with the incoming mode), so a switch into or out of Auto gets that
+  # mode's deadbands before the thermostat re-evaluates. A call already running when the
+  # deadband changes keeps its own hysteresis and finishes.
   - id: sync_changeover
     mode: single
     then:
       - lambda: |-
           auto *t = id(main_thermostat);
           const climate::ClimateMode m = id(g_pending_call) != nullptr ? id(g_pending_mode) : t->mode;
-          const bool on = m == climate::CLIMATE_MODE_HEAT_COOL && id(g_last_call) != 0 &&
+          const bool is_auto = m == climate::CLIMATE_MODE_HEAT_COOL;
+          const bool on = is_auto && id(g_last_call) != 0 &&
                           (int32_t) (id(g_lockout_until_ms) - millis()) > 0;
           static constexpr float LOCKED_C = 1000.0f;  // no room ever gets there
-          t->set_cool_deadband(on && id(g_last_call) == 1 ? LOCKED_C : ${deadband_c});
-          t->set_heat_deadband(on && id(g_last_call) == 2 ? LOCKED_C : ${deadband_c});
+          const float db = is_auto ? ${auto_deadband_c} : ${deadband_c};
+          t->set_cool_deadband(on && id(g_last_call) == 1 ? LOCKED_C : db);
+          t->set_heat_deadband(on && id(g_last_call) == 2 ? LOCKED_C : db);
 
+  # The one place the climate's setpoints are set. Derives them from the mode, comfort_target,
+  # eco_offset, comfort_level and the hold, publishes the effective target and band (and
+  # set_target, which follows the effective target so − / + step from it), then sets the
+  # climate's low / high: into the outside call being handled (on_control), or with its own
+  # call marked g_applying. Synchronous; runs at boot, on any of those changing and on every
+  # mode change.
   - id: apply_setpoints
     mode: single
     then:
