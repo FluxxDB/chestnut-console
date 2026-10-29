@@ -8,6 +8,8 @@ home-assistant/config/*
 !home-assistant/config/automations.yaml
 !home-assistant/config/scripts.yaml
 !home-assistant/config/scenes.yaml
+!home-assistant/config/www/
+!home-assistant/config/www/**
 
 # ESPHome build output and Device Builder state (includes a pairing key)
 tab5-thermostat/.esphome/
