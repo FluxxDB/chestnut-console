@@ -163,6 +163,11 @@ inline ScheduleState schedule_at(const Week &w, int dow, int minute) {
   return s;
 }
 
+// ESPTime's day_of_week (1=Sun..7=Sat) as the schedule's day (0=Mon..6=Sun).
+inline int schedule_dow(int esp_day_of_week) { return ((esp_day_of_week + 5) % 7 + 7) % 7; }
+
+inline int minute_of_day(int hour, int minute) { return hour * 60 + minute; }
+
 inline const char *period_name(int period) {
   switch (period) {
     case 0: return "Wake";
@@ -195,6 +200,15 @@ struct SanityConfig {
   float spike_c;       // a jump of more than this from the last accepted reading is held back
 };
 
+// The production thresholds (spec, Safety 4), with every time in units of unit_ms (one real
+// minute on the device; the tests shorten it): stale after 2 units without an accepted reading,
+// frozen after 30 units of an identical value, recovered after 5 units of good readings;
+// -10..50 C (14-122°F, ruling R19: only impossible readings, so a freezing or baking house is
+// still heated or cooled back); a jump over 2 C held back for one reading.
+inline SanityConfig sanity_config(uint32_t unit_ms) {
+  return SanityConfig{2u * unit_ms, 30u * unit_ms, 5u * unit_ms, -10.0f, 50.0f, 2.0f};
+}
+
 namespace detail {
 // Wrap-safe time since `then` (uint32 ms, like ESPHome's millis()). A timestamp slightly
 // ahead of `now` counts as zero elapsed rather than ~49 days.
@@ -208,8 +222,8 @@ inline uint32_t elapsed_ms(uint32_t now, uint32_t then) {
 // on_reading() and call tick() at least once a second; publish value() (NaN on a fault)
 // as the thermostat's input and fault() as the problem sensor.
 //
-// Bad: NaN, outside [min, max], no reading for stale_ms, or the identical value for
-// frozen_ms. A fault starts at the first bad condition and clears after recover_ms of
+// Bad: NaN, outside [min, max], no accepted reading for stale_ms (readings that keep arriving
+// but are never believed count as none), or the identical value for frozen_ms. A fault starts at the first bad condition and clears after recover_ms of
 // continuous good readings; any bad condition restarts that window.
 //
 // Spike: a reading more than spike_c from the last accepted one is held back. If the next
@@ -219,17 +233,15 @@ inline uint32_t elapsed_ms(uint32_t now, uint32_t then) {
 // it restarts the recovery window. A bad reading drops a held one.
 //
 // Startup: value() is NaN until the first accepted reading, but fault() stays false until
-// stale_ms passes with no reading at all (the clock starts at the first call).
+// stale_ms passes with no accepted reading (the clock starts at the first call).
 class SanityChecker {
  public:
   explicit SanityChecker(SanityConfig cfg) : cfg_(cfg) {}
 
   void on_reading(uint32_t now_ms, float c) {
     start(now_ms);
-    // A gap since the previous reading is caught even if tick() was late.
+    // A gap since the last accepted reading is caught even if tick() was late.
     if (time_bad(now_ms)) mark_bad();
-    last_rx_ms_ = now_ms;
-    stale_ = false;
     if (!std::isnan(c)) {
       if (!have_frozen_ || c != frozen_value_) {
         frozen_value_ = c;
@@ -239,11 +251,15 @@ class SanityChecker {
       }
     }
     // Still frozen counts too: the identical value keeps arriving but is not good.
-    if (std::isnan(c) || c < cfg_.min_c || c > cfg_.max_c || time_bad(now_ms)) {
+    if (std::isnan(c) || c < cfg_.min_c || c > cfg_.max_c || frozen_) {
       mark_bad();
       return;
     }
     const bool accepted = accept(c);
+    if (accepted) {
+      last_ok_ms_ = now_ms;
+      stale_ = false;  // stale ends with the next accepted reading
+    }
     if (fault_) {
       if (!accepted)
         good_valid_ = false;
@@ -271,14 +287,14 @@ class SanityChecker {
   void start(uint32_t now_ms) {
     if (started_) return;
     started_ = true;
-    last_rx_ms_ = now_ms;
+    last_ok_ms_ = now_ms;
   }
 
   // Stale and frozen are latched as state the moment they are seen, so they stay true however
   // long they last (elapsed_ms saturates to 0 past 2^31 ms, about 24.8 days). stale_ ends with
-  // the next reading, frozen_ only when the value changes.
+  // the next accepted reading, frozen_ only when the value changes.
   bool time_bad(uint32_t now_ms) {
-    if (detail::elapsed_ms(now_ms, last_rx_ms_) > cfg_.stale_ms) stale_ = true;
+    if (detail::elapsed_ms(now_ms, last_ok_ms_) > cfg_.stale_ms) stale_ = true;
     if (have_frozen_ && detail::elapsed_ms(now_ms, frozen_since_ms_) > cfg_.frozen_ms) frozen_ = true;
     return stale_ || frozen_;
   }
@@ -318,7 +334,7 @@ class SanityChecker {
 
   SanityConfig cfg_;
   bool started_ = false;
-  uint32_t last_rx_ms_ = 0;
+  uint32_t last_ok_ms_ = 0;  // the last accepted reading (or the first call)
   bool stale_ = false;
   bool frozen_ = false;
   bool have_frozen_ = false;

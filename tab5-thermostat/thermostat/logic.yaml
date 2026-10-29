@@ -44,12 +44,10 @@ esphome:
     - priority: 800
       then:
         - lambda: |-
-            // Production thresholds with every time scaled by timer_unit_s: stale 2 min,
-            // frozen 30 min, recover after 5 min of good readings; 2-40 °C; a jump over 2 °C
-            // held back for one reading.
-            static chestnut::SanityChecker checker(chestnut::SanityConfig{
-                2000u * ${timer_unit_s}, 30000u * ${timer_unit_s}, 5000u * ${timer_unit_s},
-                2.0f, 40.0f, 2.0f});
+            // The production thresholds (chestnut::sanity_config: stale 2 min, frozen 30 min,
+            // recover after 5 min of good readings; -10..50 °C; a jump over 2 °C held back for
+            // one reading), with one "minute" = timer_unit_s seconds.
+            static chestnut::SanityChecker checker(chestnut::sanity_config(1000u * ${timer_unit_s}));
             id(g_sanity) = &checker;
             id(g_boot_ms) = millis();  // millis() isn't uptime on the host (monotonic clock)
             id(room_temperature).add_on_state_callback([](float c) {
@@ -690,11 +688,13 @@ script:
       force: bool
     then:
       - lambda: |-
+          // Until boot is done (the last on_boot step forces the first evaluation): on the Tab5
+          // the interval can fire while setup still waits on the network.
+          if (!force && !id(g_ready)) return;
           const auto now = id(${clock_id}).now();
           const bool valid = now.is_valid();
-          // ESPTime's day_of_week is 1=Sun..7=Sat; the schedule's is 0=Mon..6=Sun.
-          const int dow = valid ? (now.day_of_week + 5) % 7 : id(g_last_dow);
-          const int minute = valid ? now.hour * 60 + now.minute : id(g_last_min);
+          const int dow = valid ? chestnut::schedule_dow(now.day_of_week) : id(g_last_dow);
+          const int minute = valid ? chestnut::minute_of_day(now.hour, now.minute) : id(g_last_min);
           if (force || valid != id(g_clock_valid) || dow != id(g_last_dow) ||
               minute != id(g_last_min))
             id(schedule_evaluate).execute(valid, dow, minute);

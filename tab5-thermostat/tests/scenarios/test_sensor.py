@@ -3,7 +3,8 @@ call_wait_reason and action_elapsed.
 
 The thermostat acts on checked_temperature_c, which the SanityChecker feeds from
 room_temperature. The test build scales the production thresholds by timer_unit_s = 1:
-stale 2 s, frozen 30 s, recovery after 5 s of good readings (2-40 °C, spike 2 °C unchanged).
+stale 2 s without an accepted reading, frozen 30 s, recovery after 5 s of good readings
+(-10..50 °C, i.e. 14-122°F, and the 2 °C spike limit unchanged).
 The sim publishes every 250 ms, so a fault cleared by readings lands about 5.25 s after the
 first good one. On a fault the thermostat asks for OFF: no new call starts, a running call
 still finishes its minimum run (Dang's Q3), and on recovery the minimum off times still apply.
@@ -213,3 +214,19 @@ async def test_wait_reason_starting_up_lasts_the_longer_min_off(device):
     await device.wait_for("call_cool", is_on, boot + STARTUP_S + 3 - now())
     assert_near(await device.edge("call_cool", True), STARTUP_S, "call_cool after boot")
     await device.wait_for("call_wait_reason", lambda v: v == "", 1.5)
+
+
+async def test_freezing_house_is_still_heated(device):
+    # Ruling R19: a house left cold (below the old 2 °C / 35.6°F limit) reads as a real
+    # temperature, so heating starts and brings it back. A leaky 1 h house at 20°F outdoor gets
+    # there in a few seconds.
+    await device.set_number("sim_tau_h", 1)
+    await fixed_weather(device, 20)
+    await device.wait_for("sim_room_f", lambda v: v < 32, 20)
+    await device.sleep(1)  # a few readings at freezing
+    assert True not in device.history("sensor_fault"), "a freezing room counted as a bad reading"
+    checked = await device.state("checked_temperature")
+    assert not is_nan(checked) and checked < 34, checked
+    await heat_to(device, 68)
+    await device.wait_for("call_heat", is_on, HEAT_OFF_S + 3)
+    assert await device.state("sensor_fault") is False

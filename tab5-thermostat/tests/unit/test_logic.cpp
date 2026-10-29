@@ -180,10 +180,47 @@ static void format_12h_cases() {
   CHECK(format_12h(1439) == "11:59 pm");
 }
 
-// ---- Sanity checker -------------------------------------------------------------------
-// Unit = 1000 ms: stale 2 s, frozen 30 s, recover 5 s, 2..40 C, spike 2 C.
+// ---- Schedule clock mapping -----------------------------------------------------------
 
-static SanityConfig sanity_cfg() { return SanityConfig{2000, 30000, 5000, 2.0f, 40.0f, 2.0f}; }
+// ESPTime's day_of_week is 1=Sun..7=Sat; the schedule's is 0=Mon..6=Sun.
+static void schedule_dow_all_days() {
+  CHECK(schedule_dow(1) == 6);  // Sunday
+  CHECK(schedule_dow(2) == 0);  // Monday
+  CHECK(schedule_dow(3) == 1);
+  CHECK(schedule_dow(4) == 2);
+  CHECK(schedule_dow(5) == 3);
+  CHECK(schedule_dow(6) == 4);  // Friday
+  CHECK(schedule_dow(7) == 5);  // Saturday
+  CHECK(minute_of_day(0, 0) == 0);
+  CHECK(minute_of_day(6, 30) == 390);
+  CHECK(minute_of_day(23, 59) == 1439);
+  // Saturday and Sunday use the weekend set, Friday the weekday set.
+  Week w{};
+  for (int i = 0; i < 4; i++) {
+    w.weekday[i] = Period{i * 60, false};
+    w.weekend[i] = Period{i * 60, true};
+  }
+  CHECK(!schedule_at(w, schedule_dow(6), 600).eco);
+  CHECK(schedule_at(w, schedule_dow(7), 600).eco);
+  CHECK(schedule_at(w, schedule_dow(1), 600).eco);
+  CHECK(!schedule_at(w, schedule_dow(2), 600).eco);
+}
+
+// ---- Sanity checker -------------------------------------------------------------------
+// The production thresholds (sanity_config) with unit = 1000 ms: stale 2 s, frozen 30 s,
+// recover 5 s, -10..50 C, spike 2 C.
+
+static SanityConfig sanity_cfg() { return sanity_config(1000); }
+
+static void feed_noisy(SanityChecker &s, uint32_t from, uint32_t to, uint32_t step, float base);
+
+static void sanity_production_config() {
+  const SanityConfig c = sanity_config(60000);  // one unit = one real minute
+  CHECK(c.stale_ms == 120000u && c.frozen_ms == 1800000u && c.recover_ms == 300000u);
+  CHECK_NEAR(c.min_c, -10.0, 1e-6);  // 14°F (R19)
+  CHECK_NEAR(c.max_c, 50.0, 1e-6);   // 122°F
+  CHECK_NEAR(c.spike_c, 2.0, 1e-6);
+}
 
 // Feeds one reading per `period_ms` (and a tick in between) from `from` to `to` inclusive.
 static void feed(SanityChecker &s, uint32_t from, uint32_t to, uint32_t period_ms, float c) {
@@ -206,19 +243,58 @@ static void sanity_nan_faults_immediately() {
 static void sanity_out_of_range() {
   SanityChecker s(sanity_cfg());
   s.on_reading(0, 21.0f);
-  s.on_reading(100, 45.0f);
+  s.on_reading(100, 50.1f);
   CHECK(s.fault());
   CHECK(std::isnan(s.value()));
   SanityChecker lo(sanity_cfg());
-  lo.on_reading(0, 1.9f);
+  lo.on_reading(0, -10.1f);
   CHECK(lo.fault());
-  // The limits themselves are fine.
-  SanityChecker a(sanity_cfg()), b(sanity_cfg());
-  a.on_reading(0, 2.0f);
-  b.on_reading(0, 40.0f);
-  CHECK(!a.fault() && !b.fault());
-  CHECK_NEAR(a.value(), 2.0, 1e-6);
-  CHECK_NEAR(b.value(), 40.0, 1e-6);
+  // The limits themselves are fine, and so is a freezing or baking house (R19).
+  SanityChecker a(sanity_cfg()), b(sanity_cfg()), cold(sanity_cfg()), hot(sanity_cfg());
+  a.on_reading(0, -10.0f);
+  b.on_reading(0, 50.0f);
+  cold.on_reading(0, 1.0f);
+  hot.on_reading(0, 45.0f);
+  CHECK(!a.fault() && !b.fault() && !cold.fault() && !hot.fault());
+  CHECK_NEAR(a.value(), -10.0, 1e-6);
+  CHECK_NEAR(b.value(), 50.0, 1e-6);
+  CHECK_NEAR(cold.value(), 1.0, 1e-6);
+  CHECK_NEAR(hot.value(), 45.0, 1e-6);
+}
+
+// Readings keep arriving and are in range, but none is ever accepted (each jumps more than the
+// spike limit from both the held reading and the last accepted value): stale, measured from the
+// last ACCEPTED reading. Accepted readings near the old value then recover it as usual.
+static void sanity_never_accepted_goes_stale() {
+  SanityChecker s(sanity_cfg());
+  s.on_reading(0, 21.0f);
+  uint32_t t = 250;
+  for (; t <= 2000; t += 250) {
+    s.on_reading(t, (t / 250) % 2 ? 25.0f : 29.0f);
+    s.tick(t);
+  }
+  CHECK(!s.fault());  // exactly stale_ms since the last accepted reading: not yet
+  CHECK_NEAR(s.value(), 21.0, 1e-6);
+  s.on_reading(2250, 25.0f);
+  CHECK(s.fault());
+  CHECK(std::isnan(s.value()));
+  // The same through tick() alone.
+  SanityChecker k(sanity_cfg());
+  k.on_reading(0, 21.0f);
+  k.on_reading(1000, 25.0f);
+  k.on_reading(1500, 29.0f);
+  k.tick(2000);
+  CHECK(!k.fault());
+  k.tick(2001);
+  CHECK(k.fault());
+  // Good readings again: the window starts at the first accepted one and clears after 5 s.
+  feed_noisy(s, 3000, 8000, 250, 21.0f);
+  s.tick(7999);
+  CHECK(s.fault());
+  s.on_reading(8000, 21.1f);
+  s.tick(8000);
+  CHECK(!s.fault());
+  CHECK_NEAR(s.value(), 21.1, 1e-6);
 }
 
 static void sanity_stale() {
@@ -283,13 +359,14 @@ static void sanity_spike_filtered() {
   s.on_reading(2000, 21.1f);
   CHECK(!s.fault());
   CHECK_NEAR(s.value(), 21.1, 1e-6);
-  // A second, different spike replaces the first; the held one is dropped.
+  // A second, different spike replaces the first; the held one is dropped. (Readings 500 ms
+  // apart: three unaccepted readings 1 s apart would be 3 s without an accepted one, stale.)
   SanityChecker d(sanity_cfg());
   d.on_reading(0, 21.0f);
-  d.on_reading(1000, 31.0f);
-  d.on_reading(2000, 40.0f);
+  d.on_reading(500, 31.0f);
+  d.on_reading(1000, 40.0f);
   CHECK_NEAR(d.value(), 21.0, 1e-6);
-  d.on_reading(3000, 21.2f);
+  d.on_reading(1500, 21.2f);
   CHECK(!d.fault());
   CHECK_NEAR(d.value(), 21.2, 1e-6);
 }
@@ -454,28 +531,29 @@ static void sanity_stale_during_recovery() {
   CHECK(!s.fault());
 }
 
-// A bad reading between a held spike and the next reading drops the held one.
+// A bad reading between a held spike and the next reading drops the held one. (Readings 500 ms
+// apart, inside the 2 s stale limit counted from the last accepted reading.)
 static void sanity_bad_drops_held_spike() {
   SanityChecker s(sanity_cfg());
   s.on_reading(0, 21.0f);
-  s.on_reading(1000, 31.0f);  // held
-  s.on_reading(2000, NAN);
-  s.on_reading(3000, 31.1f);  // must not confirm the old held reading
+  s.on_reading(500, 31.0f);  // held
+  s.on_reading(1000, NAN);
+  s.on_reading(1500, 31.1f);  // must not confirm the old held reading
   CHECK(s.fault());
   CHECK(std::isnan(s.value()));
-  s.on_reading(4000, 31.2f);  // within spike of the new held reading: real change
-  feed_noisy(s, 4500, 9000, 500, 31.2f);
-  s.tick(8999);
+  s.on_reading(2000, 31.2f);  // within spike of the new held reading: real change
+  feed_noisy(s, 2500, 7000, 500, 31.2f);
+  s.tick(6999);
   CHECK(s.fault());
-  s.on_reading(9000, 31.3f);
-  s.tick(9000);
+  s.on_reading(7000, 31.3f);
+  s.tick(7000);
   CHECK(!s.fault());
   CHECK_NEAR(s.value(), 31.3, 1e-6);
 }
 
 // ---- Sanity checker: conditions that outlast 2^31 ms (24.8 days) ------------------------
 
-static SanityConfig sanity_prod_cfg() { return SanityConfig{120000, 1800000, 300000, 2.0f, 40.0f, 2.0f}; }
+static SanityConfig sanity_prod_cfg() { return sanity_config(60000); }
 
 // A dead sensor repeating one value must stay faulted past 2^31 ms, and recover only
 // after the value changes and recover_ms of good readings.
@@ -557,6 +635,9 @@ int main() {
   schedule_out_of_order_times();
   schedule_edges();
   format_12h_cases();
+  schedule_dow_all_days();
+  sanity_production_config();
+  sanity_never_accepted_goes_stale();
   sanity_nan_faults_immediately();
   sanity_out_of_range();
   sanity_stale();
