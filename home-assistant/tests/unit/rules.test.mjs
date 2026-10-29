@@ -1,7 +1,7 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  statusFor, targetLabel, holdKind, levelShouldSend, countdown, dayBar, toF, fromF, Debouncer,
+  statusFor, targetLabel, holdKind, levelShouldSend, countdown, dayBar, toF, fromF, Debouncer, safetyRows, eventText,
 } from '../../config/www/chestnut/lib/rules.js';
 
 const eq = assert.equal;
@@ -124,4 +124,59 @@ test('debounce_cancel', () => {
     d.tap(80, 72); d.cancel(); mock.timers.tick(5000);
     eq(fired.length, 0);
   } finally { mock.timers.reset(); }
+});
+
+// --- System tab: safety bars (countdown from action_elapsed) and event-log wording ---
+const mins = { heatRun: 3, heatOff: 5, coolRun: 4, coolOff: 6 };
+const at = (action, elapsedS, extra = {}) => safetyRows({ action, actionElapsedS: elapsedS, publishedAtMs: 1000, nowMs: 1000, mins, ...extra });
+
+test('safety_heating_counts_min_run', () => {
+  const r = at('heating', 60);
+  eq(r.heatRun.val, '2 min left'); closeTo(r.heatRun.frac, 1 / 3, 1e-9);
+  eq(r.heatOff.val, 'running'); eq(r.heatOff.frac, 0);
+  eq(r.coolRun.val, '✓ ok');
+  eq(r.coolOff.val, '—'); // unknowable while the furnace runs
+  eq(at('heating', 200).heatRun.val, '✓ ok');
+  eq(at('heating', 200).heatRun.frac, 1);
+});
+test('safety_interpolates_since_publish', () => {
+  const r = safetyRows({ action: 'cooling', actionElapsedS: 0, publishedAtMs: 0, nowMs: 150_000, mins });
+  eq(r.coolRun.val, '2 min left'); // 4 min − 2.5 min = 1.5 → ceil
+  eq(r.heatOff.val, '—');
+});
+test('safety_idle_counts_min_off', () => {
+  const r = at('idle', 120);
+  eq(r.heatOff.val, '3 min left'); closeTo(r.heatOff.frac, 120 / 300, 1e-9);
+  eq(r.coolOff.val, '4 min left');
+  eq(r.heatRun.val, '✓ ok'); eq(r.heatRun.frac, 0);
+  const done = at('off', 3600);
+  eq(done.heatOff.val, '✓ ready'); eq(done.heatOff.frac, 0);
+  eq(done.coolOff.val, '✓ ready');
+  eq(at('fan', 60).heatOff.val, '4 min left');
+});
+test('safety_unknown_shows_dash', () => {
+  for (const r of [at(null, 60), at('heating', null), safetyRows({ action: 'heating', actionElapsedS: 60, publishedAtMs: 1000, nowMs: 1000, mins: { ...mins, heatRun: null } })]) {
+    eq(r.heatRun.val, '—');
+    eq(r.heatRun.frac, 0);
+  }
+  eq(at(null, 60).coolOff.val, '—');
+});
+test('event_text_plain_wording', () => {
+  eq(eventText('call_heat', 'on').msg, 'furnace on');
+  eq(eventText('call_heat', 'on').kind, 'heat');
+  eq(eventText('call_heat', 'off').msg, 'furnace off');
+  eq(eventText('call_cool', 'on').msg, 'ac on');
+  eq(eventText('call_cool', 'on').kind, 'cool');
+  eq(eventText('sensor_fault', 'on').msg, 'temperature sensor problem · heating and cooling paused');
+  eq(eventText('sensor_fault', 'on').kind, 'fault');
+  eq(eventText('sensor_fault', 'off').msg, 'temperature sensor ok again');
+  eq(eventText('interlock_fault', 'on').msg, 'interlock tripped · heating and cooling paused');
+  eq(eventText('interlock_fault', 'off').msg, 'interlock cleared');
+  eq(eventText('schedule_hold', 'on').msg, 'hold started');
+  eq(eventText('schedule_hold', 'off').msg, 'hold ended · following the schedule');
+  eq(eventText('schedule_period', 'Leave').msg, 'schedule · leave period');
+  eq(eventText('call_heat', 'unavailable').msg, 'thermostat offline');
+  eq(eventText('call_cool', 'unavailable'), null); // one offline line, not six
+  eq(eventText('schedule_period', 'unknown'), null);
+  eq(eventText('nope', 'on'), null);
 });

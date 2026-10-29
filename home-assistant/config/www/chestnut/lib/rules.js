@@ -62,6 +62,53 @@ export function countdown({ running, actionElapsedS, publishedAtMs, nowMs, minS 
   };
 }
 
+// The System tab's four minimum-timer rows ({val, frac} each) from the device's action_elapsed
+// (spec "System tab", builder check 2). M2 publishes no remaining times, so:
+// - heating / cooling: the running unit's min run counts from when the action began; its own min
+//   off says "running"; the other unit's min off can't be known ("—");
+// - idle / off / fan (W and Y both off): each unit's min off counts from when that action began
+//   (an upper bound for the unit that stopped earlier); min run is done ("✓ ok").
+// mins: {heatRun, heatOff, coolRun, coolOff} in minutes. "—" wherever an input is missing.
+const DASH = '—';
+export function safetyRows({ action, actionElapsedS, publishedAtMs, nowMs, mins }) {
+  const m = mins || {};
+  const unknown = { val: DASH, frac: 0 };
+  const timed = (min, doneText, fullWhenDone) => {
+    const c = countdown({ running: true, actionElapsedS, publishedAtMs, nowMs, minS: typeof min === 'number' ? min * 60 : NaN });
+    if (c.leftS == null) return unknown;
+    if (c.leftS > 0) return { val: `${Math.ceil(c.leftS / 60)} min left`, frac: c.frac };
+    return { val: doneText, frac: fullWhenDone ? 1 : 0 };
+  };
+  const ok = { val: '✓ ok', frac: 0 };
+  if (action === 'heating') {
+    return { heatRun: timed(m.heatRun, '✓ ok', true), heatOff: { val: 'running', frac: 0 }, coolRun: ok, coolOff: unknown };
+  }
+  if (action === 'cooling') {
+    return { heatRun: ok, heatOff: unknown, coolRun: timed(m.coolRun, '✓ ok', true), coolOff: { val: 'running', frac: 0 } };
+  }
+  if (action === 'idle' || action === 'off' || action === 'fan') {
+    return { heatRun: ok, heatOff: timed(m.heatOff, '✓ ready', false), coolRun: ok, coolOff: timed(m.coolOff, '✓ ready', false) };
+  }
+  return { heatRun: unknown, heatOff: unknown, coolRun: unknown, coolOff: unknown };
+}
+
+// Plain wording for an event-log entry: {msg, kind} (kind: heat, cool, fault or ''), or null to
+// leave it out. Going offline marks every entity unavailable: one line (from call_heat) says so.
+const EVENTS = {
+  call_heat: { on: ['furnace on', 'heat'], off: ['furnace off', 'heat'] },
+  call_cool: { on: ['ac on', 'cool'], off: ['ac off', 'cool'] },
+  sensor_fault: { on: ['temperature sensor problem · heating and cooling paused', 'fault'], off: ['temperature sensor ok again', ''] },
+  interlock_fault: { on: ['interlock tripped · heating and cooling paused', 'fault'], off: ['interlock cleared', ''] },
+  schedule_hold: { on: ['hold started', ''], off: ['hold ended · following the schedule', ''] },
+};
+export function eventText(objId, state) {
+  if (state === 'unavailable') return objId === 'call_heat' ? { msg: 'thermostat offline', kind: 'fault' } : null;
+  if (state == null || state === 'unknown' || state === '') return null;
+  if (objId === 'schedule_period') return { msg: `schedule · ${String(state).toLowerCase()} period`, kind: '' };
+  const e = EVENTS[objId] && EVENTS[objId][state];
+  return e ? { msg: e[0], kind: e[1] } : null;
+}
+
 export function dayBar(periods) {
   if (!periods || !periods.length) return [];
   const mins = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };

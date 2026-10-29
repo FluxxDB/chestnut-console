@@ -1,7 +1,7 @@
 // <chestnut-dashboard>: the Chestnut dashboard, HA's Overview (one panel view).
 // Frame (header, clock, connection, tab bar), the Home tab (thermostat card, last 12 hours,
-// Today and Status), the Schedule tab (tab-schedule.js) and the Simulation panel
-// (tab-simulation.js, only while the sim entities exist); the room view (room-view.js) on Home and Simulation, animated only while it
+// Today and Status), the Schedule tab (tab-schedule.js), the Simulation panel
+// (tab-simulation.js, only while the sim entities exist) and the System tab (tab-system.js); the room view (room-view.js) on Home and Simulation, animated only while it
 // is on screen (`active`). Layout from docs/design-mockups/ha-dashboard/Main.dc.html; the spec wins
 // where they differ (no supply-air readout, the wall console's status rules, M2 level holds).
 //
@@ -15,6 +15,7 @@ import { styles } from './style.js';
 import { TEMPLATE, MODES, FANS, LEVELS, BUCKETS, DASH } from './dashboard-template.js';
 import { ScheduleTab, readPeriods, dayBarHtml, dayType } from './tab-schedule.js';
 import { SimulationTab } from './tab-simulation.js';
+import { SystemTab } from './tab-system.js';
 import { Adapter } from './lib/adapter.js';
 import './room-view.js';
 import { statusFor, targetLabel, holdKind, levelShouldSend, Debouncer } from './lib/rules.js';
@@ -291,6 +292,7 @@ class ChestnutDashboard extends HTMLElement {
     this._simTab = root.querySelector('[data-tab="SIMULATION"]');
     this._schedule = new ScheduleTab(root, this);
     this._simulation = new SimulationTab(root, this);
+    this._system = new SystemTab(root, this);
     this._todayKey = '';
     this._applyTab();
     this._paintRuntime();
@@ -407,6 +409,7 @@ class ChestnutDashboard extends HTMLElement {
     this._renderStatus(v, haUp);
     if (this._tab === 'SCHEDULE') this._schedule.render(ready ? a : null, now);
     if (this._tab === 'SIMULATION') this._simulation.render(ready ? a : null);
+    if (this._tab === 'SYSTEM') this._system.render(ready ? a : null);
   }
 
   // Everything the cards show, from live entities only (called only while the climate is online).

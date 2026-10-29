@@ -4,6 +4,7 @@
 import { DASHBOARD_CSS } from './dashboard-style.js';
 import { SCHEDULE_HTML, SCHEDULE_CSS } from './tab-schedule.js';
 import { SIMULATION_HTML, SIMULATION_CSS } from './tab-simulation.js';
+import { SYSTEM_HTML, SYSTEM_CSS } from './tab-system.js';
 
 export const TABS = ['HOME', 'SCHEDULE', 'SIMULATION', 'SYSTEM'];
 export const MODES = [['off', 'OFF', 'off'], ['heat', 'HEAT', 'heat'], ['cool', 'COOL', 'cool'], ['auto', 'AUTO', 'heat_cool']];
@@ -18,7 +19,7 @@ export const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '
 const SEG = (id, label) => `<button type="button" class="seg" data-testid="${id}" aria-pressed="false">${label}</button>`;
 
 export const TEMPLATE = (device) => `
-<style>${DASHBOARD_CSS}${SCHEDULE_CSS}${SIMULATION_CSS}</style>
+<style>${DASHBOARD_CSS}${SCHEDULE_CSS}${SIMULATION_CSS}${SYSTEM_CSS}</style>
 <div class="page">
 <header><div class="head">
   <div class="titlebar">
@@ -87,6 +88,6 @@ ${SIMULATION_HTML}
     </section>
   </div>
 ${SCHEDULE_HTML}
-  <section class="card" data-views="SYSTEM" aria-label="System"><span class="label">SYSTEM</span><span class="small">Safety, alerts, wall screen and the device come next.</span></section>
+${SYSTEM_HTML}
 </div>
 </div>`;

@@ -26,6 +26,21 @@ lovelace:
       icon: mdi:thermostat
       show_in_sidebar: true
 
+# The System tab's ALERTS switches: whether each phone alert is sent (the automations read them).
+input_boolean:
+  chestnut_alert_sensor_fault:
+    name: "Alert: sensor fault"
+    icon: mdi:thermometer-alert
+    initial: true
+  chestnut_alert_interlock_fault:
+    name: "Alert: interlock fault"
+    icon: mdi:shield-alert
+    initial: true
+  chestnut_alert_offline:
+    name: "Alert: thermostat offline 10 min"
+    icon: mdi:lan-disconnect
+    initial: true
+
 automation: !include automations.yaml
 script: !include scripts.yaml
 scene: !include scenes.yaml

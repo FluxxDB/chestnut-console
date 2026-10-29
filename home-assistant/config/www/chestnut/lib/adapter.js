@@ -110,6 +110,12 @@ export class Adapter {
     return v == null ? null : toMs(v);
   }
 
+  // The device registry entry of the resolved device (hass.devices: sw_version etc.), or null.
+  deviceEntry() {
+    const e = this.entries.find((x) => x.device_id);
+    return (e && this.hass.devices && this.hass.devices[e.device_id]) || null;
+  }
+
   online() {
     const s = this._state('main_thermostat');
     return !!s && s.state !== 'unavailable';
@@ -195,8 +201,15 @@ export class Adapter {
       end_time: end.toISOString(),
       entity_ids: ids,
     });
+    const byEntity = {};
+    for (const o of objIds) if (this._id(o)) byEntity[this._id(o)] = o;
     return (res || [])
-      .map((e) => ({ t: toMs(e.when), msg: e.message || (e.state ? `changed to ${e.state}` : '') }))
+      .map((e) => ({
+        t: toMs(e.when),
+        objId: byEntity[e.entity_id] ?? null,
+        state: e.state ?? null,
+        msg: e.message || (e.state ? `changed to ${e.state}` : ''),
+      }))
       .filter((e) => e.t != null)
       .sort((a, b) => b.t - a.t);
   }

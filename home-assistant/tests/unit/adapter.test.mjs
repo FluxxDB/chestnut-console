@@ -241,3 +241,21 @@ test('attr and updatedMs read the state object; null when absent or unavailable'
   hass.states['climate.main_thermostat_main_thermostat'] = { state: 'unavailable', attributes: { hvac_action: 'heating' } };
   assert.equal(a.attr('main_thermostat', 'hvac_action'), null);
 });
+
+test('logbook entries carry the object id and state; deviceEntry is the resolved device', async () => {
+  const { hass } = makeHass({
+    callWS: async () => [
+      { when: 5, entity_id: 'binary_sensor.main_thermostat_call_heat', state: 'on' },
+      { when: 6, entity_id: 'sensor.other', state: 'x' },
+    ],
+  });
+  hass.devices[DEV].sw_version = '2026.10.1';
+  const a = new Adapter(hass, { deviceName: 'Main Thermostat' });
+  await a.resolve();
+  const l = await a.logbook(['call_heat'], 2);
+  assert.equal(l[1].objId, 'call_heat');
+  assert.equal(l[1].state, 'on');
+  assert.equal(l[0].objId, null);
+  assert.equal(a.deviceEntry().sw_version, '2026.10.1');
+  assert.equal(new Adapter(hass, { deviceName: 'Nope' }).deviceEntry(), null);
+});
