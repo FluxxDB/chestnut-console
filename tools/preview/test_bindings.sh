@@ -8,7 +8,7 @@ sh="tab5-thermostat/preview/shots"
 $dc --entrypoint rm preview -rf /config/preview/shots/bind /config/preview/shots/debounce /config/preview/shots/clamp >/dev/null 2>&1
 $dc preview preview/console-preview.yaml /config/preview/shots/bind --dump \
   "Heating" "Cooling" "Eco auto band" "Hold" "Schedule off" "Clock not set" "Waiting" \
-  "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" "Finishing" "Interlock while heating" "Sensor fault mid-run" "Eco hold in Auto" "Temperature hold in Auto" >/dev/null
+  "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" "Finishing" "Interlock while heating" "Sensor fault mid-run" "Eco hold in Auto" "Temperature hold in Auto" "Manual target" >/dev/null
 c="python3 tools/preview/check_snapshot.py $sh/bind"
 $c heating light room=71 status=Heating "sub=~^to 72° · ([0-9]+ min so far|just started)$" target=72° "tgt_label=Comfort target" tgt_comfort= \
   "sched=Comfort until 10:30 pm" resume_visible=0 mode_sel=0100 fan_sel=10 lvl_sel=10 hum=42% hum_cap=Comfortable \
@@ -34,6 +34,9 @@ $c interlock-while-heating light status=Paused sub= marker=8b8d90 banner_visible
 # widening Auto's range; − / + is a temperature hold at one number (low/high just ±1 around it).
 $c eco-hold-in-auto light target=67–77° "tgt_label=Eco target" "sched=Holding Eco until 10:30 pm" resume_visible=1 "topbar_gap=~^[1-9][0-9]*$"
 $c temperature-hold-in-auto light target=70° "sched=Holding 70° until 10:30 pm" resume_visible=1
+# Schedule off with a manual − / + number (M2's manual_target): no level is in force, so the card says
+# "Target" with no Comfort line and neither level pill is lit. No hold, so no Resume.
+$c manual-target light target=70° tgt_label=Target tgt_comfort= lvl_sel=00 "sched=Schedule off" resume_visible=0
 $c sensor-fault-mid-run light status=Paused "sub=Finishing up · stops soon" marker=8b8d90 banner_visible=1
 # Debounce: 5 quick taps on + from 72 -> one write of 77.
 $dc preview preview/console-preview.yaml /config/preview/shots/debounce --dump "Heating" \
