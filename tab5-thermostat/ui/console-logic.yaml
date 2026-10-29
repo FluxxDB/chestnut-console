@@ -15,6 +15,9 @@ substitutions:
   hist_sample_seconds: "600"
 
 esphome:
+  includes:
+    # Resolved next to this file. A list, so it merges with the other packages' includes.
+    - console_hist.h
   on_boot:
     # After the light restores its saved level (its own, earlier setup stage), well before
     # the late -100 stage: the screen is bright as soon as it shows anything.
@@ -156,21 +159,10 @@ interval:
   - interval: ${hist_sample_interval}
     then:
       - lambda: |-
-          float t = id(checked_temperature).state;
-          if (std::isnan(t)) return;
-          auto &h = id(ui_hist);
-          int &n = id(ui_hist_n);
-          if (n == (int) h.size()) {
-            std::rotate(h.begin(), h.begin() + 1, h.end());
-            n--;
-            id(ui_hist_start) += ${hist_sample_seconds};
-          }
-          if (n == 0) {
-            auto now = id(sntp_time).now();
-            id(ui_hist_start) = now.is_valid() ? now.timestamp : 0;
-          }
-          h[n++] = t;
-          id(ui_hist_gen)++;
+          auto now = id(sntp_time).now();
+          if (chestnut_ui::hist_push(id(ui_hist), id(ui_hist_n), id(ui_hist_start), id(checked_temperature).state,
+                                     now.is_valid(), now.timestamp, ${hist_sample_seconds}))
+            id(ui_hist_gen)++;
 
 script:
   - id: ui_wake
