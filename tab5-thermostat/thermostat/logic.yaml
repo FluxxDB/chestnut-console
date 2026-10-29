@@ -142,6 +142,20 @@ globals:
     type: int
     restore_value: false
     initial_value: "72"
+  # The manual target (rulings R20, R23, R24): with the schedule off, set_target (or a setpoint
+  # write) sets the target itself to g_manual_f °F, derived like a temperature hold (no Eco
+  # widening), with no hold and no "until"; comfort_target is untouched. It lasts until
+  # set_target changes it, a level is picked (comfort_level, even the option already on) or the
+  # schedule is turned back on; a mode change keeps it. Shown as manual_target. A setting, so
+  # restored (with the schedule restored off, it applies again after a reboot).
+  - id: g_manual
+    type: bool
+    restore_value: true
+    initial_value: "false"
+  - id: g_manual_f
+    type: int
+    restore_value: true
+    initial_value: "72"
   # comfort_level as last applied (true = Eco). A template select fires on_value again when set
   # to the same option; comparing with this keeps a re-tap from starting a hold.
   - id: g_level_eco
@@ -478,6 +492,14 @@ binary_sensor:
     lambda: |-
       auto *s = static_cast<chestnut::SanityChecker *>(id(g_sanity));
       return s != nullptr && s->fault();
+  # Contract (R23): the schedule is off and a manual number (set_target or a setpoint write) is
+  # the target; the screen labels the card "Target" while it's on. Off with the schedule on or
+  # once a level is picked.
+  - platform: template
+    id: manual_target
+    name: "Manual Target"
+    icon: mdi:hand-pointing-up
+    lambda: return id(g_manual) && !id(schedule_enabled).state;
   # Contract: a manual hold is on: a level hold (Comfort / Eco switched by hand) or a
   # temperature hold (set_target or a setpoint write), or both.
   - platform: template
@@ -661,9 +683,12 @@ script:
                                       : m == climate::CLIMATE_MODE_COOL      ? chestnut::Mode::Cool
                                       : m == climate::CLIMATE_MODE_HEAT_COOL ? chestnut::Mode::Auto
                                                                              : chestnut::Mode::Off;
+          // A manual target (schedule off) derives like a temperature hold; the two never
+          // coexist (with the schedule off no hold starts).
+          const bool manual = id(g_manual) && !id(schedule_enabled).state;
           const chestnut::Setpoints s = chestnut::derive_setpoints(
               mode, lroundf(id(comfort_target).state), lroundf(id(eco_offset).state),
-              id(g_level_eco), id(g_hold_temp), id(g_hold_f));
+              id(g_level_eco), manual || id(g_hold_temp), manual ? id(g_manual_f) : id(g_hold_f));
           id(g_effective_f) = s.effective_f;
           auto publish = [](sensor::Sensor *sens, int f) {
             if (!sens->has_state() || sens->state != (float) f) sens->publish_state(f);
@@ -735,6 +760,7 @@ script:
           id(g_last_min) = minute;
           id(g_sched_key) = -1;
           id(g_sched_period) = -1;
+          if (id(schedule_enabled).state) id(g_manual) = false;  // the schedule drops it (R20)
           if (!id(schedule_enabled).state) {
             id(g_hold_level) = false;
             id(g_hold_temp) = false;
@@ -850,7 +876,8 @@ button:
       - script.execute: schedule_rerun
 
 # Contract: schedule on/off (restored, default on). Off ends any hold; with it off nothing
-# switches and no hold starts: a manual change simply stays.
+# switches and no hold starts: a manual change simply stays (set_target becomes the manual
+# target). Turning it on drops the manual target and applies the current period.
 switch:
   - platform: template
     id: schedule_enabled
@@ -1032,7 +1059,8 @@ number:
     on_value:
       - lambda: if (id(g_ready)) id(apply_setpoints).execute();
   # What − / + and HA writes go to. Shows the effective target (apply_setpoints keeps it there);
-  # a different value starts a hold at it, the same value starts nothing. Not restored.
+  # a different value starts a hold at it (schedule on) or becomes the manual target (schedule
+  # off); the same value does nothing. Not restored (the manual target is, in g_manual_f).
   - platform: template
     id: set_target
     name: "Set Target"
@@ -1051,11 +1079,11 @@ number:
           const int f = lroundf(x);
           if (f == id(g_effective_f)) return;  // already the target: no hold (spec)
           if (!id(schedule_enabled).state) {
-            // Schedule off: no hold, the target just moves. comfort_target moves by the same
-            // step, so the effective target becomes f in Eco too (Comfort: comfort_target = f).
-            const int c = lroundf(id(comfort_target).state) + f - id(g_effective_f);
-            id(comfort_target).make_call().set_value(std::max(50, std::min(90, c))).perform();
-            id(apply_setpoints).execute();  // also when clamping left comfort_target unchanged
+            // Schedule off (R20): no hold, f is the target itself until changed again, a level
+            // is picked or the schedule is turned on. comfort_target is untouched.
+            id(g_manual) = true;
+            id(g_manual_f) = f;
+            id(apply_setpoints).execute();
             return;
           }
           id(g_hold_temp) = true;  // a temperature hold (R12), until the next period
@@ -1067,8 +1095,9 @@ select:
   # Contract: Comfort / Eco. A manual change starts a level hold (R12) and ends a temperature
   # hold, but only when the level actually changes (a template select fires on_value again when set
   # to the same option). The schedule sets it with g_sched_setting: no hold. With the schedule
-  # off a manual change just sets the level. Restored (the schedule re-applies its period's
-  # level at boot when it's on and the clock is set).
+  # off a manual change just sets the level, and any pick, even of the option already on, drops
+  # the manual target (R23, R24). Restored (the schedule re-applies its period's level at boot
+  # when it's on and the clock is set).
   - platform: template
     id: comfort_level
     name: "Comfort Level"
@@ -1084,7 +1113,10 @@ select:
             id(g_level_eco) = eco;
             return;
           }
-          if (eco == id(g_level_eco)) return;
+          // A pick drops the manual target, even a re-tap of the level already on (R24).
+          const bool dropped = id(g_manual) && !id(schedule_enabled).state;
+          id(g_manual) = false;
+          if (eco == id(g_level_eco) && !dropped) return;
           id(g_level_eco) = eco;
           if (!id(g_sched_setting) && id(schedule_enabled).state) {
             // A level hold (R12) until the next period: the level applies with its normal

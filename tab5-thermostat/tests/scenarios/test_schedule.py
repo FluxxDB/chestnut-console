@@ -230,14 +230,16 @@ async def test_schedule_off(device):
     await clock(device, MON, hm(17, 30))
     await device.sleep(QUIET_S)
     assert await device.state("comfort_level") == "Eco"
-    # set_target just sets the target: it moves comfort_target, with no hold.
+    # set_target sets the target directly (R20): a manual number, no hold, Comfort untouched.
     await device.select("comfort_level", "Comfort")
     await effective(device, 72)
     await set_target(device, 70)
-    await device.wait_for("comfort_target", lambda v: v == 70, WAIT_S)
     await effective(device, 70)
-    await device.select("comfort_level", "Eco")  # a manual level change: no hold either
-    await effective(device, 66)
+    await device.wait_for("manual_target", is_on, WAIT_S)
+    assert await device.state("comfort_target") == 72
+    await device.select("comfort_level", "Eco")  # a level pick: drops the number (R23), no hold
+    await effective(device, 68)
+    await device.wait_for("manual_target", is_off, WAIT_S)
     await device.sleep(QUIET_S)
     assert True not in device.history("schedule_hold")[n_hold:]
     assert await device.state("schedule_status") == "Schedule off"
@@ -290,3 +292,106 @@ async def test_schedule_off_survives_restart_and_keeps_level(device):
     await status(device, "Schedule off")
     assert await device.wait_for("comfort_level", lambda v: v is not None, 3) == "Eco"
     assert await device.state("schedule_hold") is False
+
+
+
+# --- Schedule off: the manual target (rulings R20, R23, R24) ---
+# With the schedule off, − / + (set_target) set the target itself: a manual number, derived like
+# a temperature hold (no Eco widening), with no hold and no "until", Comfort untouched.
+# manual_target shows it. It lasts until set_target changes it, a level is picked (Comfort or
+# Eco, even the one already on) or the schedule is turned back on. A setting: restored.
+
+async def schedule_off_heat_eco(dev):
+    """Heat, the room held at 68, the schedule off, Eco: effective 68 (Comfort 72 - 4)."""
+    await heat_at_68(dev)
+    assert await dev.switch("schedule_enabled", False) is False
+    await dev.select("comfort_level", "Eco")
+    await effective(dev, 68)
+
+
+async def test_manual_target_in_eco(device):
+    assert await device.wait_for("manual_target", lambda v: v is not None, 3) is False
+    await schedule_off_heat_eco(device)
+    assert await device.state("manual_target") is False  # off by default
+    await set_target(device, 69)  # + from Eco's 68
+    await effective(device, 69)
+    await device.wait_for("manual_target", is_on, WAIT_S)
+    await device.wait_for("effective_low", lambda v: v == 69, WAIT_S)
+    await set_target(device, 70)  # + again: the number itself moves
+    await effective(device, 70)
+    assert await device.state("comfort_target") == 72
+    assert await device.state("comfort_level") == "Eco"
+    assert await device.state("schedule_status") == "Schedule off"
+    # Auto: the number is the centre of the plain ±1 band, no Eco widening.
+    await device.climate(mode="HEAT_COOL")
+    await device.wait_for("effective_low", lambda v: v == 69, WAIT_S)
+    await device.wait_for("effective_high", lambda v: v == 71, WAIT_S)
+    assert await device.state("effective_target") == 70
+    # A mode change keeps it (it is the target, not a hold).
+    assert await device.state("manual_target") is True
+    assert True not in device.history("schedule_hold")
+
+
+async def test_manual_target_clamp_edges(device):
+    await schedule_off_heat_eco(device)
+    # Moving Comfort by the step would clamp it at 90 and leave Eco at 86; the number is 90.
+    await set_target(device, 90)
+    await effective(device, 90)
+    await device.wait_for("effective_high", lambda v: v == 92, WAIT_S)
+    await device.climate(mode="COOL")
+    await effective(device, 90)
+    await set_target(device, 50)
+    await effective(device, 50)
+    await device.wait_for("effective_low", lambda v: v == 48, WAIT_S)
+    assert await device.state("comfort_target") == 72
+    assert await device.state("manual_target") is True
+
+
+async def test_manual_target_dropped_by_level_pick(device):
+    await schedule_off_heat_eco(device)
+    await set_target(device, 70)
+    await device.wait_for("manual_target", is_on, WAIT_S)
+    # Picking the level that is already on still drops the number (R24).
+    await device.select("comfort_level", "Eco")
+    await device.wait_for("manual_target", is_off, WAIT_S)
+    await effective(device, 68)
+    # Without a number, picking the same level again does nothing: no hold, no change (R24).
+    n = device.updates("effective_target")
+    await device.select("comfort_level", "Eco")
+    await device.sleep(QUIET_S)
+    assert device.updates("effective_target") == n
+    assert await device.state("effective_target") == 68
+    assert await device.state("manual_target") is False
+    # The other level drops it too, and applies that level.
+    await set_target(device, 66)
+    await device.wait_for("manual_target", is_on, WAIT_S)
+    await device.select("comfort_level", "Comfort")
+    await device.wait_for("manual_target", is_off, WAIT_S)
+    await effective(device, 72)
+    assert True not in device.history("schedule_hold")
+
+
+async def test_manual_target_dropped_by_schedule_on(device):
+    await schedule_off_heat_eco(device)
+    await clock(device, MON, hm(18))  # Return (Comfort), once the schedule is on
+    await set_target(device, 75)
+    await device.wait_for("manual_target", is_on, WAIT_S)
+    assert await device.switch("schedule_enabled", True) is True
+    await device.wait_for("manual_target", is_off, WAIT_S)
+    await level(device, "Comfort")
+    await effective(device, 72)  # the period applies, not the number
+    await status(device, "Comfort until 10:30 pm")
+    assert await device.state("schedule_hold") is False
+
+
+async def test_manual_target_survives_restart(device):
+    await schedule_off_heat_eco(device)
+    await set_target(device, 66)
+    await device.wait_for("manual_target", is_on, WAIT_S)
+    await device.sleep(2)  # the preference flush
+    await device.restart()
+    assert await device.wait_for("schedule_enabled", lambda v: v is not None, 3) is False
+    await effective(device, 66)
+    assert await device.wait_for("manual_target", lambda v: v is not None, 3) is True
+    assert await device.wait_for("comfort_level", lambda v: v is not None, 3) == "Eco"
+    assert await device.wait_for("comfort_target", lambda v: v is not None, 3) == 72
