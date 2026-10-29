@@ -115,6 +115,7 @@ test('on/str/online', async () => {
 });
 
 test('sim_absent_after_m4', async () => {
+  // After the M2 flash HA moves removed sim_* entities to deleted_entities: gone from the active list.
   const { hass } = makeHass();
   const a = new Adapter(hass, { deviceName: 'Main Thermostat' });
   await a.resolve();
@@ -132,12 +133,17 @@ test('sim_unavailable_still_present', async () => {
   assert.equal(a.simPresent(), true);
 });
 
-test('sim_orphaned_entry_is_absent', async () => {
-  const registry = [entry('number.main_thermostat_sim_outdoor_f', 'number', 'Sim Outdoor F', { orphaned_timestamp: 123 })];
+test('resolves text_sensor unique_id to a sensor entity, and original_name fallback', async () => {
+  const registry = [
+    entry('sensor.main_thermostat_schedule_period', 'text_sensor', 'Schedule Period'),
+    entry('time.main_thermostat_sched_weekday_wake_time', 'time', 'Sched Weekday Wake Time'),
+    { entity_id: 'sensor.main_thermostat_ip_address', device_id: DEV, platform: 'esphome', original_name: 'IP Address' },
+  ];
   const { hass } = makeHass({ registry });
-  const a = new Adapter(hass, { deviceName: 'Main Thermostat' });
-  await a.resolve();
-  assert.equal(a.simPresent(), false);
+  const map = await new Adapter(hass, { deviceName: 'Main Thermostat' }).resolve();
+  assert.equal(map.schedule_period, 'sensor.main_thermostat_schedule_period');
+  assert.equal(map.sched_weekday_wake_time, 'time.main_thermostat_sched_weekday_wake_time');
+  assert.equal(map.ip_address, 'sensor.main_thermostat_ip_address');
 });
 
 test('set_target_writes_entity_unit', async () => {

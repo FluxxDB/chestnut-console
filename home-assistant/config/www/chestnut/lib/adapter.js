@@ -4,27 +4,25 @@ import { toF, fromF } from './rules.js';
 const DEAD = new Set(['unavailable', 'unknown', '']);
 const TEMP_UNITS = new Set(['°C', '°F']);
 
-// Real ESPHome unique_id: "<MAC>/0/<domain>/<Entity Name>", e.g.
+// Real ESPHome unique_id: "<MAC>/0/<esphome type>/<Entity Name>", e.g.
 // "AA:BB:CC:DD:EE:FF/0/sensor/Room Temperature" -> object id "room_temperature".
-// Also accepts the "...-<domain>-<object_id>" form.
+// The type segment is the ESPHome type and need not equal the HA entity_id domain
+// (text_sensor -> sensor.*, datetime -> time.*), so only the LAST segment is used.
+// config/entity_registry/list returns full entries incl. unique_id (partial_json_repr).
 function slug(s) {
   return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
 function objectIdOf(entry) {
-  const domain = entry.entity_id.split('.')[0];
   const uid = String(entry.unique_id || '');
   const parts = uid.split('/');
-  if (parts.length >= 4 && parts[parts.length - 2] === domain) {
-    return slug(parts[parts.length - 1]);
-  }
-  const m = uid.match(new RegExp(`-${domain}-(.+)$`));
-  if (m) return slug(m[1]);
-  return null;
+  if (parts.length >= 4) return slug(parts[parts.length - 1]);
+  const m = uid.match(new RegExp(`-${entry.entity_id.split('.')[0]}-(.+)$`));
+  return m ? slug(m[1]) : null;
 }
 
 function toMs(v) {
-  if (typeof v === 'number') return v < 1e11 ? v * 1000 : v; // HA sends epoch seconds
+  if (typeof v === 'number') return v < 1e11 ? v * 1000 : v; // HA sends epoch seconds (history minimal_response `lu`, logbook `when`)
   const ms = Date.parse(v);
   return Number.isFinite(ms) ? ms : null;
 }
@@ -101,10 +99,12 @@ export class Adapter {
     return !!s && s.state !== 'unavailable';
   }
 
-  // Rule: a sim_* registry entry for the device, not flagged orphaned_timestamp, means present
-  // (even if its state is unavailable). No such entry (e.g. after M4 removal) means absent.
+  // Rule: an active registry entry for the device with object id sim_* means present (even if
+  // its state is unavailable); none means absent. Evidence (HA 2026.10): when the firmware stops
+  // providing an ESPHome entity, HA moves it from `entities` to `deleted_entities`, so an entry in
+  // the active list == provided by the firmware. (orphaned_timestamp exists only on deleted entries.)
   simPresent() {
-    return this.entries.some((e) => (e.objectId || '').startsWith('sim_') && !e.orphaned_timestamp);
+    return this.entries.some((e) => (e.objectId || '').startsWith('sim_'));
   }
 
   _unit(objId) {
