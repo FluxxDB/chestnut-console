@@ -13,7 +13,7 @@ Buy these from **Mouser** (US stock, arrives in days, but may add a tariff surch
   - **Four relays cover** a single-stage furnace + AC, a heat pump with backup heat, split Rh/Rc transformers and a zone panel. **They don't cover** two-stage equipment (W2 or Y2 terminals in use) or a "communicating" system. The site survey confirms (see below).
 - [ ] **M5Stack Grove Hub** (1-to-3; U006, Mouser 170-U006). Lets the sensor and relays share the Tab5's single Port A; neither unit can be chained. $3.50 ([store](https://shop.m5stack.com/products/mini-hub-module)). The 20 cm cables that come with the sensor and relays are enough, so no extra cables.
 
-**No USB-C power meter needed.** The Tab5's built-in monitor (INA226) measures the battery: unplugged, the Tab5 runs on the battery, so battery current × voltage is its real draw, and a negative current while plugged in is the charging draw. Those figures size the 24 V AC → DC supply (see "Later").
+**No USB-C power meter needed.** The Tab5's built-in monitor (INA226) measures the battery: unplugged, the Tab5 runs on the battery, so battery current × voltage is its real draw, and a negative current while plugged in is the charging draw. Measured 2026-10-29: see "Notes".
 
 ## Optional: a fake furnace for the desk (about $65–70)
 
@@ -45,12 +45,13 @@ At the visit, with the multimeter:
 - The furnace control board's **terminal labels** (W1/W2, Y1/Y2, C) and its **fuse rating**.
 - Optional: the current on W, Y and G while each runs, to check the relay contacts.
 - **2.4 GHz Wi-Fi signal** at the thermostat's spot.
+- The **furnace transformer's VA rating** (on its label, usually 40 VA). The Tab5 adds about 3 VA normally, up to about 8 VA while recharging its battery if it's kept in.
 - The **wall opening** (hole or box size) and the old thermostat's outline, for the enclosure design.
 
 ## Later: don't buy yet
 
 - [ ] **Home Assistant box for the house**: Home Assistant Green, $199, about 1.7 W idle, storage built in ([home-assistant.io](https://www.home-assistant.io/green/)). Now cheaper and simpler than a reliable Raspberry Pi 5 setup (about $210+ with its power supply, case and SSD).
-- [ ] **24 V AC → DC supply for the Tab5.** Wait for the measured Tab5 draw. One candidate: Altronix VR1T (24 V AC → 12 V DC, 1 A), ~$33, into the Tab5's 6–24 V DC input ([listing](https://www.surveillance-video.com/power-supply-vr1t.html)). Two cautions:
+- [ ] **24 V AC → DC supply for the Tab5.** The Tab5's draw is now measured (see "Notes"), so 1 A at 12 V is plenty. Candidate: Altronix VR1T (24 V AC → 12 V DC, 1 A), ~$33, into the Tab5's 6–24 V DC input ([listing](https://www.surveillance-video.com/power-supply-vr1t.html)). Two cautions:
   - an HVAC transformer at light load can read 26–29 V AC, so check the module's input margin;
   - with a bridge rectifier, the Tab5's ground isn't C: never tie it to C, and don't plug the Tab5 into a grounded computer while it runs on 24 V AC.
 - [ ] **If the house has no C wire**: Venstar ACC0410 Add-a-Wire, ~$33 ([SupplyHouse](https://www.supplyhouse.com/Venstar-ACC0410-Add-a-Wire)).
@@ -60,4 +61,10 @@ At the visit, with the multimeter:
 
 ## Notes
 
-- **The Tab5's battery** (NP-F550, 7.4 V, 2000 mAh, in Dang's unit) powers it only when outside power is lost, and charges only while the Tab5 is on. M5Stack publishes no power-draw figure; its "about 6 hours on battery" works out to roughly 2.5 W. Measure the draw while it charges before sizing the 24 V AC → DC supply.
+- **Measured Tab5 power** (2026-10-29, from its built-in battery monitor):
+  - **In use** (screen at 10%, Wi-Fi on): **1.3–1.4 W**. Asleep with the screen off draws less (not measured).
+  - **Charging the battery**: **+4.05 W** (a fixed 0.51 A), and only until the battery is full.
+  - **From the 24 V AC wires**, including about 0.9 W for two relays and converter losses: **about 3 W normally**, and **about 8 W (0.35 A)** while recharging after the battery has been used.
+- **The battery (NP-F550, 7.4 V, 2000 mAh) is optional on the wall.** The thermostat runs entirely from the wire power. The battery only covers power cuts, and a gas furnace can't run during one anyway, since its blower and igniter need house power. So all it would keep going is the screen and the clock.
+  - The likely choice is to **leave it out** of the wall install. A lithium pack kept full and warm inside an enclosure for years ages faster. Without it, the clock comes back from the internet once Wi-Fi returns, and heating holds its current level meanwhile.
+  - Keep it in for the bench.
