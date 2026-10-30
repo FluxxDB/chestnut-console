@@ -209,6 +209,43 @@ def test_sim_outdoor_slider_writes(page, ha):
         ha.call("select", "select_option", {"entity_id": weather, "option": prev_weather})
 
 
+def test_sim_outdoor_now_shown(page, ha):
+    """The panel and the room view show the outdoor the physics uses now (sim_outdoor_now_f):
+    the Fixed setting, or the day curve, which the panel says the slider switches off."""
+    outdoor = eid(ha, "number", "sim_outdoor_f")
+    weather = eid(ha, "select", "sim_weather")
+    now_f = eid(ha, "sensor", "sim_outdoor_now_f")
+    prev_outdoor, prev_weather = state(ha, outdoor), state(ha, weather)
+
+    def outdoor_now_f():  # the test HA runs metric: it shows this °F sensor in °C
+        st = ha.get_state(now_f)
+        if st["state"] in ("unknown", "unavailable"):
+            return None
+        return to_f(st["state"], st["attributes"].get("unit_of_measurement"))
+
+    def shown_f():
+        text = tid(page, "sim-outdoor-now").inner_text()
+        return float(text[:-2]) if text.endswith("°F") else None
+
+    try:
+        ha.call("select", "select_option", {"entity_id": weather, "option": "Fixed"})
+        ha.call("number", "set_value", {"entity_id": outdoor, "value": 50})
+        wait_until(lambda: (v := outdoor_now_f()) is not None and abs(v - 50) < 0.06, 10, message="sim_outdoor_now_f 50")
+        sim_tab(page)
+        expect(tid(page, "sim-outdoor-now")).to_have_text("50.0°F", timeout=10_000)
+        expect(tid(page, "sim-outdoor-note")).to_have_text("")
+        expect(dash(page).locator('[data-testid="outdoor-num"]')).to_have_text("50°F", timeout=10_000)
+        ha.call("select", "select_option", {"entity_id": weather, "option": "Winter day"})
+        wait_until(lambda: (v := outdoor_now_f()) is not None and abs(v - 50) >= 0.06, 10, message="sim_outdoor_now_f off the Fixed value")
+        want = outdoor_now_f()
+        wait_until(lambda: (v := shown_f()) is not None and abs(v - want) <= 0.11, 10, message=f"outdoor now ≈ {want:.1f}°F")
+        expect(tid(page, "sim-outdoor-note")).to_have_text("moving it switches the weather from winter day to fixed")
+        expect(dash(page).locator('[data-testid="outdoor-num"]')).to_have_text(f"{round(want)}°F", timeout=10_000)
+    finally:
+        ha.call("number", "set_value", {"entity_id": outdoor, "value": float(prev_outdoor)})
+        ha.call("select", "select_option", {"entity_id": weather, "option": prev_weather})
+
+
 def test_sim_fault_select_writes(page, ha, sim):
     entity = eid(ha, "select", "sim_fault")
     try:

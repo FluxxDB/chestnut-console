@@ -4,13 +4,13 @@
 // the M2 schedule entities (switch.schedule_enabled, time.sched_*_time, select.sched_*_level,
 // number.comfort_target / eco_offset, sensor.schedule_period); the level selects are
 // per-period settings (plain select_option), not holds.
-import { dayBar, Debouncer } from './lib/rules.js';
+import { dayBar, TargetTaps } from './lib/rules.js';
 
 export const PERIODS = ['wake', 'leave', 'return', 'sleep'];
 const DAYS = [['weekday', 'WEEKDAY'], ['weekend', 'WEEKEND']];
 const LEVEL_OPTIONS = ['Comfort', 'Eco'];
 const STEP_DEBOUNCE_MS = 800;
-const TIME_WRITE_PAUSE_MS = 600;
+const TIME_WRITE_PAUSE_MS = 1500; // a typed time fires change per finished segment (09:01, then 09:15)
 const PENDING_GIVE_UP_MS = 6000;
 const DASH = '—';
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -23,12 +23,19 @@ export function readPeriods(a, day) {
   return periods.some((p) => !/^\d{1,2}:\d{2}/.test(p.time || '') || !LEVEL_OPTIONS.includes(p.level)) ? null : periods;
 }
 
-// rules.dayBar as spans: white #eeeeee = Comfort, #3a3a3a = Eco.
-export function dayBarHtml(periods) {
-  return dayBar(periods).map((s) => `<span data-level="${s.level}" style="flex: ${s.flex} 1 0; ${s.level === 'Comfort' ? 'background: #eeeeee; color: #000000' : 'background: #3a3a3a; color: #eeeeee'}">${esc(s.label)}</span>`).join('');
+// rules.dayBar as spans: white #eeeeee = Comfort, #3a3a3a = Eco. `before`: the previous day's
+// last period (the Today bar), else the day's own (the week bars).
+export function dayBarHtml(periods, before) {
+  return dayBar(periods, before).map((s) => `<span data-level="${s.level}" style="flex: ${s.flex} 1 0; ${s.level === 'Comfort' ? 'background: #eeeeee; color: #000000' : 'background: #3a3a3a; color: #eeeeee'}">${esc(s.label)}</span>`).join('');
 }
 
 const minutesOf = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + m; };
+
+// The period of `periods` that starts last in the day (still in force after midnight), or null.
+export function lastPeriod(periods) {
+  if (!periods) return null;
+  return periods.reduce((x, p) => (minutesOf(p.time) >= minutesOf(x.time) ? p : x));
+}
 
 export const SCHEDULE_CSS = `
   .sched-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 24px; }
@@ -81,14 +88,18 @@ export const SCHEDULE_HTML = `
   </div>`;
 
 // − / + for a number: the tapped value shows at once, one write after a short pause, and the
-// tapped value stays until the entity reports it (or gives up).
+// tapped value stays until the entity reports it (or gives up). The same burst rules as the
+// target's − / + (rules.TargetTaps), with the entity's own range and step.
 class Stepper {
   constructor(tab, key, { read, range, write }) {
-    Object.assign(this, { tab, read, range, write, pending: null, until: 0 });
+    Object.assign(this, { tab, read, range });
     this.val = tab.q(`${key}-val`);
     this.minus = tab.q(`${key}-minus`);
     this.plus = tab.q(`${key}-plus`);
-    this.debouncer = new Debouncer(STEP_DEBOUNCE_MS, (v) => this.write(v));
+    this.taps = new TargetTaps({
+      ms: STEP_DEBOUNCE_MS, giveUpMs: PENDING_GIVE_UP_MS, min: -Infinity, max: Infinity, write,
+      onFailed: () => this.render(this.tab.adapter()),
+    });
     this.minus.addEventListener('click', () => this.step(-1));
     this.plus.addEventListener('click', () => this.step(1));
   }
@@ -98,20 +109,24 @@ class Stepper {
     const cur = a ? this.read(a) : null;
     if (cur == null) return;
     const r = this.range(a) || { min: -Infinity, max: Infinity, step: 1 };
-    const base = this.pending ?? cur;
-    this.pending = Math.min(r.max, Math.max(r.min, Math.round((base + dir * r.step) * 100) / 100));
-    this.until = Date.now() + STEP_DEBOUNCE_MS + PENDING_GIVE_UP_MS;
-    this.debouncer.tap(this.pending, cur);
+    this.taps.min = r.min;
+    this.taps.max = r.max;
+    this.taps.step(dir * r.step, cur, Date.now());
     this.render(a);
   }
 
   render(a) {
     const cur = a ? this.read(a) : null;
-    if (this.pending != null && !this.debouncer.timer && (cur === this.pending || Date.now() > this.until)) this.pending = null;
-    const v = this.pending ?? cur;
+    this.taps.settle(cur, Date.now());
+    const v = this.taps.pending ?? cur;
     this.tab.text(this.val, v == null ? DASH : `${Math.round(v * 10) / 10}°`);
     this.minus.disabled = cur == null;
     this.plus.disabled = cur == null;
+  }
+
+  // The dashboard is going away: send a burst still in its pause while the adapter is bound.
+  detach() {
+    this.taps.detach(!!this.tab.adapter());
   }
 }
 
@@ -135,12 +150,14 @@ export class ScheduleTab {
       // Typing a time fires change once per complete value (09:0…, 09:15): write the last one.
       row.time.addEventListener('change', () => {
         clearTimeout(row.timer);
+        row.timer = null;
         const day = this.day;
         const value = row.time.value;
         if (!/^\d{2}:\d{2}$/.test(value)) return;
         row.pending = value; // shown until the entity reports it (or gives up)
         row.until = Date.now() + TIME_WRITE_PAUSE_MS + PENDING_GIVE_UP_MS;
-        row.timer = setTimeout(() => this.host.call('time', 'set_value', `sched_${day}_${p}_time`, { time: `${value}:00` }), TIME_WRITE_PAUSE_MS);
+        row.send = () => { row.timer = null; this.host.call('time', 'set_value', `sched_${day}_${p}_time`, { time: `${value}:00` }); };
+        row.timer = setTimeout(row.send, TIME_WRITE_PAUSE_MS);
       });
       row.level.addEventListener('change', () => this.host.call('select', 'select_option', `sched_${this.day}_${p}_level`, { option: row.level.value }));
       return row;
@@ -148,18 +165,38 @@ export class ScheduleTab {
     this.comfort = new Stepper(this, 'comfort', {
       read: (a) => { const f = a.num('comfort_target'); return f == null ? null : Math.round(f); }, // whole °F (°C round-trips)
       range: (a) => a.rangeF('comfort_target'),
-      write: (f) => { const a = this.host.adapter(); if (a) a.setNumberF('comfort_target', f).catch((e) => console.warn('chestnut-dashboard: comfort_target', e)); },
+      write: (f) => {
+        const a = this.host.adapter();
+        if (!a || !a.online()) return Promise.reject(new Error('thermostat offline'));
+        return a.setNumberF('comfort_target', f).catch((e) => { console.warn('chestnut-dashboard: comfort_target', e); throw e; });
+      },
     });
     // An offset, not a temperature: never unit-converted.
     this.eco = new Stepper(this, 'eco', {
       read: (a) => { const n = Number(a.str('eco_offset')); return a.str('eco_offset') != null && Number.isFinite(n) ? n : null; },
       range: (a) => { const lo = a.attr('eco_offset', 'min'); const hi = a.attr('eco_offset', 'max'); return lo == null || hi == null ? null : { min: lo, max: hi, step: a.attr('eco_offset', 'step') || 1 }; },
-      write: (v) => this.host.call('number', 'set_value', 'eco_offset', { value: v }),
+      write: (v) => {
+        const a = this.host.adapter();
+        if (!a || !a.online()) return Promise.reject(new Error('thermostat offline'));
+        return a.call('number', 'set_value', 'eco_offset', { value: v }).catch((e) => { console.warn('chestnut-dashboard: eco_offset', e); throw e; });
+      },
     });
   }
 
   q(testid) {
     return this.root.querySelector(`[data-testid="${testid}"]`);
+  }
+
+  // The dashboard is going away (still bound): send what is waiting, the steppers' bursts and
+  // a typed time still in its pause.
+  detach() {
+    this.comfort.detach();
+    this.eco.detach();
+    for (const row of this.rows) {
+      if (!row.timer) continue;
+      clearTimeout(row.timer);
+      row.send();
+    }
   }
 
   adapter() {

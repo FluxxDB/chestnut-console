@@ -214,9 +214,126 @@ test('taps_detach_net_zero_sends_nothing', () => {
   } finally { mock.timers.reset(); }
 });
 
+// A write that fails (the websocket call rejects, or the thermostat went offline mid-burst).
+const settleMicrotasks = () => new Promise((r) => setImmediate(r));
+function failingTaps(written, fails, onFailed) {
+  return new TargetTaps({
+    ms: 1500, giveUpMs: 6000, min: 50, max: 90, onFailed,
+    write: (v) => { written.push(v); return fails.has(v) ? Promise.reject(new Error('rejected')) : Promise.resolve(); },
+  });
+}
+test('taps_failure_when_idle_shows_the_device_again', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const written = [];
+    let failedCalls = 0;
+    const t = failingTaps(written, new Set([72]), () => failedCalls++);
+    t.step(1, 70, 0); t.step(1, 70, 0);
+    mock.timers.tick(1500);
+    await settleMicrotasks();
+    assert.deepEqual(written, [72]);
+    eq(t.pending, null); eq(t.written, null); eq(failedCalls, 1);
+  } finally { mock.timers.reset(); }
+});
+test('taps_failure_mid_burst_keeps_the_new_burst', async () => {
+  // Write A (71) fails while burst B is under way: B keeps counting from its own value and is then
+  // written against the device's value (not against the failed 71).
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const written = [];
+    const t = failingTaps(written, new Set([71]));
+    t.step(1, 70, 0);
+    mock.timers.tick(1500);                     // A: 71 sent
+    t.step(1, 70, 1500);                        // B starts: 72
+    await settleMicrotasks();                   // A's rejection lands mid-burst
+    eq(t.pending, 72);
+    t.step(1, 70, 1600);                        // the next + shows 73, not 71
+    eq(t.pending, 73);
+    mock.timers.tick(1500);
+    assert.deepEqual(written, [71, 73]);
+  } finally { mock.timers.reset(); }
+});
+test('taps_failed_value_is_resent_when_a_burst_returns_to_it', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const written = [];
+    const t = failingTaps(written, new Set([71]));
+    t.step(1, 70, 0);
+    mock.timers.tick(1500);                     // A: 71 sent
+    t.step(1, 70, 1500); t.step(-1, 70, 1500);  // B ends on 71 again
+    await settleMicrotasks();                   // A failed, so 71 never reached the device
+    written.length = 0;
+    mock.timers.tick(1500);
+    assert.deepEqual(written, [71]);
+  } finally { mock.timers.reset(); }
+});
+test('taps_stale_failure_is_ignored', async () => {
+  // A late rejection of an older write must not wipe a newer one.
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const written = [];
+    let rejectA;
+    const t = new TargetTaps({
+      ms: 1500, giveUpMs: 6000, min: 50, max: 90,
+      write: (v) => { written.push(v); return v === 71 ? new Promise((_, rej) => { rejectA = rej; }) : Promise.resolve(); },
+    });
+    t.step(1, 70, 0);
+    mock.timers.tick(1500);                     // A: 71 sent, still in flight
+    t.step(1, 70, 1500);
+    mock.timers.tick(1500);                     // B: 72 sent
+    rejectA(new Error('late'));
+    await settleMicrotasks();
+    assert.deepEqual(written, [71, 72]);
+    eq(t.pending, 72); eq(t.written, 72);
+  } finally { mock.timers.reset(); }
+});
+test('taps_fractional_steps_round_and_clamp', () => {
+  // The schedule's eco offset steps by its entity's step (0.5 here) within its min/max.
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const written = [];
+    const t = new TargetTaps({ ms: 800, giveUpMs: 6000, min: 0, max: 3, write: (v) => written.push(v) });
+    t.step(0.1, 2, 0); t.step(0.1, 2, 0); t.step(0.1, 2, 0);
+    eq(t.pending, 2.3);                         // not 2.3000000000000003
+    t.step(0.5, 2, 0); t.step(0.5, 2, 0);
+    eq(t.pending, 3);
+    mock.timers.tick(800);
+    assert.deepEqual(written, [3]);
+  } finally { mock.timers.reset(); }
+});
+
+test('day_bar_before_first_uses_the_previous_days_last_period', () => {
+  // Monday before wake: the thermostat still follows Sunday's (weekend) sleep level.
+  const weekday = [
+    { name: 'wake', time: '06:00', level: 'Comfort' }, { name: 'leave', time: '08:00', level: 'Eco' },
+    { name: 'return', time: '17:00', level: 'Comfort' }, { name: 'sleep', time: '22:00', level: 'Eco' },
+  ];
+  const bar = dayBar(weekday, { name: 'sleep', level: 'Comfort' });
+  eq(bar[0].level, 'Comfort'); eq(bar[0].flex, 360); eq(bar[0].label, 'sleep');
+  eq(bar[bar.length - 1].level, 'Eco');
+  eq(dayBar(weekday)[0].level, 'Eco');         // without one, the day's own last period
+});
+
 // --- System tab: safety bars (countdown from action_elapsed) and event-log wording ---
 const mins = { heatRun: 3, heatOff: 5, coolRun: 4, coolOff: 6 };
-const at = (action, elapsedS, extra = {}) => safetyRows({ action, actionElapsedS: elapsedS, publishedAtMs: 1000, nowMs: 1000, mins, ...extra });
+// The relays follow the action here (call_heat while heating, call_cool while cooling).
+const at = (action, elapsedS, extra = {}) => safetyRows({
+  action, callHeat: action == null ? null : action === 'heating', callCool: action == null ? null : action === 'cooling',
+  interlockFault: false, actionElapsedS: elapsedS, publishedAtMs: 1000, nowMs: 1000, mins, ...extra,
+});
+
+test('safety_running_unit_comes_from_the_relays', () => {
+  // The interlock latch cuts W while the climate still says heating: no row may claim the
+  // furnace is running, and its min off can't be timed (the trip time isn't published).
+  const latched = at('heating', 60, { callHeat: false, interlockFault: true });
+  for (const k of ['heatRun', 'heatOff', 'coolRun', 'coolOff']) eq(latched[k].val, '—');
+  // W off but the action still says heating (no fault): don't count min off from the heat start.
+  const stale = at('heating', 60, { callHeat: false });
+  eq(stale.heatOff.val, '—'); eq(stale.heatRun.val, '—');
+  // W on: the furnace rows, whatever the action says.
+  eq(at('idle', 60, { callHeat: true }).heatRun.val, '2 min left');
+  eq(at('idle', 60, { callCool: true }).coolOff.val, 'running');
+});
 
 test('safety_heating_counts_min_run', () => {
   const r = at('heating', 60);
@@ -228,7 +345,7 @@ test('safety_heating_counts_min_run', () => {
   eq(at('heating', 200).heatRun.frac, 1);
 });
 test('safety_interpolates_since_publish', () => {
-  const r = safetyRows({ action: 'cooling', actionElapsedS: 0, publishedAtMs: 0, nowMs: 150_000, mins });
+  const r = safetyRows({ action: 'cooling', callHeat: false, callCool: true, actionElapsedS: 0, publishedAtMs: 0, nowMs: 150_000, mins });
   eq(r.coolRun.val, '2 min left'); // 4 min − 2.5 min = 1.5 → ceil
   eq(r.heatOff.val, '—');
 });
@@ -243,7 +360,7 @@ test('safety_idle_counts_min_off', () => {
   eq(at('fan', 60).heatOff.val, '4 min left');
 });
 test('safety_unknown_shows_dash', () => {
-  for (const r of [at(null, 60), at('heating', null), safetyRows({ action: 'heating', actionElapsedS: 60, publishedAtMs: 1000, nowMs: 1000, mins: { ...mins, heatRun: null } })]) {
+  for (const r of [at(null, 60), at('heating', null), safetyRows({ action: 'heating', callHeat: true, callCool: false, actionElapsedS: 60, publishedAtMs: 1000, nowMs: 1000, mins: { ...mins, heatRun: null } })]) {
     eq(r.heatRun.val, '—');
     eq(r.heatRun.frac, 0);
   }

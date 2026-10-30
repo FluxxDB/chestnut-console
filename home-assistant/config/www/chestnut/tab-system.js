@@ -2,7 +2,8 @@
 // interlock fault), Alerts (three HA input_boolean helpers), Wall screen, Device and the Event log.
 // Mockup Main.dc.html, System tab; spec "System tab".
 // - Bars: rules.safetyRows from the device's action_elapsed (published every 30 s, interpolated
-//   here); the startup delay and changeover lockout show as call_wait_reason text.
+//   here) and the relays (call_heat / call_cool); the startup delay and changeover lockout show
+//   as call_wait_reason text.
 // - Timers: number.set_value clamped to each entity's min/max (minutes).
 // - Alerts: input_boolean.chestnut_alert_* are HA helpers (configuration.yaml), not device
 //   entities, so they are read from hass.states and toggled directly.
@@ -82,6 +83,7 @@ export const SYSTEM_HTML = `
         ${TIMERS.map(([obj, label]) => `<label class="kv ctl-row"><span>${label}</span><input type="number" class="num" data-testid="timer-${obj}" aria-label="${label} (minutes)"></label>`).join('')}
       </div>
       <button type="button" class="ghost" data-testid="clear-interlock" disabled>Clear interlock fault</button>
+      <span class="small" data-testid="clear-note" style="color: var(--cn-label)"></span>
     </section>
     <section class="card" aria-label="Alerts">
       <span class="label">ALERTS · HOME ASSISTANT APP</span>
@@ -130,7 +132,18 @@ export class SystemTab {
       return c;
     });
     this.clear = this.q('clear-interlock');
-    this.clear.addEventListener('click', () => this.host.call('button', 'press', 'clear_interlock_fault'));
+    this.clearNote = this.q('clear-note');
+    // The logic drops the latch only once the longer min off since the trip has passed (an early
+    // press is remembered, a second one ignored): after a press, say so and hold the button until
+    // the latch drops, or that wait plus a minute (a press that never arrived can be repeated).
+    this.clearUntil = 0;
+    this.clear.addEventListener('click', () => {
+      const a = this.host.adapter();
+      const offMin = Math.max(a ? a.num('heat_min_off') || 0 : 0, a ? a.num('cool_min_off') || 0 : 0, 5);
+      this.clearUntil = Date.now() + (offMin + 1) * 60000;
+      this.host.call('button', 'press', 'clear_interlock_fault');
+      this.render(a);
+    });
     this.alerts = ALERTS.map(([k]) => {
       const c = { entityId: `input_boolean.chestnut_alert_${k}`, el: this.q(`alert-${k}`) };
       c.el.addEventListener('click', () => {
@@ -143,6 +156,7 @@ export class SystemTab {
     });
     this.screen = SCREEN.map(([id, objId]) => {
       const c = { objId, el: this.q(id), val: this.q(`${id}-val`), dragging: false, pending: null, until: 0 };
+      c.el.addEventListener('pointercancel', () => { c.dragging = false; });
       c.el.addEventListener('input', () => { c.dragging = true; this.text(c.val, `${c.el.value}%`); });
       c.el.addEventListener('change', () => {
         c.dragging = false;
@@ -160,6 +174,13 @@ export class SystemTab {
 
   text(n, value) {
     if (n.textContent !== value) n.textContent = value;
+  }
+
+  // The dashboard is going away: no more logbook calls from a detached element.
+  detach() {
+    clearTimeout(this.logState.timer);
+    this.logState.timer = null;
+    this.logState.adapter = null;
   }
 
   writeTimer(c) {
@@ -200,6 +221,9 @@ export class SystemTab {
     }
     const rows = safetyRows({
       action: a ? a.attr('main_thermostat', 'hvac_action') : null,
+      callHeat: a ? a.on('call_heat') : null,
+      callCool: a ? a.on('call_cool') : null,
+      interlockFault: a ? a.on('interlock_fault') : null,
       actionElapsedS: elapsedS,
       publishedAtMs: a ? a.updatedMs('action_elapsed') : null,
       nowMs: now,
@@ -219,7 +243,12 @@ export class SystemTab {
     this.text(this.q('safety-sensor-val'), sensor == null ? DASH : sensor ? '⚠ fault' : '✓ ok');
     const wait = a ? a.str('call_wait_reason') : null;
     this.text(this.q('safety-wait-val'), wait == null || DEAD.has(wait) ? (a ? 'none' : DASH) : wait);
-    this.clear.disabled = lock !== true;
+    if (lock !== true || now > this.clearUntil) this.clearUntil = 0;
+    const asked = this.clearUntil > 0;
+    this.clear.disabled = lock !== true || asked;
+    this.text(this.clearNote, lock !== true ? '' : asked
+      ? 'clear requested · it takes effect once the furnace and ac min off times since the trip have passed'
+      : 'takes effect once the furnace and ac min off times since the trip have passed');
   }
 
   renderTimers(a, now) {
@@ -257,6 +286,7 @@ export class SystemTab {
       if (r) for (const k of ['min', 'max', 'step']) if (c.el.getAttribute(k) !== String(r[k])) c.el.setAttribute(k, String(r[k]));
       if (c.pending != null && (cur === c.pending || now > c.until)) c.pending = null;
       c.el.disabled = cur == null || !r;
+      if (c.el.disabled) c.dragging = false; // a drag cut short never fires change
       if (c.dragging) continue;
       const v = c.pending ?? cur;
       if (v != null && c.el.value !== String(v)) c.el.value = String(v);
@@ -335,10 +365,12 @@ export class SystemTab {
     if (a !== L.adapter || !rows) return;
     this.paintLog(rows);
     // The newest change HA shows should be in the logbook; if the recorder hasn't written it
-    // yet, ask again shortly (a few times).
+    // yet, ask again shortly (a few times). Only for a change inside the logbook's window: on a
+    // quiet system the newest change is older than that and never shows up.
     const newestShown = Math.max(0, ...LOG_IDS.map((o) => a.updatedMs(o) || 0));
     const newestLogged = rows.length ? rows[0].t : 0;
-    if (newestShown > newestLogged + 1000 && L.retries < LOG_RETRIES && !L.timer) {
+    const windowStart = Date.now() - LOG_HOURS * 3600 * 1000;
+    if (newestShown > windowStart && newestShown > newestLogged + 1000 && L.retries < LOG_RETRIES && !L.timer) {
       L.retries++;
       this.scheduleLog(a, LOG_AFTER_CHANGE_MS);
     }

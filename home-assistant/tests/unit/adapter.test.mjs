@@ -60,6 +60,18 @@ test('resolves_by_device', async () => {
   assert.ok(!Object.values(map).includes('sensor.room_temperature'));
 });
 
+test('resolve_reports_a_missing_device', async () => {
+  // A renamed device or a typo in device_name: the dashboard must say so, not just "offline".
+  const { hass } = makeHass();
+  const missing = new Adapter(hass, { deviceName: 'No Such Thermostat' });
+  assert.equal(missing.found, null);           // not looked up yet
+  await missing.resolve();
+  assert.equal(missing.found, false);
+  const ok = new Adapter(hass, { deviceName: 'Main Thermostat' });
+  await ok.resolve();
+  assert.equal(ok.found, true);
+});
+
 test('resolves_by_device uses name_by_user and falls back to entity_id suffix', async () => {
   const reg = [{ entity_id: 'sensor.tab5_room_temperature', unique_id: 'weird', device_id: DEV, platform: 'esphome' }];
   const { hass } = makeHass({ registry: reg });

@@ -6,6 +6,7 @@ import re
 import pytest
 from playwright.sync_api import expect
 
+from ha_client import SIM_DEVICE
 from test_home import dash, eid, ready, tid
 from test_room import heat_forced  # noqa: F401 - fixture
 
@@ -56,6 +57,29 @@ def test_clear_interlock_disabled_normally(page, ha):
     system_tab(page)
     expect(tid(page, "safety-interlock-val")).to_have_text("✓ armed", timeout=10_000)
     expect(tid(page, "clear-interlock")).to_be_disabled()
+
+
+def test_interlock_trip_blanks_timer_rows_and_explains_clear(page, ha):
+    """While the interlock is tripped the relays are cut whatever the climate's action says, and
+    the trip time isn't published: the four timer rows show "—". Clear says when it takes effect,
+    and after a press says it was asked for (a second press would be ignored)."""
+    entity = eid(ha, "binary_sensor", "interlock_fault")
+    cur = ha.get_state(entity)
+    ha.post(f"/api/states/{entity}", {"state": "on", "attributes": cur["attributes"]})  # HA's view only
+    try:
+        system_tab(page)
+        expect(tid(page, "safety-interlock-val")).to_have_text("⚠ tripped", timeout=10_000)
+        for row in ("heat-run", "heat-off", "cool-run", "cool-off"):
+            expect(tid(page, f"safety-{row}-val")).to_have_text("—")
+        clear = tid(page, "clear-interlock")
+        expect(clear).to_be_enabled()
+        expect(tid(page, "clear-note")).to_contain_text("takes effect once the furnace and ac min off times")
+        clear.click()
+        expect(tid(page, "clear-note")).to_contain_text("clear requested", timeout=5_000)
+        expect(clear).to_be_disabled()
+    finally:
+        ha.post(f"/api/states/{entity}", {"state": cur["state"], "attributes": cur["attributes"]})
+    expect(tid(page, "clear-note")).to_have_text("", timeout=10_000)
 
 
 def test_alert_toggle_flips_boolean(page, ha):
@@ -114,9 +138,9 @@ def test_device_dash_on_sim(page, ha):
     # The host sim has no Wi-Fi, uptime, clock or IP sensors, and no wall screen.
     for k in ("ip", "uptime", "wifi", "clock"):
         expect(tid(page, f"dev-{k}")).to_have_text("—", timeout=10_000)
-    expect(tid(page, "dev-name")).to_have_text("Main Thermostat (Sim)")
+    expect(tid(page, "dev-name")).to_have_text(SIM_DEVICE)
     sim_dev = next(d for d in ha.ws({"type": "config/device_registry/list"})
-                   if (d.get("name_by_user") or d.get("name")) == "Main Thermostat (Sim)")
+                   if (d.get("name_by_user") or d.get("name")) == SIM_DEVICE)
     expect(tid(page, "dev-firmware")).to_have_text(sim_dev.get("sw_version") or "—")
     for k in ("scr-bright", "scr-dim"):
         expect(tid(page, k)).to_be_disabled()

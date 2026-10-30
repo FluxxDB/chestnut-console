@@ -33,6 +33,7 @@ export class Adapter {
     this.deviceName = deviceName;
     this.map = {};
     this.entries = [];
+    this.found = null; // after resolve(): whether a device named deviceName exists
   }
 
   // Async: the frontend registry lacks unique_id, so ask the websocket for full entries.
@@ -41,6 +42,7 @@ export class Adapter {
     const ids = Object.values(hass.devices || {})
       .filter((d) => (d.name_by_user || d.name) === this.deviceName)
       .map((d) => d.id);
+    this.found = ids.length > 0;
     const all = await hass.callWS({ type: 'config/entity_registry/list' });
     const mine = all.filter((e) => ids.includes(e.device_id) && e.platform === 'esphome');
     const map = {};

@@ -64,13 +64,16 @@ export function countdown({ running, actionElapsedS, publishedAtMs, nowMs, minS 
 
 // The System tab's four minimum-timer rows ({val, frac} each) from the device's action_elapsed
 // (spec "System tab", builder check 2). M2 publishes no remaining times, so:
-// - heating / cooling: the running unit's min run counts from when the action began; its own min
-//   off says "running"; the other unit's min off can't be known ("—");
-// - idle / off / fan (W and Y both off): each unit's min off counts from when that action began
-//   (an upper bound for the unit that stopped earlier); min run is done ("✓ ok").
+// - W on (call_heat) / Y on (call_cool): the running unit's min run counts from when the action
+//   began; its own min off says "running"; the other unit's min off can't be known ("—");
+// - W and Y both off, action idle / off / fan: each unit's min off counts from when that action
+//   began (an upper bound for the unit that stopped earlier); min run is done ("✓ ok").
+// Which unit runs comes from the relays, never the climate's action: during an interlock latch
+// the action can still say heating with W cut (logic.yaml). While the interlock is tripped, or the
+// action and the relays disagree, every row is "—": the trip time isn't published.
 // mins: {heatRun, heatOff, coolRun, coolOff} in minutes. "—" wherever an input is missing.
 const DASH = '—';
-export function safetyRows({ action, actionElapsedS, publishedAtMs, nowMs, mins }) {
+export function safetyRows({ action, callHeat, callCool, interlockFault, actionElapsedS, publishedAtMs, nowMs, mins }) {
   const m = mins || {};
   const unknown = { val: DASH, frac: 0 };
   const timed = (min, doneText, fullWhenDone) => {
@@ -80,16 +83,18 @@ export function safetyRows({ action, actionElapsedS, publishedAtMs, nowMs, mins 
     return { val: doneText, frac: fullWhenDone ? 1 : 0 };
   };
   const ok = { val: '✓ ok', frac: 0 };
-  if (action === 'heating') {
+  const none = { heatRun: unknown, heatOff: unknown, coolRun: unknown, coolOff: unknown };
+  if (interlockFault === true) return none;
+  if (callHeat === true && callCool !== true) {
     return { heatRun: timed(m.heatRun, '✓ ok', true), heatOff: { val: 'running', frac: 0 }, coolRun: ok, coolOff: unknown };
   }
-  if (action === 'cooling') {
+  if (callCool === true && callHeat !== true) {
     return { heatRun: ok, heatOff: unknown, coolRun: timed(m.coolRun, '✓ ok', true), coolOff: { val: 'running', frac: 0 } };
   }
-  if (action === 'idle' || action === 'off' || action === 'fan') {
+  if (callHeat === false && callCool === false && (action === 'idle' || action === 'off' || action === 'fan')) {
     return { heatRun: ok, heatOff: timed(m.heatOff, '✓ ready', false), coolRun: ok, coolOff: timed(m.coolOff, '✓ ready', false) };
   }
-  return { heatRun: unknown, heatOff: unknown, coolRun: unknown, coolOff: unknown };
+  return none;
 }
 
 // Plain wording for an event-log entry: {msg, kind} (kind: heat, cool, fault or ''), or null to
@@ -109,13 +114,17 @@ export function eventText(objId, state) {
   return e ? { msg: e[0], kind: e[1] } : null;
 }
 
-export function dayBar(periods) {
+// A day's periods as bar segments from midnight. Before the day's first period the previous
+// day's last-starting period is still in force (chestnut_logic.h): `before` ({name, level}),
+// else the day's own last period (the week bars, which stand for any day of their type).
+export function dayBar(periods, before) {
   if (!periods || !periods.length) return [];
   const mins = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
   const ps = periods.map(p => ({ ...p, at: mins(p.time) })).sort((a, b) => a.at - b.at);
   const seg = (name, level, flex) => ({ flex, level, label: flex >= 150 ? name : '' });
   const out = [];
-  if (ps[0].at > 0) out.push(seg(ps[ps.length - 1].name, ps[ps.length - 1].level, ps[0].at));
+  const carried = before || ps[ps.length - 1];
+  if (ps[0].at > 0) out.push(seg(carried.name, carried.level, ps[0].at));
   ps.forEach((p, i) => {
     const end = i + 1 < ps.length ? ps[i + 1].at : 1440;
     if (end > p.at) out.push(seg(p.name, p.level, end - p.at));
@@ -152,48 +161,70 @@ export class Debouncer {
   }
 }
 
-// The − / + taps on the target. A burst of taps becomes one write of its final value, `ms`
-// after the last tap. `pending` is the value to show: from the first tap until the device
-// reports it (`settle`), or `giveUpMs` after the write at most.
-// The base a burst is compared against (and starts from) is the last value written that the
-// device hasn't confirmed yet, else the device's own target. So a burst that backs out of an
-// unconfirmed write is itself written, and one that returns to it sends nothing.
+// The − / + taps on a number: the target, and the schedule's comfort and eco offset. A burst of
+// taps becomes one write of its final value, `ms` after the last tap. `pending` is the value to
+// show: from the first tap until the device reports it (`settle`), or `giveUpMs` after the write
+// at most. Values are rounded to 0.01 and clamped to `min`/`max` (callers may change those
+// between taps, e.g. from an entity's range).
+// The base a burst starts from, and is compared against when it fires, is the last value written
+// that the device hasn't confirmed yet, else the device's own value. So a burst that backs out of
+// an unconfirmed write is itself written, and one that returns to it sends nothing.
+// `write(v)` may return a promise. A rejection undoes that write (`failed`) unless a newer write
+// has gone out since; mid-burst, the burst carries on and is compared with the device instead.
 export class TargetTaps {
-  constructor({ ms, giveUpMs, min, max, write }) {
+  constructor({ ms, giveUpMs, min, max, write, onFailed }) {
     this.ms = ms;
     this.giveUpMs = giveUpMs;
     this.min = min;
     this.max = max;
     this.write = write;
+    this.onFailed = onFailed;
     this.pending = null;
     this.written = null; // the last value sent, until the device reports it or we give up
     this.until = 0;
-    this.base = null;
-    this.debouncer = new Debouncer(ms, (v) => this._send(v));
+    this.deviceBase = null;
+    this.seq = 0; // numbers each write, so a late failure of an older one is ignored
+    this.timer = null;
   }
 
   get busy() {
-    return this.debouncer.timer != null;
+    return this.timer != null;
+  }
+
+  _base() {
+    return this.written ?? this.deviceBase;
   }
 
   _send(v) {
+    const seq = ++this.seq;
     this.written = v;
-    this.write(v);
+    let p;
+    try {
+      p = this.write(v);
+    } catch (err) {
+      p = Promise.reject(err);
+    }
+    Promise.resolve(p).catch(() => this.failed(seq));
   }
 
-  // One tap; `deviceBase` is the device's current target (rounded °F). Returns the new pending value.
+  // One tap; `deviceBase` is the device's current value. Returns the new pending value.
   step(delta, deviceBase, now) {
-    const base = this.written ?? deviceBase;
+    this.deviceBase = deviceBase;
+    const base = this._base();
     if (base == null) return null;
-    this.base = base;
-    this.pending = Math.min(this.max, Math.max(this.min, (this.pending ?? base) + delta));
+    const next = Math.round(((this.pending ?? base) + delta) * 100) / 100;
+    this.pending = Math.min(this.max, Math.max(this.min, next));
     this.until = now + this.ms + this.giveUpMs;
-    this.debouncer.tap(this.pending, base);
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      if (this.pending !== this._base()) this._send(this.pending);
+    }, this.ms);
     return this.pending;
   }
 
   // Every render: drop the shown value once the device reports it, or after the give-up time
-  // (never mid-burst). `deviceTarget` is the device's target (rounded °F), null while offline.
+  // (never mid-burst). `deviceTarget` is the device's value, null while offline.
   settle(deviceTarget, now) {
     if (this.busy || (this.pending == null && this.written == null)) return;
     const shown = this.pending ?? this.written;
@@ -203,18 +234,22 @@ export class TargetTaps {
     }
   }
 
-  // The write failed: show the device's value again.
-  failed() {
-    this.pending = null;
+  // Write `seq` (default: the latest) failed. Ignored if a newer write has gone out since. Else
+  // the device's value shows again, or, mid-burst, the burst goes on against the device's value.
+  failed(seq = this.seq) {
+    if (seq !== this.seq) return;
     this.written = null;
+    if (!this.busy) this.pending = null;
+    if (this.onFailed) this.onFailed();
   }
 
   // The element is going away mid-burst: send the burst now if it can still be written
   // (`canWrite`: an adapter is bound), else drop it so the number doesn't show a value nobody sends.
   detach(canWrite) {
     if (!this.busy) return;
-    this.debouncer.cancel();
-    if (canWrite && this.pending !== this.base) {
+    clearTimeout(this.timer);
+    this.timer = null;
+    if (canWrite && this.pending !== this._base()) {
       this._send(this.pending);
     } else if (!canWrite) {
       this.pending = null;

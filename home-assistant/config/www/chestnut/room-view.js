@@ -262,6 +262,8 @@ class ChestnutRoomView extends HTMLElement {
       action: a.attr('main_thermostat', 'hvac_action'),
       room: a.num('checked_temperature'),
       eff: a.num('effective_target'),
+      lo: a.num('effective_low'),
+      hi: a.num('effective_high'),
       humidity: a.num('room_humidity'),
       heat: a.on('call_heat') === true,
       cool: a.on('call_cool') === true,
@@ -285,16 +287,17 @@ class ChestnutRoomView extends HTMLElement {
     return (sec + (at != null ? Math.max(0, Date.now() - at) / 1000 : 0)) / 60;
   }
 
-  // Outdoor: the sim's current outdoor sensor, else its fixed knob, else HA's weather entity.
+  // Outdoor: the sim's sim_outdoor_now_f (what its physics uses now), else HA's weather entity.
+  // A day curve needs the device's clock: without it the sim uses the Fixed setting, so say so.
   _outdoor() {
     const a = this._adapter;
     if (!a) return { f: null, sub: '', sim: false };
-    const now = (a.entries || []).find((e) => e.objectId && (e.objectId === 'sim_outdoor_now_f'
-      || (e.objectId.includes('outdoor') && e.objectId.includes('now'))));
-    const weather = a.str('sim_weather');
-    const wtxt = weather && !['unknown', 'unavailable'].includes(weather) ? weather.toLowerCase() : '';
-    if (now) return { f: a.num(now.objectId), sub: wtxt, sim: true };
-    if ((a.entries || []).some((e) => e.objectId === 'sim_outdoor_f')) return { f: a.num('sim_outdoor_f'), sub: wtxt && wtxt !== 'fixed' ? `fixed · sim ${wtxt}` : 'fixed', sim: true };
+    if ((a.entries || []).some((e) => e.objectId === 'sim_outdoor_now_f')) {
+      const weather = a.str('sim_weather');
+      let sub = weather && !['unknown', 'unavailable'].includes(weather) ? weather.toLowerCase() : '';
+      if (sub && sub !== 'fixed' && a.on('clock_valid') === false) sub = 'fixed · clock not set';
+      return { f: a.num('sim_outdoor_now_f'), sub, sim: true };
+    }
     const w = a.hass && a.hass.states ? a.hass.states[WEATHER_ENTITY] : null;
     const t = w && w.attributes ? Number(w.attributes.temperature) : NaN;
     if (w && !['unknown', 'unavailable'].includes(w.state) && Number.isFinite(t)) {
@@ -359,7 +362,9 @@ class ChestnutRoomView extends HTMLElement {
     const room = v ? v.room : null;
     this._text('room-num', room == null ? DASH : `${room.toFixed(1)}°`);
     this._text('ro-room', room == null ? DASH : `${room.toFixed(1)}°F`);
-    this._text('ro-target', v && v.mode !== 'off' ? deg(v.eff) : v ? 'OFF' : DASH);
+    // The Auto band like the thermostat card (same rule as the wall console).
+    const band = !!v && v.mode === 'heat_cool' && v.lo != null && v.hi != null && v.hi - v.lo > 2.5;
+    this._text('ro-target', !v ? DASH : v.mode === 'off' ? 'OFF' : band ? `${Math.round(v.lo)}–${Math.round(v.hi)}°` : deg(v.eff));
     this._text('ro-air', v ? (v.air ? 'on' : 'still') : DASH);
     this._text('ro-hum', v && v.humidity != null ? `${Math.round(v.humidity)}%` : DASH);
 

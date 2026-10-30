@@ -13,7 +13,7 @@
 // `_intervals` (live in the whole window, all instances), `_resolves` and `_historyLoads`.
 import { styles } from './style.js';
 import { TEMPLATE, MODES, FANS, LEVELS, BUCKETS, DASH } from './dashboard-template.js';
-import { ScheduleTab, readPeriods, dayBarHtml, dayType } from './tab-schedule.js';
+import { ScheduleTab, readPeriods, dayBarHtml, dayType, lastPeriod } from './tab-schedule.js';
 import { SimulationTab } from './tab-simulation.js';
 import { SystemTab } from './tab-system.js';
 import { Adapter } from './lib/adapter.js';
@@ -29,6 +29,7 @@ const HISTORY_EVERY_MS = 5 * 60 * 1000;
 const HISTORY_HOURS = 12;
 const BUCKET_MS = (HISTORY_HOURS * 3600 * 1000) / BUCKETS;
 const HISTORY_IDS = ['call_heat', 'call_cool', 'call_fan', 'checked_temperature', 'effective_target'];
+const RESOLVE_RETRY_MS = [2000, 5000, 15000, 60000]; // after a failed entity lookup, then every minute
 // Live timers across every instance in this window (a leaked loop in a detached element counts).
 const live = { loops: 0, intervals: 0 };
 
@@ -42,10 +43,15 @@ function fmtMin(ms) {
 // Wall-clock parts in HA's time zone (the house's, which the thermostat's schedule uses), not
 // the browser's; the browser's own zone if HA's is unknown or invalid.
 const WEEKDAYS = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 0 };
+const formatters = new Map(); // one per time zone (a render runs on every HA state change)
 function nowParts(timeZone) {
   const d = new Date();
   try {
-    const f = new Intl.DateTimeFormat('en-US', { timeZone, hour12: false, weekday: 'short', hour: 'numeric', minute: 'numeric' });
+    let f = formatters.get(timeZone);
+    if (!f) {
+      f = new Intl.DateTimeFormat('en-US', { timeZone, hour12: false, weekday: 'short', hour: 'numeric', minute: 'numeric' });
+      formatters.set(timeZone, f);
+    }
     const p = Object.fromEntries(f.formatToParts(d).map((x) => [x.type, x.value]));
     return { day: WEEKDAYS[p.weekday], hour: Number(p.hour) % 24, minute: Number(p.minute) };
   } catch {
@@ -108,11 +114,15 @@ class ChestnutDashboard extends HTMLElement {
     this._resolves = 0;
     this._historyLoads = 0;
     this._onReady = () => this._resolve();
+    this._resolveError = false; // the entity lookup failed; a retry is scheduled
+    this._retryTimer = null;
+    this._retries = 0;
     this._narrow = window.matchMedia('(max-width: 860px)');
-    this._onNarrow = () => this._syncRoom();
+    this._onNarrow = () => { this._syncRoom(); this._dirty = true; };
     this._taps = new TargetTaps({
       ms: DEBOUNCE_MS, giveUpMs: PENDING_GIVE_UP_MS, min: TARGET_MIN, max: TARGET_MAX,
       write: (f) => this._writeTarget(f),
+      onFailed: () => { this._dirty = true; },
     });
   }
 
@@ -148,6 +158,8 @@ class ChestnutDashboard extends HTMLElement {
     this._stop();
     // A − / + burst still in its debounce: send it now while the adapter is bound, else drop it.
     this._taps.detach(!!(this._adapter && this._resolved));
+    if (this._schedule) this._schedule.detach();
+    if (this._system) this._system.detach();
     this._unbind();
   }
 
@@ -206,12 +218,15 @@ class ChestnutDashboard extends HTMLElement {
       this._conn = hass.connection;
       if (this._conn && this._conn.addEventListener) this._conn.addEventListener('ready', this._onReady);
       this._entitiesRef = hass.entities;
+      this._devicesRef = hass.devices;
       this._resolve();
       return;
     }
     this._adapter.hass = hass;
-    if (hass.entities !== this._entitiesRef) {
+    // A registry change (or a device list that arrives late, or a renamed device) re-resolves.
+    if (hass.entities !== this._entitiesRef || hass.devices !== this._devicesRef) {
       this._entitiesRef = hass.entities;
+      this._devicesRef = hass.devices;
       this._resolve();
     }
   }
@@ -221,6 +236,10 @@ class ChestnutDashboard extends HTMLElement {
     this._conn = null;
     this._adapter = null;
     this._resolved = false;
+    this._resolveError = false;
+    clearTimeout(this._retryTimer);
+    this._retryTimer = null;
+    this._retries = 0;
     this._gen++;
   }
 
@@ -229,13 +248,23 @@ class ChestnutDashboard extends HTMLElement {
     if (!adapter) return;
     const gen = ++this._gen;
     this._resolves++;
+    clearTimeout(this._retryTimer);
+    this._retryTimer = null;
     try {
       await adapter.resolve();
     } catch (err) {
       console.warn('chestnut-dashboard: entity lookup failed', err);
+      if (gen !== this._gen) return;
+      // Say so and try again (2 s, 5 s, 15 s, then every minute), rather than "connecting" forever.
+      this._resolveError = true;
+      this._dirty = true;
+      const ms = RESOLVE_RETRY_MS[Math.min(this._retries++, RESOLVE_RETRY_MS.length - 1)];
+      this._retryTimer = setTimeout(() => { this._retryTimer = null; this._resolve(); }, ms);
       return;
     }
     if (gen !== this._gen) return;
+    this._resolveError = false;
+    this._retries = 0;
     this._resolved = true;
     this._dirty = true;
     this._loadHistory();
@@ -345,6 +374,9 @@ class ChestnutDashboard extends HTMLElement {
   _step(delta) {
     const a = this._adapter;
     if (!a || !this._resolved || !a.online()) return;
+    // As on the wall screen: − / + do nothing in Off (a write would start a hold, or set the
+    // manual target, that nobody sees until the mode changes).
+    if (a.str('main_thermostat') === 'off') return;
     const base = this._baseTarget();
     if (base == null) return;
     this._taps.step(delta, base, Date.now());
@@ -352,12 +384,14 @@ class ChestnutDashboard extends HTMLElement {
     this._render();
   }
 
+  // A promise: TargetTaps undoes the write if it rejects. The thermostat may have gone offline
+  // since the last tap; HA would drop that call without an error, so it isn't sent.
   _writeTarget(f) {
-    if (!this._adapter) return;
-    this._adapter.setTargetF(f).catch((err) => {
+    const a = this._adapter;
+    if (!a || !this._resolved || !a.online()) return Promise.reject(new Error('thermostat offline'));
+    return a.setTargetF(f).catch((err) => {
       console.warn('chestnut-dashboard: set_target failed', err);
-      this._taps.failed();
-      this._dirty = true;
+      throw err;
     });
   }
 
@@ -389,17 +423,19 @@ class ChestnutDashboard extends HTMLElement {
     const now = nowParts(hass && hass.config ? hass.config.time_zone : undefined);
     this._text('clock', clockText(now));
     const haUp = !!(hass && hass.connected !== false);
-    this._text('conn', !haUp ? '○ reconnecting' : online ? '● connected' : ready ? '○ thermostat offline' : '○ connecting');
+    const missing = ready && a.found === false;
+    this._text('conn', !haUp ? '○ reconnecting' : online ? '● connected' : missing ? '○ thermostat not found' : ready ? '○ thermostat offline' : '○ connecting');
 
+    // The Simulation panel exists only while the sim does, and never at phone width.
     const sim = ready && a.simPresent();
     this._simTab.hidden = !sim;
-    if (!sim && this._tab === 'SIMULATION') this._pickTab('HOME');
+    if ((!sim || this._narrow.matches) && this._tab === 'SIMULATION') this._pickTab('HOME');
 
     // The tapped value shows until the device reports it (or gives up); never mid-burst.
     const eff = online ? a.num('effective_target') : null;
     this._taps.settle(eff != null ? Math.round(eff) : null, Date.now());
     const v = online ? this._read(a) : null;
-    this._renderThermostat(v, ready);
+    this._renderThermostat(v, ready, missing);
     const room = this._el.room;
     const roomAdapter = ready ? a : null;
     if (room.adapter !== roomAdapter) room.adapter = roomAdapter;
@@ -467,7 +503,7 @@ class ChestnutDashboard extends HTMLElement {
     };
   }
 
-  _renderThermostat(v, ready) {
+  _renderThermostat(v, ready, missing) {
     const el = this._el;
     const live = !!v;
     this._text('target', live ? v.display : DASH);
@@ -481,8 +517,17 @@ class ChestnutDashboard extends HTMLElement {
     this._text('tgt-sub', sub);
     const st = live ? v.status : null;
     this._text('status-mark', live ? st.mark : '·');
-    this._text('status-word', live ? st.word : ready ? 'OFFLINE' : 'CONNECTING');
-    this._text('status-sub', live ? st.sub : ready ? 'The thermostat is not connected to Home Assistant' : '');
+    let word = 'CONNECTING';
+    let why = this._resolveError ? "Couldn't read Home Assistant's entity list · retrying" : '';
+    if (missing) {
+      word = 'NOT FOUND';
+      why = `No device named "${this._config.device_name}" in Home Assistant (dashboard device_name)`;
+    } else if (ready) {
+      word = 'OFFLINE';
+      why = 'The thermostat is not connected to Home Assistant';
+    }
+    this._text('status-word', live ? st.word : word);
+    this._text('status-sub', live ? st.sub : why);
     const color = live ? st.color : '#b4b4b4';
     if (el['status-word'].parentNode.style.color !== color) el['status-word'].parentNode.style.color = color;
 
@@ -491,8 +536,8 @@ class ChestnutDashboard extends HTMLElement {
     const fan = live && v.fanMode ? String(v.fanMode).toLowerCase() : null;
     for (const [k] of FANS) this._press(`fan-${k}`, fan === k, live);
     for (const [k, , option] of LEVELS) this._press(`level-${k}`, live && !v.manual && v.level === option, live);
-    el.minus.disabled = !live;
-    el.plus.disabled = !live;
+    el.minus.disabled = !live || v.mode === 'off';
+    el.plus.disabled = !live || v.mode === 'off';
     const sched = live ? v.schedLine : DASH;
     this._text('sched-line', sched);
     this._text('sched-foot', sched);
@@ -511,8 +556,10 @@ class ChestnutDashboard extends HTMLElement {
     this._text('today-label', `TODAY · ${day.toUpperCase()}`);
     this._el['now-mark'].style.left = `${(((now.hour * 60 + now.minute) / 1440) * 100).toFixed(1)}%`;
     const periods = a ? readPeriods(a, day) : null;
+    // Before today's first period, yesterday's last one is still in force.
+    const before = a ? lastPeriod(readPeriods(a, dayType((now.day + 6) % 7))) : null;
     const off = !!a && a.on('schedule_enabled') === false;
-    const key = JSON.stringify([periods, off]);
+    const key = JSON.stringify([periods, before, off]);
     if (key === this._todayKey) return;
     this._todayKey = key;
     const bar = this._el.daybar;
@@ -521,7 +568,7 @@ class ChestnutDashboard extends HTMLElement {
       bar.innerHTML = `<span class="empty" style="padding-left: 0">${DASH}</span>`;
       return;
     }
-    bar.innerHTML = dayBarHtml(periods);
+    bar.innerHTML = dayBarHtml(periods, before);
   }
 
   _renderStatus(v, haUp) {

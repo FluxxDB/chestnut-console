@@ -1,6 +1,7 @@
 // The Simulation tab's panel (BENCH ONLY): the virtual house's knobs, beside the room view.
 // Mockup Main.dc.html, Simulation tab. Entities from tab5-thermostat/sim/virtual-house.yaml:
-// number.sim_outdoor_f (the Fixed outdoor), select.sim_weather, select.sim_fault, and
+// sensor.sim_outdoor_now_f (read-only: the outdoor the physics uses now, the Fixed setting or the
+// day curve), number.sim_outdoor_f (the Fixed outdoor), select.sim_weather, select.sim_fault, and
 // number.sim_tau_h / sim_heat_fph / sim_cool_fph / sim_humidity. Ranges come from each number's
 // attributes. Sliders write once on release (`change`, not every `input`), after a short pause
 // so arrow-key repeats send one write; selects write on change. The dashboard shows the panel
@@ -12,7 +13,7 @@ const DASH = '—';
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 const SLIDERS = [
-  ['sim-outdoor', 'sim_outdoor_f', 'outdoor', (v) => `${v}°F`],
+  ['sim-outdoor', 'sim_outdoor_f', 'fixed outdoor', (v) => `${v}°F`],
   ['sim-tau', 'sim_tau_h', 'insulation (hours to drift)', (v) => `${v} h`],
   ['sim-heat', 'sim_heat_fph', 'furnace heating rate', (v) => `${v}°F/h`],
   ['sim-cool', 'sim_cool_fph', 'ac cooling rate', (v) => `${v}°F/h`],
@@ -44,7 +45,10 @@ const select = ([id, , label]) => `
 export const SIMULATION_HTML = `
     <section class="card sim desk" data-testid="sim-panel" data-views="SIMULATION" aria-label="Simulation">
       <div class="between"><span class="label">SIMULATION</span><span class="label">BENCH ONLY</span></div>
-      ${slider(SLIDERS[0])}${SELECTS.map(select).join('')}${SLIDERS.slice(1).map(slider).join('')}
+      <div class="kv"><span>outdoor now</span><span data-testid="sim-outdoor-now">${DASH}</span></div>
+      ${slider(SLIDERS[0])}
+      <span class="small" data-testid="sim-outdoor-note" style="color: var(--cn-label)"></span>
+      ${SELECTS.map(select).join('')}${SLIDERS.slice(1).map(slider).join('')}
       <div class="physics">
         <span class="label">PHYSICS</span>
         <span class="eq">dT/dt = (outdoor − room) / insulation
@@ -61,6 +65,7 @@ export class SimulationTab {
     const q = (id) => root.querySelector(`[data-testid="${id}"]`);
     this.sliders = SLIDERS.map(([id, objId, , fmt]) => {
       const c = { objId, fmt, el: q(id), val: q(`${id}-val`), dragging: false, pending: null, until: 0, timer: null };
+      c.el.addEventListener('pointercancel', () => { c.dragging = false; });
       c.el.addEventListener('input', () => { c.dragging = true; this.label(c, Number(c.el.value)); });
       c.el.addEventListener('change', () => {
         c.dragging = false;
@@ -72,6 +77,8 @@ export class SimulationTab {
       });
       return c;
     });
+    this.outdoorNow = q('sim-outdoor-now');
+    this.outdoorNote = q('sim-outdoor-note');
     this.selects = SELECTS.map(([id, objId]) => {
       const c = { objId, el: q(id), pending: null, until: 0, optionsKey: '' };
       c.el.addEventListener('change', () => {
@@ -106,6 +113,13 @@ export class SimulationTab {
   // a: the resolved adapter (unavailable entities disable their control), else null.
   render(a) {
     const now = Date.now();
+    const out = a ? a.num('sim_outdoor_now_f') : null;
+    const outText = out == null ? DASH : `${out.toFixed(1)}°F`;
+    if (this.outdoorNow.textContent !== outText) this.outdoorNow.textContent = outText;
+    const weather = a ? a.str('sim_weather') : null;
+    const note = weather && weather !== 'Fixed' && (a.attr('sim_weather', 'options') || []).includes('Fixed')
+      ? `moving it switches the weather from ${weather.toLowerCase()} to fixed` : '';
+    if (this.outdoorNote.textContent !== note) this.outdoorNote.textContent = note;
     for (const c of this.sliders) {
       const cur = a ? a.num(c.objId) : null;
       const r = a ? a.rangeF(c.objId) : null;
@@ -114,6 +128,7 @@ export class SimulationTab {
       }
       if (c.pending != null && !c.timer && (cur === c.pending || now > c.until)) c.pending = null;
       c.el.disabled = cur == null || !r;
+      if (c.el.disabled) c.dragging = false; // a drag cut short never fires change
       if (c.dragging) continue;
       const v = c.pending ?? cur;
       if (v != null && c.el.value !== String(v)) c.el.value = String(v);

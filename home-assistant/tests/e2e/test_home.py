@@ -9,7 +9,7 @@ import pytest
 from playwright.sync_api import expect
 
 from conftest import open_dashboard
-from ha_client import HA_URL, wait_until
+from ha_client import HA_URL, SIM_DEVICE, wait_until
 
 
 LIVE_TARGET = re.compile(r"^(\d+°|\d+–\d+°|OFF)$")
@@ -205,11 +205,84 @@ def test_empty_history_renders(context, ha, request_log):
 
 
 def test_runtime_shows_history(page):
+    """The chart is drawn from the recorder (the sim has run for minutes by now): shown, with a
+    room line; not "loading…" or "no data yet" (the 360 bars are in the template either way)."""
     ready(page)
     runtime = tid(page, "runtime")
     expect(runtime).to_contain_text("LAST 12 HOURS", timeout=15_000)
-    expect(runtime).not_to_contain_text("no data yet", timeout=15_000)
+    expect(dash(page).locator("#rt-chart")).to_be_visible(timeout=20_000)
+    expect(dash(page).locator("#rt-empty")).to_be_hidden()
+    expect(dash(page).locator("#pl-room")).to_have_attribute("points", re.compile(r"\d+(\.\d+)?,\d"), timeout=20_000)
     expect(runtime.locator("[data-bar]")).to_have_count(360)
+
+
+@pytest.fixture
+def mode_restored(ha):
+    climate = ha.sim_climate()
+    prev = ha.get_state(climate)["state"]
+    yield climate
+    ha.call("climate", "set_hvac_mode", {"entity_id": climate, "hvac_mode": prev})
+
+
+def test_minus_plus_do_nothing_in_off(page, ha, mode_restored):
+    """As on the wall screen: in Off, − / + are disabled and write nothing (a write would start a
+    hold, or set the manual target, that nobody sees until the mode changes)."""
+    climate = mode_restored
+    st = eid(ha, "number", "set_target")
+    ha.call("climate", "set_hvac_mode", {"entity_id": climate, "hvac_mode": "off"})
+    ha.wait_state(climate, lambda s: s["state"] == "off")
+    ready(page)
+    expect(tid(page, "target")).to_have_text("OFF", timeout=10_000)
+    expect(tid(page, "plus")).to_be_disabled()
+    expect(tid(page, "minus")).to_be_disabled()
+    before = ha.get_state(st)["state"]
+    dash(page).evaluate("el => { el._step(1); el._step(1); }")  # the handler itself ignores Off too
+    time.sleep(2.5)  # past the 1.5 s debounce
+    assert ha.get_state(st)["state"] == before
+    expect(tid(page, "target")).to_have_text("OFF")
+    ha.call("climate", "set_hvac_mode", {"entity_id": climate, "hvac_mode": "heat"})
+    expect(tid(page, "plus")).to_be_enabled(timeout=10_000)
+
+
+def test_write_dropped_when_thermostat_drops_mid_burst(page, ha, mode_restored):
+    """The thermostat goes offline during the 1.5 s pause: the burst isn't sent (HA would drop it
+    silently), and when it's back the card shows its real target, not the tapped one."""
+    climate = mode_restored
+    ha.call("climate", "set_hvac_mode", {"entity_id": climate, "hvac_mode": "heat"})
+    ha.wait_state(climate, lambda s: s["state"] == "heat")
+    st = eid(ha, "number", "set_target")
+    ready(page)
+    expect(tid(page, "plus")).to_be_enabled(timeout=10_000)
+    shown = tid(page, "target").inner_text()
+    before = ha.get_state(st)["state"]
+    tid(page, "plus").click()
+    dash(page).evaluate("el => { el._adapter.online = () => false; }")  # offline, as the page sees it
+    time.sleep(2.5)
+    assert ha.get_state(st)["state"] == before, "a write went out while the thermostat was offline"
+    dash(page).evaluate("el => { delete el._adapter.online; }")         # back online
+    expect(tid(page, "target")).to_have_text(shown, timeout=5_000)
+
+
+def test_narrowing_on_simulation_goes_home(page):
+    """Shrinking to phone width on SIMULATION (rotation, split view) can't leave a page with no
+    tab selected: it goes back to HOME."""
+    ready(page)
+    dash(page).locator('[data-tab="SIMULATION"]').click()
+    expect(dash(page).locator('[data-tab="SIMULATION"]')).to_have_attribute("aria-selected", "true")
+    page.set_viewport_size({"width": 800, "height": 900})
+    expect(dash(page).locator('[data-tab="HOME"]')).to_have_attribute("aria-selected", "true", timeout=5_000)
+    expect(tid(page, "target")).to_be_visible()
+
+
+def test_missing_device_says_not_found(page):
+    """A device_name HA doesn't have (a typo, a renamed device) says so, not "offline"."""
+    ready(page)
+    dash(page).evaluate("el => el.setConfig({ device_name: 'No Such Thermostat' })")
+    expect(tid(page, "status-word")).to_have_text("NOT FOUND", timeout=10_000)
+    expect(tid(page, "status-sub")).to_contain_text('No device named "No Such Thermostat"')
+    dash(page).evaluate("(el, name) => el.setConfig({ device_name: name })", SIM_DEVICE)
+    ready(page)
+    expect(tid(page, "status-word")).not_to_have_text("NOT FOUND")
 
 
 def counters(page):
