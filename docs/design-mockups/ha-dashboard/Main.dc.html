@@ -96,7 +96,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{ou
 <section aria-label="Room" class="desk" style="flex: 999 1 560px; min-width: 0; background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px">
 <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 8px 24px">
 <div style="display: flex; flex-direction: column; gap: 4px">
-<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">ROOM · MIDDLE FLOOR · SIMULATED</span>
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">ROOM · MAIN THERMOSTAT · SIMULATED</span>
 <div style="display: flex; align-items: baseline; gap: 16px">
 <span style="font-size: 48px; line-height: 1; font-weight: 700">{{roomTxt}}</span>
 <span style="font-size: 14px; color: {{statusColor}}">{{statusMark}} {{statusWord}}</span>
@@ -420,7 +420,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{ou
 </sc-if>
 
 <footer style="display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 12px; color: #7e7e7e; border-top: 1px solid #202020; padding-top: 16px">
-<span>tab5-thermostat</span><span>10.0.0.193</span><span>main c6ab2a8</span><span>up {{uptime}}</span><span>screen {{brightTxt}} · dim {{dimTxt}}</span>
+<span>tab5-thermostat</span><span>192.0.2.10</span><span>main c6ab2a8</span><span>up {{uptime}}</span><span>screen {{brightTxt}} · dim {{dimTxt}}</span>
 </footer>
 
 </div>
@@ -788,7 +788,7 @@ class Component extends DCLogic {
         { name: 'home assistant', val: '● connected' }
       ],
       alerts: [['sensor', 'sensor fault'], ['interlock', 'interlock fault'], ['offline', 'thermostat offline 10 min']].map((a) => ({ label: a[1], on: s.alerts[a[0]], txt: s.alerts[a[0]] ? 'ON' : 'OFF', style: sw(s.alerts[a[0]]), toggle: () => { s.alerts[a[0]] = !s.alerts[a[0]]; self.forceUpdate(); } })),
-      device: [{ k: 'name', v: 'tab5-thermostat' }, { k: 'address', v: '10.0.0.193' }, { k: 'firmware', v: 'main c6ab2a8 · esphome 2026.10.1' }, { k: 'wi-fi', v: '2.4 GHz' }, { k: 'uptime', v: Math.floor(up / 60) + 'm ' + (up % 60) + 's' }, { k: 'clock', v: 'sntp + rtc · valid' }],
+      device: [{ k: 'name', v: 'tab5-thermostat' }, { k: 'address', v: '192.0.2.10' }, { k: 'firmware', v: 'main c6ab2a8 · esphome 2026.10.1' }, { k: 'wi-fi', v: '2.4 GHz' }, { k: 'uptime', v: Math.floor(up / 60) + 'm ' + (up % 60) + 's' }, { k: 'clock', v: 'sntp + rtc · valid' }],
       log: s.log.map((e) => ({ t: e.t, msg: e.msg, style: e.kind === 'fault' ? 'color: #eeeeee; font-weight: 700' : (e.kind === 'heat' ? 'color: #da5c2c' : (e.kind === 'cool' ? 'color: #2a7fff' : 'color: #b4b4b4')) })),
       scale: scale,
       humTxt: Math.round(s.hum) + '%',

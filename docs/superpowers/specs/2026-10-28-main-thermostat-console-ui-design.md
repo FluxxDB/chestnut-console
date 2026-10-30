@@ -28,7 +28,7 @@ The Tab5 can't render Home Assistant's own dashboard (it has no browser). Phones
 
 ## Visual language
 
-**Source:** the Co2 style reference in [`tab5-thermostat/docs/design/`](../../../tab5-thermostat/docs/design/DESIGN.md): an editorial look with ink on paper, hairline rules, pale washes, saturated colors reserved for categories, and no shadows or gradients.
+**Source:** the Co2 style reference in [`tab5-thermostat/docs/design/co2/`](../../../tab5-thermostat/docs/design/co2/DESIGN.md): an editorial look with ink on paper, hairline rules, pale washes, saturated colors reserved for categories, and no shadows or gradients.
 
 **Adaptations (decided with Dang through mockups v2–v4):**
 

@@ -54,7 +54,7 @@ Desktop and laptop: as in `Main.dc.html`. At **≤ 860px**:
 1. **Room view** (desktop only): top-down room. Windows on the outside wall, two supply vents on the top wall and one on the right, a return grille, the Tab5 on the right wall with the sensor reading. Readout row: room average, target, supply air, airflow, humidity.
    - **Outdoor column:** outdoor °F, weather, AC outdoor unit (fan spins about its centre while Y is on, blue outline).
    - **Equipment closet column:** cooling coil (Y, blue while cooling), interlock line ("armed · never both", or tripped), furnace (W, Ember outline and flame while firing), blower (G, spins while air moves).
-2. **Thermostat card:** label (COMFORT TARGET / ECO TARGET / HOLD / TARGET, plus "Target" for the schedule-off manual number), − / + (target, 50–90), status line, MODE Off/Heat/Cool/Auto, FAN Auto/On, LEVEL Comfort/Eco, schedule line, and **Resume schedule →** only while a hold is on.
+2. **Thermostat card:** label (COMFORT TARGET / ECO TARGET / HOLD / TARGET, plus "Target" for the schedule-off manual number), − / + (target, 50–90; disabled in Off, as on the wall screen), status line, MODE Off/Heat/Cool/Auto, FAN Auto/On, LEVEL Comfort/Eco, schedule line, and **Resume schedule →** only while a hold is on.
 3. **Last 12 hours:** room-temperature line with the dashed target, log-bars for heat W / cool Y / fan G (6-minute buckets), and runtime totals.
 4. **Today:** a 24-hour Comfort/Eco bar for today's day type with a now-marker, linking to Schedule. **Status:** equipment, interlock, sensor, HA connection, linking to System.
 
@@ -70,7 +70,7 @@ The room view plus a panel: outdoor temperature, weather, sensor fault, insulati
 
 ### System tab
 
-- **Safety:** furnace and AC minimum run/off with countdown bars, interlock, sensor. **Countdowns (builder check 2):** M2 publishes no remaining times. Bars come from the device's own `action_elapsed`: the running unit's min run, and the idle unit's min off, counted from when that action began (published every 30 s and interpolated in the browser). That survives HA restarts. The startup delay and the changeover lockout show as `call_wait_reason` text, not bars. Where a bar can't be known, it shows "—"; editable timer settings (minutes, with the M2 limits); Clear interlock fault (enabled only while latched).
+- **Safety:** furnace and AC minimum run/off with countdown bars, interlock, sensor. **Countdowns (builder check 2):** M2 publishes no remaining times. Bars come from the device's own `action_elapsed`: the running unit's min run, and the idle unit's min off, counted from when that action began (published every 30 s and interpolated in the browser). Which unit runs comes from `call_heat`/`call_cool`, never the climate's action; while the interlock is tripped all four rows show "—" (Mac review, 2026-10-29). That survives HA restarts. The startup delay and the changeover lockout show as `call_wait_reason` text, not bars. Where a bar can't be known, it shows "—"; editable timer settings (minutes, with the M2 limits); Clear interlock fault (enabled only while latched; a note says it takes effect once both units' min off times since the trip have passed, and after a press that the clear was requested).
 - **Alerts · Home Assistant app:** switches for sensor fault, interlock fault, thermostat offline for 10 min (**PC call:** these three).
 - **Wall screen:** brightness in use, dim brightness, dark theme ("follows sunset and sunrise").
 - **Device:** name, address, firmware, Wi-Fi, uptime, clock state.
@@ -112,8 +112,8 @@ All of these are the M2 contract on the Tab5, through HA's ESPHome integration.
 
 **Small additions (PC-owned, not contract changes):**
 - an ESPHome `uptime` sensor, Wi-Fi signal and a "Clock Valid" binary sensor on the Tab5 (`hardware/tab5-base.yaml`), for Device. The Wall-screen and IP entities already exist on the Tab5 (PC-owned `ui/` and hardware packages), not in M2. The host sim doesn't have them, which is fine: it isn't targeted;
-- **asked of the Mac agent (sim package):** a sensor with the sim's current outdoor °F. Today `sim_outdoor_f` is only the Fixed setting, and the Winter/Summer curve is internal (builder check 4). Until it exists, the outdoor readout shows the Fixed value with "fixed" or "—";
-- HA `input_boolean` helpers for the three alert switches.
+- **from the Mac agent (sim package, on main since 2026-10-29):** `sensor.sim_outdoor_now_f`, the outdoor °F the physics uses now (the Fixed setting, or the Winter/Summer curve; builder check 4). The Simulation panel shows it read-only as "outdoor now", and the slider is labelled "fixed outdoor";
+- HA `input_boolean` helpers for the three alert switches: restored across HA restarts (a mute stays), on at the first start. A startup check notifies if an entity the alert automations watch doesn't exist (PC call, Mac review 2026-10-29).
 
 ## Room view behaviour
 
@@ -126,7 +126,7 @@ All of these are the M2 contract on the Tab5, through HA's ESPHome integration.
 - Drawn upscaled with smoothing and a soft blur, over a faint dot grid.
 - **Honest readouts (builder check 8):** the readout row shows only measured or derived values: room average, target, humidity, airflow (on/still, from the calls). The modelled supply-air temperature is **not** shown as a reading. The mockup's "supply air 108°F" is dropped.
 - While the sim package is loaded, the room and outdoor readouts carry a small "SIM" tag.
-- **Outdoor source:** `sim_outdoor_f` while the sim exists. At M4: HA's weather entity (`weather.forecast_home`, already used by the console), or a fixed fallback with "outdoor —".
+- **Outdoor source:** `sim_outdoor_now_f` while the sim exists, labelled with the weather ("fixed · clock not set" when a day curve is picked but the device's clock isn't set, since the sim then uses the Fixed setting). At M4: HA's weather entity (`weather.forecast_home`, already used by the console), or "outdoor —".
 - Sensor fault: the field freezes at the last good value (no false heating) and the room view shows the fault. The heat map follows the calls, never the target.
 - The constants (supply temperatures, rates, grid size) are display tuning, kept in one place.
 - **M4 (Dang: live system view):** when the `sim_*` entities are gone from the registry or orphaned (no longer provided by the device), not merely `unavailable` (that also happens when the Tab5 is just offline), the Simulation tab and the BENCH controls disappear. The room view stays as the live view of the real house.

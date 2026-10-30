@@ -31,29 +31,31 @@ docker compose restart homeassistant
 
 Then one manual step, which HA 2026.10 requires because the system default panel lives in `.storage`, not YAML: open **Settings → Dashboards → Chestnut** and choose **Set as default**. Do it once per HA install. The `axiom` theme is applied automatically at startup (an automation sets it for every user), so there is nothing to do for it.
 
+**After an update, reload the dashboard's code.** HA serves `config/www` with a 31-day browser cache, so a browser or phone that has opened the dashboard keeps the old JavaScript (or a mix of old and new files). In a browser, hard-reload the page (Ctrl+Shift+R). In the Companion app: **Settings → Companion app → Debugging → Reset frontend cache**. (A version query on the URLs wouldn't help: the dashboard's own modules import each other by plain relative paths, which a query on the first file doesn't reach.)
+
 ### Alerts
 
-Three switches on the System tab (`input_boolean.chestnut_alert_sensor_fault`, `..._interlock_fault`, `..._offline`) decide which alerts are sent. All default to on.
+Three switches on the System tab (`input_boolean.chestnut_alert_sensor_fault`, `..._interlock_fault`, `..._offline`) decide which alerts are sent. They start on (an automation turns them on at the first HA start and records that in `input_boolean.chestnut_alert_switches_set_up`). After that HA restores them, so a switch you turn off stays off across restarts. Turning a switch on while its fault is already active doesn't alert; the next fault, or the next HA start with the fault still on, does.
 
 | Alert | Fires when |
 |---|---|
 | Sensor fault | the thermostat reports a temperature sensor problem (bad or missing reading). It has stopped calling for heat/cool. |
-| Interlock fault | the heat/cool interlock tripped: the heat and cool relays were found on at the same time (a stuck relay or wiring fault), so both were cut. Clear it on the System tab once it's checked; it won't clear until the minimum off time has passed (or the device reboots). |
+| Interlock fault | the heat/cool interlock tripped: the heat and cool relays were found on at the same time (a stuck relay or wiring fault), so both were cut. Clear it on the System tab once it's checked. The clear takes effect once both units have been off for their minimum off time since the trip (the longer of the two, 5 min by default; or the device reboots). An early press is remembered, so press once and wait; the System tab says the clear was requested. |
 | Offline | HA has had no contact with the thermostat for 10 minutes. It keeps running on its own. |
 
-Each alert also sends a "cleared" notice when the problem goes away, but only if that alert actually fired. A fault that is first seen as the thermostat reconnects (it was unavailable, then reports the fault) still alerts; a fault that was already alerted and is still there after a reconnect doesn't alert again. A fault that is on, or a thermostat that is still offline, when HA starts alerts again (HA's notifications don't survive a restart); for offline that is 10 minutes after HA starts. An alert's notification is always removed when the problem clears, even if its switch was turned off meanwhile.
+Each alert also sends a "cleared" notice when the problem goes away, but only if that alert actually fired. A new alert takes down the last "cleared" notice of its kind. A fault that is first seen as the thermostat reconnects (it was unavailable, then reports the fault) still alerts; a fault that was already alerted and is still there after a reconnect doesn't alert again. A fault that is on, or a thermostat that is still offline, when HA starts alerts again (HA's notifications don't survive a restart); for offline that is 10 minutes after HA starts. An alert's notification is always removed when the problem clears, even if its switch was turned off meanwhile.
 
-What each alert remembers between its alert and its "cleared" notice lives in three more helpers, `input_boolean.chestnut_sensor_fault_alerted`, `..._interlock_fault_alerted` and `input_boolean.chestnut_offline_alerted` (off at every HA start). They are internal: don't toggle them by hand.
+What each alert remembers between its alert and its "cleared" notice lives in three more helpers, `input_boolean.chestnut_sensor_fault_alerted`, `..._interlock_fault_alerted` and `input_boolean.chestnut_offline_alerted` (off at every HA start). They are internal: don't toggle them by hand. Because they reset at a start, a problem that clears while HA is restarting gets no "cleared" notice (the alert from before the restart stays on the phone), and a thermostat that stays offline alerts again 10 minutes after every HA start.
 
-**Check the entity ids once on the real install.** `config/automations.yaml` hard-codes the real Tab5's ids:
+**The entity ids.** `config/automations.yaml` names the ids HA makes for a device called "Main Thermostat":
 
 - `binary_sensor.main_thermostat_sensor_fault`
 - `binary_sensor.main_thermostat_interlock_fault`
 - `climate.main_thermostat_main_thermostat`
 
-Open Developer Tools → States and search for `main_thermostat`. If the ids differ (HA keeps old ids from earlier setups), edit `automations.yaml` to match, or the alerts will never fire.
+The dev HA has exactly these (checked 2026-10-29), and the e2e tests run the file as written. On a new install, HA can name them differently (ids left from an earlier device name, or a renamed device). So the "Chestnut: alert entity check" automation looks for them 30 s after every HA start, and if one is missing it posts a notification naming it. Then edit `automations.yaml` to match (Developer Tools → States, search for `main_thermostat`); otherwise that alert never fires.
 
-Phone push needs the HA Companion app signed in to this HA (it provides `notify.notify`). Until then, alerts show as persistent notifications in HA (the bell in the sidebar).
+Phone push needs the HA Companion app signed in to this HA (it provides `notify.notify`). It goes to **every** phone signed in to this HA with the app, not only Dang's. Until a phone is set up, alerts show as persistent notifications in HA (the bell in the sidebar).
 
 ### Running the tests
 
@@ -63,7 +65,7 @@ home-assistant/tests/run.sh e2e    # browser tests against a throwaway HA + the 
 home-assistant/tests/run.sh all    # both, about 7 minutes
 ```
 
-Docker only. The e2e HA runs on port **8124** with its own temporary config (the alerts pointed at the sim, the offline alert's 10 minutes shortened to 30 s) and never touches the dev HA on 8123; ports **8124** and **6053** (the sim's API) must be free, so stop any other host sim first.
+Docker on Linux (WSL) only: run.sh uses `ss`, GNU `sed` and `stat`, `flock` and host networking, so it doesn't run on macOS. The unit tests alone run anywhere with Node 24 (`node --test 'home-assistant/tests/unit/*.test.mjs'`). The e2e HA runs on port **8124** with its own temporary config (the offline alert's 10 minutes shortened to 30 s; everything else as written, with the sim named "Main Thermostat" like the Tab5) and a fresh admin password each run, and never touches the dev HA on 8123; ports **8124** and **6053** (the sim's API) must be free, so stop any other host sim first. One run at a time.
 
 ### Fonts
 

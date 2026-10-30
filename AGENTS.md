@@ -36,7 +36,7 @@ home-assistant/config/       HA config (runtime state gitignored)
   www/chestnut/              the Chestnut dashboard: custom element (one JS file per tab), self-hosted fonts
   dashboards/chestnut.yaml   the dashboard (replaces Overview); themes/axiom.yaml = the theme
   configuration.yaml, automations.yaml   dashboard registration, alert helpers, alert automations
-home-assistant/tests/        run.sh (unit | e2e | all, Docker only): JS unit tests + browser e2e on a throwaway HA (port 8124)
+home-assistant/tests/        run.sh (unit | e2e | all; e2e needs Docker on Linux/WSL): JS unit tests + browser e2e on a throwaway HA (port 8124)
 tab5-thermostat/             ESPHome config dir (mounted at /config in the esphome container)
   tab5-thermostat.yaml       device entry point: Wi-Fi, API, OTA, web page, packages
   main-thermostat-sim.yaml   host entry point: the thermostat logic + virtual house, for HA (API on 6053)
