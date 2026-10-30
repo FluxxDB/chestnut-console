@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Home Assistant in Axiom</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#000000}
+.ic{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+</style>
+</helmet>
+<div style="width: 1200px; height: 760px; box-sizing: border-box; background: #000000; color: #eeeeee; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 14px; display: flex; gap: 40px; padding: 40px">
+
+<div style="flex: 1 1 0; display: flex; flex-direction: column; gap: 16px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">SETTINGS PAGE · THEMED</span>
+<div style="background: #111111; border: 1px solid #202020; border-radius: 2px; display: flex; flex-direction: column">
+<div style="padding: 16px 24px; border-bottom: 1px solid #202020; font-weight: 700">Settings</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+<div style="display: flex; align-items: center; gap: 16px; padding: 14px 24px; border-bottom: 1px solid #202020">
+<span style="width: 24px; height: 24px; border-radius: 9999px; background: #202020; display: flex; align-items: center; justify-content: center; font-size: 12px">{{r.glyph}}</span>
+<div style="flex: 1; display: flex; flex-direction: column"><span>{{r.name}}</span><span style="font-size: 12px; color: #7e7e7e">{{r.sub}}</span></div>
+<span style="color: #7e7e7e">→</span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; gap: 12px">
+<button type="button" style="min-height: 44px; padding: 0 16px; background: #da5c2c; color: #eeeeee; border: none; border-radius: 2px; font-family: inherit; font-size: 14px; font-weight: 700">Save →</button>
+<button type="button" style="min-height: 44px; padding: 0 16px; background: transparent; color: #eeeeee; border: 1px solid #3a3a3a; border-radius: 2px; font-family: inherit; font-size: 14px">Cancel</button>
+<label style="display: flex; align-items: center; gap: 10px; font-size: 12px; color: #b4b4b4"><span style="width: 36px; height: 20px; background: #eeeeee; border-radius: 2px; position: relative; display: inline-block"><span style="position: absolute; right: 2px; top: 2px; width: 16px; height: 16px; background: #000000; border-radius: 1px"></span></span>toggle on</label>
+</div>
+</div>
+
+<div style="flex: 0 0 440px; display: flex; flex-direction: column; gap: 16px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">MORE-INFO POP-UP · THEMED</span>
+<div role="dialog" aria-label="Main Thermostat" style="background: #191919; border: 1px solid #3a3a3a; border-radius: 2px; padding: 24px; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<span style="font-weight: 700">Main Thermostat</span>
+<button type="button" aria-label="Close" style="width: 32px; height: 32px; background: transparent; border: 1px solid #3a3a3a; border-radius: 2px; color: #eeeeee">×</button>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px">
+<span style="font-size: 12px; color: #7e7e7e">heating · 68° now</span>
+<span style="font-size: 56px; font-weight: 700; line-height: 1">72°</span>
+<div style="display: flex; gap: 12px; margin-top: 8px">
+<button type="button" aria-label="Lower" style="width: 48px; height: 48px; background: transparent; border: 1px solid #3a3a3a; border-radius: 2px; color: #eeeeee; font-size: 20px">−</button>
+<button type="button" aria-label="Raise" style="width: 48px; height: 48px; background: transparent; border: 1px solid #3a3a3a; border-radius: 2px; color: #eeeeee; font-size: 20px">+</button>
+</div>
+</div>
+<div style="display: flex; gap: 8px">
+<span style="flex: 1; text-align: center; padding: 10px 0; border: 1px solid #3a3a3a; border-radius: 2px; font-size: 12px">OFF</span>
+<span style="flex: 1; text-align: center; padding: 10px 0; background: #eeeeee; color: #000000; border-radius: 2px; font-size: 12px; font-weight: 700">HEAT</span>
+<span style="flex: 1; text-align: center; padding: 10px 0; border: 1px solid #3a3a3a; border-radius: 2px; font-size: 12px">COOL</span>
+<span style="flex: 1; text-align: center; padding: 10px 0; border: 1px solid #3a3a3a; border-radius: 2px; font-size: 12px">AUTO</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #b4b4b4; border-top: 1px solid #202020; padding-top: 12px">
+<span>11:52 am  furnace on</span><span>11:40 am  target set to 72° (hold)</span><span>10:30 am  schedule: return → comfort</span>
+</div>
+</div>
+<span style="font-size: 12px; color: #7e7e7e; line-height: 1.7">HA's own pages (settings, history, logbook, pop-ups) take the Axiom theme: black canvas, #111/#191919 surfaces, hairline borders, JetBrains Mono, 2px corners, white-on-black selection, orange only for the main action.</span>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { rows: [
+      { glyph: '◇', name: 'Devices & services', sub: 'esphome · main thermostat' },
+      { glyph: '⌂', name: 'Dashboards', sub: 'chestnut (default)' },
+      { glyph: '≡', name: 'Automations', sub: 'thermostat fault alerts' },
+      { glyph: '◉', name: 'People', sub: 'Dang' },
+      { glyph: '⚙', name: 'System', sub: 'backups · updates · network' },
+      { glyph: '?', name: 'About', sub: 'home assistant 2026.10.4' }
+    ] };
+  }
+}
+</script>
+</body>
+</html>

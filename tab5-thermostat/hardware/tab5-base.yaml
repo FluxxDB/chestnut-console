@@ -170,6 +170,11 @@ binary_sensor:
       mode: INPUT_PULLDOWN
     filters:
       - delayed_on_off: 10s
+  # For the HA dashboard's Device card: is the clock set (SNTP, or the RTC at boot)?
+  - platform: template
+    id: clock_valid
+    name: "Clock Valid"
+    lambda: return id(sntp_time).now().is_valid();
 
 sensor:
   - platform: ina226
@@ -186,6 +191,12 @@ sensor:
       # Positive means discharging, negative means charging
       name: "Battery Current"
       entity_category: diagnostic
+  # For the HA dashboard's Device card.
+  - platform: uptime
+    name: "Uptime"
+  - platform: wifi_signal
+    name: "Wi-Fi Signal"
+    update_interval: 60s
 
 text_sensor:
   - platform: wifi_info

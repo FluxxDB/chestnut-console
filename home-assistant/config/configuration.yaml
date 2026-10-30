@@ -3,6 +3,62 @@
 
 default_config:
 
+frontend:
+  # The Axiom theme (themes/axiom.yaml), made the default for everyone by the
+  # "Chestnut: Axiom theme" automation at startup.
+  themes: !include_dir_merge_named themes
+  # Loads the self-hosted JetBrains Mono on every HA page (the theme's font), not only on
+  # the dashboard.
+  extra_module_url:
+    - /local/chestnut/style.js
+
+lovelace:
+  resource_mode: yaml
+  resources:
+    - url: /local/chestnut/chestnut-dashboard.js
+      type: module
+  dashboards:
+    # Takes the place of HA's Overview (url /lovelace).
+    lovelace:
+      mode: yaml
+      filename: dashboards/chestnut.yaml
+      title: Chestnut
+      icon: mdi:thermostat
+      show_in_sidebar: true
+
+# The System tab's ALERTS switches: whether each phone alert is sent (the automations read them),
+# and what the alert automations remember between an alert and its "cleared" notice.
+# The switches have no `initial`, so HA restores them: a muted alert stays muted across restarts.
+# They start on: the "alert switches on at first start" automation turns them on once.
+input_boolean:
+  chestnut_alert_sensor_fault:
+    name: "Alert: sensor fault"
+    icon: mdi:thermometer-alert
+  chestnut_alert_interlock_fault:
+    name: "Alert: interlock fault"
+    icon: mdi:shield-alert
+  chestnut_alert_offline:
+    name: "Alert: thermostat offline 10 min"
+    icon: mdi:lan-disconnect
+  # Set once that automation has run (restored too).
+  chestnut_alert_switches_set_up:
+    name: "Chestnut: alert switches set up"
+    icon: mdi:check
+  # Internal to the alert automations (not switches): that an alert fired and its "cleared"
+  # notice is still owed. Off at every HA start, like HA's persistent notifications.
+  chestnut_sensor_fault_alerted:
+    name: "Alerted: sensor fault"
+    icon: mdi:bell-check
+    initial: false
+  chestnut_interlock_fault_alerted:
+    name: "Alerted: interlock fault"
+    icon: mdi:bell-check
+    initial: false
+  chestnut_offline_alerted:
+    name: "Alerted: thermostat offline"
+    icon: mdi:bell-check
+    initial: false
+
 automation: !include automations.yaml
 script: !include scripts.yaml
 scene: !include scenes.yaml

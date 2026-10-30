@@ -8,6 +8,15 @@ home-assistant/config/*
 !home-assistant/config/automations.yaml
 !home-assistant/config/scripts.yaml
 !home-assistant/config/scenes.yaml
+!home-assistant/config/dashboards/
+!home-assistant/config/dashboards/**
+!home-assistant/config/themes/
+!home-assistant/config/themes/**
+!home-assistant/config/www/
+!home-assistant/config/www/**
+
+# HA dashboard e2e harness output (logs, failure screenshots)
+home-assistant/tests/.e2e-out/
 
 # ESPHome build output and Device Builder state (includes a pairing key)
 tab5-thermostat/.esphome/

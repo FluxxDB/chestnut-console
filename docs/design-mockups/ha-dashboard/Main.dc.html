@@ -1,0 +1,828 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chestnut · Main Thermostat</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#000000}
+a{color:#eeeeee}a:hover{color:#ffffff}
+.ic{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.spinc{animation:spin 0.9s linear infinite;transform-box:view-box;transform-origin:32px 32px}
+.spin12{animation:spin 0.9s linear infinite;transform-box:view-box;transform-origin:12px 12px}
+.spin12slow{animation:spin 3s linear infinite;transform-box:view-box;transform-origin:12px 12px}
+.num{width:64px;min-height:36px;background:#000000;color:#eeeeee;border:1px solid #3a3a3a;border-radius:2px;padding:0 8px;font-size:13px;box-sizing:border-box}
+.sel{min-height:36px;background:#000000;color:#eeeeee;border:1px solid #3a3a3a;border-radius:2px;padding:0 8px;font-size:13px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.blink{animation:blink 1.1s steps(2,start) infinite}
+@keyframes blink{to{visibility:hidden}}
+.sb{display:flex}
+.mbar{display:none}
+@media (max-width: 860px){.sb{display:none}.mbar{display:flex}.desk{display:none !important}}
+input[type=range]{accent-color:#da5c2c}
+input[type=time]{color-scheme:dark}
+input[type=time]::-webkit-calendar-picker-indicator{margin-left:2px;opacity:0.7}
+select,input,button{font-family:inherit}
+button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{outline:1px solid #eeeeee;outline-offset:2px}
+</style>
+</helmet>
+<div style="min-height: 100%; display: flex; flex-wrap: wrap; background: #000000; color: #eeeeee; font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14px; line-height: 1.6">
+
+<nav class="sb" aria-label="Home Assistant" style="flex: 0 0 216px; flex-direction: column; justify-content: space-between; border-right: 1px solid #202020; padding: 16px 0; box-sizing: border-box; min-height: 100%">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; align-items: center; gap: 10px; padding: 8px 20px 20px">
+<svg class="ic" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3 2 21h20Z"></path></svg>
+<span style="font-weight: 700; letter-spacing: 0.02em">chestnut</span>
+</div>
+<a href="#" aria-current="page" style="display: flex; align-items: center; gap: 12px; padding: 10px 20px; color: #eeeeee; text-decoration: none; background: #111111; border-left: 2px solid #eeeeee">
+<svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4Z"></path></svg>Chestnut</a>
+<a href="#" style="display: flex; align-items: center; gap: 12px; padding: 10px 20px 10px 22px; color: #b4b4b4; text-decoration: none">
+<svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 4-6"></path></svg>History</a>
+<a href="#" style="display: flex; align-items: center; gap: 12px; padding: 10px 20px 10px 22px; color: #b4b4b4; text-decoration: none">
+<svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 5h14M5 10h14M5 15h10M5 20h7"></path></svg>Logbook</a>
+<a href="#" style="display: flex; align-items: center; gap: 12px; padding: 10px 20px 10px 22px; color: #b4b4b4; text-decoration: none">
+<svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 4 4 6v14l5-2 6 2 5-2V4l-5 2Zm0 0v14m6-12v14"></path></svg>Map</a>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<a href="#" style="display: flex; align-items: center; gap: 12px; padding: 10px 20px 10px 22px; color: #b4b4b4; text-decoration: none">
+<svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"></path><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z"></path></svg>Settings</a>
+<a href="#" style="display: flex; align-items: center; gap: 12px; padding: 10px 20px 10px 22px; color: #b4b4b4; text-decoration: none">
+<svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 9a6 6 0 1 1 12 0c0 6 2 8 2 8H4s2-2 2-8M10 20a2 2 0 0 0 4 0"></path></svg>Notifications</a>
+<div style="display: flex; align-items: center; gap: 12px; padding: 12px 20px; color: #eeeeee">
+<span style="width: 24px; height: 24px; border-radius: 9999px; background: #202020; display: flex; align-items: center; justify-content: center; font-size: 12px">D</span>Dang</div>
+</div>
+</nav>
+
+<main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+
+<div class="mbar" style="align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #202020; gap: 12px">
+<button type="button" aria-label="Open Home Assistant menu" style="width: 44px; height: 44px; background: transparent; border: 1px solid #3a3a3a; border-radius: 2px; color: #eeeeee; display: flex; align-items: center; justify-content: center; cursor: pointer">
+<svg class="ic" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></button>
+<span style="font-weight: 700">chestnut</span>
+<span style="color: #b4b4b4; font-size: 12px">{{clock}}</span>
+</div>
+
+<header style="border-bottom: 1px solid #202020">
+<div style="max-width: 1200px; margin: 0 auto; padding: 24px 24px 0; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px">
+<div style="display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 12px; color: #7e7e7e">~/chestnut/main-thermostat</span>
+<h1 style="margin: 0; font-size: 24px; line-height: 1.33; font-weight: 700">Main Thermostat</h1>
+</div>
+<div style="display: flex; gap: 24px; font-size: 12px; color: #b4b4b4">
+<span>{{schedLine}}</span>
+<span>{{clock}}</span>
+<span>● connected</span>
+</div>
+</div>
+<div role="tablist" aria-label="Dashboard views" style="display: flex; gap: 24px; overflow-x: auto; font-size: 12px; letter-spacing: 0.08em">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="4">
+<button type="button" role="tab" class="{{t.cls}}" aria-selected="{{t.selected}}" onClick="{{t.pick}}" style="{{t.style}}">{{t.label}}</button>
+</sc-for>
+</div>
+</div>
+</header>
+
+<div style="max-width: 1200px; width: 100%; margin: 0 auto; padding: 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px">
+
+<div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: stretch">
+<sc-if value="{{showRoom}}" hint-placeholder-val="{{true}}">
+<section aria-label="Room" class="desk" style="flex: 999 1 560px; min-width: 0; background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 8px 24px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">ROOM · MAIN THERMOSTAT · SIMULATED</span>
+<div style="display: flex; align-items: baseline; gap: 16px">
+<span style="font-size: 48px; line-height: 1; font-weight: 700">{{roomTxt}}</span>
+<span style="font-size: 14px; color: {{statusColor}}">{{statusMark}} {{statusWord}}</span>
+</div>
+<span style="font-size: 12px; color: #b4b4b4">{{statusSub}}</span>
+</div>
+<div style="display: flex; gap: 16px; font-size: 12px; color: #b4b4b4; align-items: center">
+<span>60°</span>
+<span aria-hidden="true" style="display: flex; height: 8px; width: 140px; border: 1px solid #202020"><sc-for list="{{scale}}" as="c" hint-placeholder-count="21"><span style="{{c}}"></span></sc-for></span>
+<span>80°F</span>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch">
+
+<div style="flex: 1 1 150px; display: flex; flex-direction: column; gap: 12px; min-width: 150px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">OUTDOOR</span>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 24px; font-weight: 700">{{outdoorTxt}}</span>
+<span style="font-size: 12px; color: #b4b4b4">{{weather}}</span>
+</div>
+<div style="{{condBox}}">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<span style="font-size: 12px; letter-spacing: 0.06em">AC UNIT</span>
+<span style="font-size: 12px; color: #7e7e7e">Y</span>
+</div>
+<svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true" style="align-self: center; color: {{condColor}}">
+<rect x="4" y="4" width="56" height="56" rx="2" class="ic"></rect>
+<circle cx="32" cy="32" r="18" class="ic"></circle>
+<g class="{{condFanClass}}"><path d="M32 32 32 16M32 32 46 40M32 32 18 40" class="ic"></path></g>
+</svg>
+<span style="font-size: 12px; color: {{condColor}}">{{condState}}</span>
+</div>
+</div>
+
+<div style="flex: 999 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+<div style="position: relative; width: 100%; aspect-ratio: 16 / 10; border: 2px solid #3a3a3a; border-radius: 2px; box-sizing: border-box; background: #0b0b0b; overflow: hidden">
+<canvas ref="{{setCanvas}}" width="640" height="400" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%; display: block"></canvas>
+<div aria-hidden="true" style="position: absolute; left: -2px; top: 22%; width: 6px; height: 18%; background: #0b0b0b; border-left: 1px solid #7e7e7e; border-right: 1px solid #7e7e7e; box-sizing: border-box"></div>
+<div aria-hidden="true" style="position: absolute; left: -2px; top: 58%; width: 6px; height: 18%; background: #0b0b0b; border-left: 1px solid #7e7e7e; border-right: 1px solid #7e7e7e; box-sizing: border-box"></div>
+<div aria-hidden="true" style="position: absolute; right: 14%; bottom: -2px; width: 14%; height: 4px; background: #111111"></div>
+<span style="position: absolute; left: 10px; top: 32%; font-size: 10px; color: #7e7e7e; writing-mode: vertical-rl">WINDOWS</span>
+<div aria-hidden="true" style="{{ventStyleA}}"></div>
+<div aria-hidden="true" style="{{ventStyleB}}"></div>
+<div aria-hidden="true" style="{{ventStyleC}}"></div>
+<span style="position: absolute; left: 16%; top: 12px; font-size: 10px; color: #7e7e7e">SUPPLY</span>
+<span style="position: absolute; left: 60%; top: 12px; font-size: 10px; color: #7e7e7e">SUPPLY</span>
+<div aria-hidden="true" style="position: absolute; left: 4%; bottom: 8px; width: 12%; height: 8px; border: 1px solid #505050; border-radius: 2px"></div>
+<span style="position: absolute; left: 4%; bottom: 20px; font-size: 10px; color: #7e7e7e">RETURN</span>
+<div style="position: absolute; right: 8px; top: 46%; display: flex; align-items: center; gap: 8px">
+<span style="font-size: 10px; color: #b4b4b4; text-align: right">{{sensorLine}}</span>
+<div style="{{tstatStyle}}"><span style="font-size: 9px; font-weight: 700">{{tstatNum}}</span></div>
+</div>
+<span style="position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); font-size: 10px; color: #505050; letter-spacing: 0.1em">LIVING ROOM · TOP-DOWN</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: #7e7e7e">
+<span>room avg <span style="color: #eeeeee">{{roomTxt}}</span></span>
+<span>target <span style="color: #eeeeee">{{targetTxt}}</span></span>
+<span>supply air <span style="color: #eeeeee">{{supplyTxt}}</span></span>
+<span>airflow <span style="color: #eeeeee">{{airTxt}}</span></span>
+<span>humidity <span style="color: #eeeeee">{{humTxt}}</span></span>
+</div>
+</div>
+
+<div style="flex: 1 1 170px; display: flex; flex-direction: column; gap: 12px; min-width: 170px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">EQUIPMENT CLOSET</span>
+<div style="{{coilBox}}">
+<div style="display: flex; justify-content: space-between"><span style="font-size: 12px; letter-spacing: 0.06em">COOLING COIL</span><span style="font-size: 12px; color: #7e7e7e">Y</span></div>
+<span style="font-size: 12px; color: {{coilColor}}">{{coilState}}</span>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; padding-left: 12px; font-size: 11px; color: {{lockColor}}">
+<svg class="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="1"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
+<span>{{lockLine}}</span>
+</div>
+<div style="{{furnBox}}">
+<div style="display: flex; justify-content: space-between"><span style="font-size: 12px; letter-spacing: 0.06em">FURNACE</span><span style="font-size: 12px; color: #7e7e7e">W</span></div>
+<div style="display: flex; align-items: center; gap: 10px">
+<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" style="color: {{furnColor}}"><path class="ic" d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-3 2-4 2-6 1 1 2 2 3 2 0-2-1-4 0-6Z"></path></svg>
+<span style="font-size: 12px; color: {{furnColor}}">{{furnState}}</span>
+</div>
+</div>
+<div style="{{blowBox}}">
+<div style="display: flex; justify-content: space-between"><span style="font-size: 12px; letter-spacing: 0.06em">BLOWER</span><span style="font-size: 12px; color: #7e7e7e">G</span></div>
+<div style="display: flex; align-items: center; gap: 10px">
+<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" style="color: {{blowColor}}"><g class="{{blowFanClass}}"><circle cx="12" cy="12" r="2" class="ic"></circle><path class="ic" d="M12 10c-1-4 1-7 3-6s0 5-3 6Zm2 2c4-1 7 1 6 3s-5 0-6-3Zm-2 2c1 4-1 7-3 6s0-5 3-6Zm-2-2c-4 1-7-1-6-3s5 0 6 3Z"></path></g></svg>
+<span style="font-size: 12px; color: {{blowColor}}">{{blowState}}</span>
+</div>
+</div>
+</div>
+
+</div>
+</section>
+</sc-if>
+<sc-if value="{{isHome}}" hint-placeholder-val="{{true}}">
+<section aria-label="Thermostat" style="flex: 1 1 340px; min-width: 0; background: #191919; border: 1px solid #202020; border-radius: 2px; padding: 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">{{targetLabel}}</span>
+<span style="font-size: 12px; color: #7e7e7e">set_target</span>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px">
+<button type="button" onClick="{{minus}}" aria-label="Lower target" style="width: 56px; height: 56px; background: transparent; border: 1px solid #3a3a3a; border-radius: 2px; color: #eeeeee; font-size: 24px; cursor: pointer">−</button>
+<span style="font-size: 64px; line-height: 1; font-weight: 700; letter-spacing: -0.02em">{{targetTxt}}</span>
+<button type="button" onClick="{{plus}}" aria-label="Raise target" style="width: 56px; height: 56px; background: transparent; border: 1px solid #3a3a3a; border-radius: 2px; color: #eeeeee; font-size: 24px; cursor: pointer">+</button>
+</div>
+<span style="font-size: 12px; color: #b4b4b4; text-align: center; min-height: 20px">{{tgtSub}}</span>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">MODE</span>
+<div style="display: flex; gap: 8px">
+<sc-for list="{{modes}}" as="m" hint-placeholder-count="4">
+<button type="button" aria-pressed="{{m.pressed}}" onClick="{{m.pick}}" style="{{m.style}}">{{m.label}}</button>
+</sc-for>
+</div>
+</div>
+<div style="display: flex; gap: 16px; flex-wrap: wrap">
+<div style="flex: 1 1 120px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">FAN</span>
+<div style="display: flex; gap: 8px">
+<sc-for list="{{fans}}" as="f" hint-placeholder-count="2">
+<button type="button" aria-pressed="{{f.pressed}}" onClick="{{f.pick}}" style="{{f.style}}">{{f.label}}</button>
+</sc-for>
+</div>
+</div>
+<div style="flex: 1 1 160px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">LEVEL</span>
+<div style="display: flex; gap: 8px">
+<sc-for list="{{levels}}" as="l" hint-placeholder-count="2">
+<button type="button" aria-pressed="{{l.pressed}}" onClick="{{l.pick}}" style="{{l.style}}">{{l.label}}</button>
+</sc-for>
+</div>
+</div>
+</div>
+<div style="border-top: 1px solid #202020; padding-top: 16px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; gap: 12px; font-size: 12px">
+<span style="color: #7e7e7e; letter-spacing: 0.08em">SCHEDULE</span>
+<span>{{schedLine}}</span>
+</div>
+<sc-if value="{{hold}}" hint-placeholder-val="{{false}}">
+<button type="button" onClick="{{resume}}" style="min-height: 44px; background: #da5c2c; color: #eeeeee; border: none; border-radius: 2px; font-size: 14px; font-weight: 700; cursor: pointer">Resume schedule →</button>
+</sc-if>
+</div>
+</section>
+</sc-if>
+<sc-if value="{{isSim}}" hint-placeholder-val="{{false}}">
+<section aria-label="Simulation" class="desk" style="display: flex; flex: 1 1 340px; min-width: 0; box-sizing: border-box; background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; justify-content: space-between; align-items: baseline">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">SIMULATION</span>
+<span style="font-size: 12px; color: #7e7e7e">BENCH ONLY</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="sim-outdoor" style="display: flex; justify-content: space-between; font-size: 12px; color: #b4b4b4"><span>outdoor</span><span style="color: #eeeeee">{{outdoorTxt}}</span></label>
+<input id="sim-outdoor" type="range" min="-10" max="110" step="1" value="{{outdoor}}" onChange="{{onOutdoor}}" style="width: 100%">
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="sim-weather" style="font-size: 12px; color: #b4b4b4">weather</label>
+<select id="sim-weather" value="{{weather}}" onChange="{{onWeather}}" style="min-height: 44px; background: #000000; color: #eeeeee; border: 1px solid #3a3a3a; border-radius: 2px; padding: 0 12px; font-size: 14px">
+<option>Fixed</option><option>Winter day</option><option>Summer day</option>
+</select>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="sim-fault" style="font-size: 12px; color: #b4b4b4">sensor fault</label>
+<select id="sim-fault" value="{{fault}}" onChange="{{onFault}}" style="min-height: 44px; background: #000000; color: #eeeeee; border: 1px solid #3a3a3a; border-radius: 2px; padding: 0 12px; font-size: 14px">
+<option>None</option><option>Unplugged</option><option>Frozen</option><option>Out of range</option><option>Spike</option>
+</select>
+</div>
+<sc-for list="{{simKnobs}}" as="k" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="{{k.id}}" style="display: flex; justify-content: space-between; font-size: 12px; color: #b4b4b4"><span>{{k.label}}</span><span style="color: #eeeeee">{{k.txt}}</span></label>
+<input id="{{k.id}}" type="range" min="{{k.min}}" max="{{k.max}}" step="{{k.step}}" value="{{k.val}}" onChange="{{k.set}}" style="width: 100%">
+</div>
+</sc-for>
+<span style="font-size: 12px; color: #7e7e7e">mockup runs ×60; the Tab5's room runs in real time</span>
+<div style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #202020; padding-top: 12px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">PHYSICS</span>
+<span style="font-size: 12px; color: #b4b4b4; line-height: 1.7">dT/dt = (outdoor − room) / insulation<br>  + heating rate · W − cooling rate · Y</span>
+<span style="font-size: 12px; color: #7e7e7e">one room temperature; the colour flow is drawn around it</span>
+</div>
+</section>
+</sc-if>
+</div>
+
+<sc-if value="{{showRoom}}" hint-placeholder-val="{{true}}">
+<section aria-label="Runtime" style="background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; align-items: baseline">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">LAST 12 HOURS</span>
+<div style="display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: #b4b4b4">
+<span>heat <span style="color: #eeeeee">{{heatTotal}}</span></span>
+<span>cool <span style="color: #eeeeee">{{coolTotal}}</span></span>
+<span>fan <span style="color: #eeeeee">{{fanTotal}}</span></span>
+</div>
+</div>
+<svg viewBox="0 0 120 30" preserveAspectRatio="none" width="100%" height="56" role="img" aria-label="Room temperature over the last 12 hours, with the target dashed">
+<polyline points="{{targetPts}}" fill="none" stroke="#505050" stroke-dasharray="1.5 1.5" vector-effect="non-scaling-stroke"></polyline>
+<polyline points="{{roomPts}}" fill="none" stroke="#eeeeee" vector-effect="non-scaling-stroke"></polyline>
+</svg>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="3">
+<div style="display: flex; align-items: center; gap: 12px">
+<span style="flex: 0 0 64px; font-size: 12px; color: #b4b4b4">{{r.label}}</span>
+<div style="flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 1px; height: 10px">
+<sc-for list="{{r.bars}}" as="b" hint-placeholder-count="60">
+<span style="{{b}}"></span>
+</sc-for>
+</div>
+</div>
+</sc-for>
+<div style="display: flex; justify-content: space-between; padding-left: 76px; font-size: 12px; color: #7e7e7e">
+<span>12h ago</span><span>6h</span><span>now</span>
+</div>
+</section>
+</sc-if>
+
+<sc-if value="{{isHome}}" hint-placeholder-val="{{true}}">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px">
+<section aria-label="Today" style="background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">TODAY · {{dayName}}</span><button type="button" onClick="{{goSchedule}}" style="background: transparent; border: none; color: #eeeeee; font-size: 12px; text-decoration: underline; cursor: pointer; padding: 0">schedule →</button></div>
+<div style="display: flex; height: 24px; gap: 1px"><sc-for list="{{todayBar}}" as="b" hint-placeholder-count="4"><span style="{{b.style}}">{{b.label}}</span></sc-for></div>
+<div style="position: relative; height: 16px"><span style="{{nowMark}}"></span></div>
+<div style="display: flex; justify-content: space-between; font-size: 12px; color: #7e7e7e"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span></div>
+</section>
+<section aria-label="Status" style="background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">STATUS</span><button type="button" onClick="{{goSystem}}" style="background: transparent; border: none; color: #eeeeee; font-size: 12px; text-decoration: underline; cursor: pointer; padding: 0">system →</button></div>
+<sc-for list="{{statusRows}}" as="r" hint-placeholder-count="4"><div style="display: flex; justify-content: space-between; font-size: 12px"><span style="color: #b4b4b4">{{r.name}}</span><span>{{r.val}}</span></div></sc-for>
+</section>
+</div>
+</sc-if>
+
+<sc-if value="{{isSched}}" hint-placeholder-val="{{false}}">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 24px">
+<section aria-label="Schedule" style="background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">SCHEDULE</span>
+<button type="button" role="switch" aria-checked="{{schedOn}}" onClick="{{toggleSched}}" style="{{schedSwitch}}">{{schedOnTxt}}</button>
+</div>
+<div style="display: flex; gap: 8px">
+<sc-for list="{{days}}" as="d" hint-placeholder-count="2"><button type="button" aria-pressed="{{d.pressed}}" onClick="{{d.pick}}" style="{{d.style}}">{{d.label}}</button></sc-for>
+</div>
+<sc-for list="{{periods}}" as="p" hint-placeholder-count="4">
+<div style="{{p.style}}">
+<span style="flex: 0 0 12px">{{p.mark}}</span>
+<span style="flex: 1">{{p.name}}</span>
+<input type="time" aria-label="{{p.timeLabel}}" value="{{p.time}}" onChange="{{p.onTime}}" class="num" style="width: 122px">
+<select aria-label="{{p.levelLabel}}" value="{{p.level}}" onChange="{{p.onLevel}}" class="sel"><option>Comfort</option><option>Eco</option></select>
+</div>
+</sc-for>
+<div style="display: flex; flex-wrap: wrap; gap: 12px 24px; padding-top: 4px">
+<div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #b4b4b4">comfort
+<button type="button" aria-label="Lower comfort" onClick="{{comfortDown}}" style="width: 32px; height: 32px; background: transparent; color: #eeeeee; border: 1px solid #3a3a3a; border-radius: 2px; cursor: pointer">−</button>
+<span style="color: #eeeeee; min-width: 32px; text-align: center">{{comfortTxt}}</span>
+<button type="button" aria-label="Raise comfort" onClick="{{comfortUp}}" style="width: 32px; height: 32px; background: transparent; color: #eeeeee; border: 1px solid #3a3a3a; border-radius: 2px; cursor: pointer">+</button></div>
+<div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #b4b4b4">eco offset
+<button type="button" aria-label="Smaller eco offset" onClick="{{ecoDown}}" style="width: 32px; height: 32px; background: transparent; color: #eeeeee; border: 1px solid #3a3a3a; border-radius: 2px; cursor: pointer">−</button>
+<span style="color: #eeeeee; min-width: 32px; text-align: center">{{ecoTxt}}</span>
+<button type="button" aria-label="Larger eco offset" onClick="{{ecoUp}}" style="width: 32px; height: 32px; background: transparent; color: #eeeeee; border: 1px solid #3a3a3a; border-radius: 2px; cursor: pointer">+</button></div>
+</div>
+</section>
+<section aria-label="Week" style="background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">THE WEEK</span>
+<sc-for list="{{weekRows}}" as="w" hint-placeholder-count="2">
+<div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 12px; color: #b4b4b4">{{w.label}}</span>
+<div style="display: flex; height: 20px; gap: 1px"><sc-for list="{{w.bar}}" as="b" hint-placeholder-count="4"><span style="{{b.style}}">{{b.label}}</span></sc-for></div></div>
+</sc-for>
+<div style="display: flex; justify-content: space-between; font-size: 12px; color: #7e7e7e"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span></div>
+<div style="display: flex; gap: 16px; font-size: 12px; color: #b4b4b4"><span><span style="display: inline-block; width: 10px; height: 10px; background: #eeeeee; margin-right: 6px"></span>comfort</span><span><span style="display: inline-block; width: 10px; height: 10px; background: #3a3a3a; margin-right: 6px"></span>eco</span></div>
+</section>
+
+</div>
+</sc-if>
+
+<sc-if value="{{isSystem}}" hint-placeholder-val="{{false}}">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px">
+<section aria-label="Safety" style="background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">SAFETY</span>
+<sc-for list="{{safety}}" as="s" hint-placeholder-count="6">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; justify-content: space-between; gap: 12px; font-size: 12px">
+<span style="color: #b4b4b4">{{s.name}}</span>
+<span style="{{s.valStyle}}">{{s.val}}</span>
+</div>
+<div style="height: 2px; background: #202020"><div style="{{s.bar}}"></div></div>
+</div>
+</sc-for>
+<div style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #202020; padding-top: 12px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">TIMERS · MINUTES</span>
+<sc-for list="{{timers}}" as="t" hint-placeholder-count="5">
+<label style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #b4b4b4">{{t.label}}<input type="number" min="{{t.min}}" max="{{t.max}}" value="{{t.val}}" onChange="{{t.set}}" class="num"></label>
+</sc-for>
+</div>
+<button type="button" disabled style="min-height: 44px; background: transparent; color: #7e7e7e; border: 1px solid #202020; border-radius: 2px; font-size: 14px; cursor: not-allowed">Clear interlock fault</button>
+</section>
+<section aria-label="Alerts" style="background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">ALERTS · HOME ASSISTANT APP</span>
+<sc-for list="{{alerts}}" as="a" hint-placeholder-count="3">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px"><span style="color: #b4b4b4">{{a.label}}</span><button type="button" role="switch" aria-checked="{{a.on}}" onClick="{{a.toggle}}" style="{{a.style}}">{{a.txt}}</button></div>
+</sc-for>
+<span style="font-size: 12px; color: #7e7e7e">push to your phone through the HA app</span>
+</section>
+<section aria-label="Wall screen" style="background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">WALL SCREEN</span>
+<sc-for list="{{screenKnobs}}" as="k" hint-placeholder-count="2">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="{{k.id}}" style="display: flex; justify-content: space-between; font-size: 12px; color: #b4b4b4"><span>{{k.label}}</span><span style="color: #eeeeee">{{k.txt}}</span></label>
+<input id="{{k.id}}" type="range" min="{{k.min}}" max="{{k.max}}" step="1" value="{{k.val}}" onChange="{{k.set}}" style="width: 100%">
+</div>
+</sc-for>
+<div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #b4b4b4">
+<span>dark theme<br><span style="color: #7e7e7e">follows sunset and sunrise</span></span>
+<button type="button" role="switch" aria-checked="{{dark}}" onClick="{{toggleDark}}" style="{{darkSwitch}}">{{darkTxt}}</button>
+</div>
+</section>
+<section aria-label="Device" style="background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">DEVICE</span>
+<sc-for list="{{device}}" as="d" hint-placeholder-count="6"><div style="display: flex; justify-content: space-between; font-size: 12px"><span style="color: #b4b4b4">{{d.k}}</span><span>{{d.v}}</span></div></sc-for>
+</section>
+<section aria-label="Event log" style="background: #111111; border: 1px solid #202020; border-radius: 2px; padding: 24px; display: flex; flex-direction: column; gap: 12px; grid-column: 1 / -1">
+<span style="font-size: 12px; color: #7e7e7e; letter-spacing: 0.08em">EVENT LOG</span>
+<div style="background: #000000; border: 1px solid #202020; border-radius: 2px; padding: 12px; display: flex; flex-direction: column; gap: 2px; font-size: 12px; max-height: 220px; overflow-y: auto">
+<sc-for list="{{log}}" as="e" hint-placeholder-count="6"><div style="display: flex; gap: 16px"><span style="color: #7e7e7e; flex: 0 0 72px">{{e.t}}</span><span style="{{e.style}}">{{e.msg}}</span></div></sc-for>
+</div>
+</section>
+</div>
+</sc-if>
+
+<footer style="display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 12px; color: #7e7e7e; border-top: 1px solid #202020; padding-top: 16px">
+<span>tab5-thermostat</span><span>192.0.2.10</span><span>main c6ab2a8</span><span>up {{uptime}}</span><span>screen {{brightTxt}} · dim {{dimTxt}}</span>
+</footer>
+
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2000}}'>
+class Component extends DCLogic {
+  ensure() {
+    if (this.sim) return this.sim;
+    const hist = [];
+    for (let i = 0; i < 120; i++) {
+      const w = ((i * 7) % 10) < 3;
+      hist.push({ w: w, y: false, g: w, room: 67.6 + Math.sin(i / 3) * 0.7 + (i > 90 ? 1.5 : 0), target: i > 90 ? 72 : 68 });
+    }
+    this.sim = {
+      room: 67.9, target: 72, comfort: 72, mode: 'Heat', fan: 'Auto', level: 'Comfort', hold: false,
+      outdoor: 35, weather: 'Winter day', fault: 'None', W: false, Y: false,
+      wOn: -1e9, wOff: -1e9, yOn: -1e9, yOff: -1e9, t: 0, lastSample: 0, hist: hist, tab: 'HOME', start: Date.now(),
+      log: [{ t: '', msg: 'boot · thermostat logic running, startup delay done', kind: '' }], alerts: { sensor: true, interlock: true, offline: true }, eco: 4, schedOn: true, day: 'weekday', tau: 8, heatFph: 10, coolFph: 5, hum: 45, bright: 10, dim: 4, dark: true,
+      tm: { heatRun: 3, heatOff: 3, coolRun: 5, coolOff: 5, lockout: 30 },
+      sched: { weekday: [['wake', '06:30', 'Comfort'], ['leave', '08:00', 'Eco'], ['return', '17:30', 'Comfort'], ['sleep', '22:30', 'Eco']], weekend: [['wake', '08:00', 'Comfort'], ['leave', '10:00', 'Comfort'], ['return', '16:00', 'Comfort'], ['sleep', '23:00', 'Eco']] }
+    };
+    return this.sim;
+  }
+
+  componentDidMount() {
+    this.ensure();
+    this.initField();
+    this._last = performance.now();
+    const loop = (now) => {
+      const dt = Math.min(0.1, (now - this._last) / 1000);
+      this._last = now;
+      this.stepSim(dt);
+      this.stepField(dt);
+      this.drawField();
+      this._raf = requestAnimationFrame(loop);
+    };
+    this._raf = requestAnimationFrame(loop);
+    this._ui = setInterval(() => this.forceUpdate(), 400);
+  }
+
+  componentWillUnmount() {
+    cancelAnimationFrame(this._raf);
+    clearInterval(this._ui);
+  }
+
+  stepSim(dt) {
+    const s = this.sim;
+    const simSec = dt * 60;
+    s.t += simSec;
+    const h = simSec / 3600;
+    s.room += h * ((s.outdoor - s.room) / s.tau + (s.W ? s.heatFph : 0) - (s.Y ? s.coolFph : 0));
+    const faulted = s.fault !== 'None';
+    const lo = s.mode === 'Auto' ? s.target - 1 : s.target;
+    const hi = s.mode === 'Auto' ? s.target + 1 : s.target;
+    const canHeat = !faulted && (s.mode === 'Heat' || s.mode === 'Auto');
+    const canCool = !faulted && (s.mode === 'Cool' || s.mode === 'Auto');
+    if (s.W) {
+      if ((!canHeat || s.room >= lo + 0.5) && s.t - s.wOn >= s.tm.heatRun * 60) { s.W = false; s.wOff = s.t; this.logEv('furnace off · W released'); }
+    } else if (canHeat && !s.Y && s.room < lo - 0.5 && s.t - s.wOff >= s.tm.heatOff * 60) { s.W = true; s.wOn = s.t; this.logEv('furnace on · W called', 'heat'); }
+    if (s.Y) {
+      if ((!canCool || s.room <= hi - 0.5) && s.t - s.yOn >= s.tm.coolRun * 60) { s.Y = false; s.yOff = s.t; this.logEv('ac off · Y released'); }
+    } else if (canCool && !s.W && s.room > hi + 0.5 && s.t - s.yOff >= s.tm.coolOff * 60) { s.Y = true; s.yOn = s.t; this.logEv('ac on · Y called', 'cool'); }
+    if (s.weather === 'Winter day') s.outdoor += (35 + 8 * Math.sin(s.t / 7200) - s.outdoor) * Math.min(1, h * 0.5);
+    if (s.weather === 'Summer day') s.outdoor += (88 + 8 * Math.sin(s.t / 7200) - s.outdoor) * Math.min(1, h * 0.5);
+    if (s.t - s.lastSample >= 360) {
+      s.lastSample = s.t;
+      s.hist.push({ w: s.W, y: s.Y, g: s.W || s.Y || s.fan === 'On', room: s.room, target: s.target });
+      if (s.hist.length > 120) s.hist.shift();
+    }
+  }
+
+  initField() {
+    const W = 64, H = 40;
+    this.fw = W; this.fh = H;
+    this.T = new Float32Array(W * H).fill(this.sim.room);
+    this.T2 = new Float32Array(W * H);
+    this.vents = [{ x: 14, y: 1, dx: 0, dy: 1 }, { x: 42, y: 1, dx: 0, dy: 1 }, { x: 62, y: 28, dx: -1, dy: 0 }];
+    this.U = new Float32Array(W * H);
+    this.V = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let u = 0, v = 0;
+        for (const vt of this.vents) {
+          const rx = x - vt.x, ry = y - vt.y;
+          const along = rx * vt.dx + ry * vt.dy;
+          if (along <= 0) continue;
+          const perp = Math.abs(rx * vt.dy - ry * vt.dx);
+          const wdt = 2 + along * 0.35;
+          const k = Math.exp(-along / 26) * Math.exp(-(perp * perp) / (2 * wdt * wdt));
+          u += vt.dx * k; v += vt.dy * k;
+        }
+        const rx = 5 - x, ry = 38 - y, d = Math.hypot(rx, ry) + 1;
+        u += (rx / d) * 0.25 * Math.exp(-d / 40);
+        v += (ry / d) * 0.25 * Math.exp(-d / 40);
+        this.U[y * W + x] = u;
+        this.V[y * W + x] = v;
+      }
+    }
+  }
+
+  sample(T, x, y) {
+    const W = this.fw, H = this.fh;
+    x = Math.max(0, Math.min(W - 1.001, x));
+    y = Math.max(0, Math.min(H - 1.001, y));
+    const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0;
+    const i = y0 * W + x0;
+    return (T[i] * (1 - fx) + T[i + 1] * fx) * (1 - fy) + (T[i + W] * (1 - fx) + T[i + W + 1] * fx) * fy;
+  }
+
+  stepField(dt) {
+    const s = this.sim, W = this.fw, H = this.fh, T = this.T, T2 = this.T2;
+    const air = s.W || s.Y || s.fan === 'On';
+    const sp = air ? 9 : 0;
+    const tt = s.t / 60;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        let u = this.U[i], v = this.V[i];
+        if (air) { u += 0.12 * Math.sin(tt * 0.05 + y * 0.21); v += 0.12 * Math.cos(tt * 0.04 + x * 0.17); }
+        T2[i] = sp ? this.sample(T, x - u * sp * dt, y - v * sp * dt) : T[i];
+      }
+    }
+    for (let y = 1; y < H - 1; y++) {
+      for (let x = 1; x < W - 1; x++) {
+        const i = y * W + x;
+        T[i] = T2[i] + 0.18 * (T2[i - 1] + T2[i + 1] + T2[i - W] + T2[i + W] - 4 * T2[i]);
+      }
+    }
+    for (let x = 0; x < W; x++) { T[x] = T2[x]; T[(H - 1) * W + x] = T2[(H - 1) * W + x]; }
+    for (let y = 0; y < H; y++) { T[y * W] = T2[y * W]; T[y * W + W - 1] = T2[y * W + W - 1]; }
+    if (s.W || s.Y) {
+      const sup = s.W ? 108 : 55;
+      for (const vt of this.vents) {
+        for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+          const x = vt.x + ox, y = vt.y + oy;
+          if (x < 0 || y < 0 || x >= W || y >= H) continue;
+          T[y * W + x] += (sup - T[y * W + x]) * 0.35;
+        }
+      }
+    }
+    for (let x = 0; x < W; x++) {
+      T[x] += (s.outdoor - T[x]) * 0.004;
+      T[(H - 1) * W + x] += (s.outdoor - T[(H - 1) * W + x]) * 0.004;
+    }
+    for (let y = 0; y < H; y++) {
+      const win = (y > 8 && y < 16) || (y > 23 && y < 31);
+      T[y * W] += (s.outdoor - T[y * W]) * (win ? 0.02 : 0.005);
+      T[y * W + W - 1] += (s.outdoor - T[y * W + W - 1]) * 0.003;
+    }
+    let sum = 0;
+    for (let i = 0; i < T.length; i++) sum += T[i];
+    const corr = s.room - sum / T.length;
+    for (let i = 0; i < T.length; i++) T[i] += corr;
+  }
+
+  drawField() {
+    const cv = this._cv;
+    if (!cv) return;
+    const W = this.fw, H = this.fh;
+    if (!this._off) {
+      this._off = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(W, H) : Object.assign(document.createElement('canvas'), { width: W, height: H });
+      this._img = this._off.getContext('2d').createImageData(W, H);
+    }
+    const d = this._img.data, T = this.T;
+    for (let i = 0; i < T.length; i++) {
+      const c = this.heatColor(T[i]);
+      const o = i * 4;
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = c[3] * 255;
+    }
+    this._off.getContext('2d').putImageData(this._img, 0, 0);
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    if ('filter' in ctx) ctx.filter = 'blur(10px)';
+    ctx.drawImage(this._off, -10, -10, cv.width + 20, cv.height + 20);
+    if ('filter' in ctx) ctx.filter = 'none';
+    ctx.fillStyle = '#202020';
+    for (let y = 16; y < cv.height; y += 20) for (let x = 16; x < cv.width; x += 20) ctx.fillRect(x, y, 1.5, 1.5);
+  }
+
+  heatColor(t) {
+    // Two colours, 60°F blue to 80°F Ember (supply air pegs the ends), blended in OKLab (perceptual) so the middle stays
+    // clean instead of the muddy grey a plain RGB blend gives.
+    if (!this._ok) {
+      const toLin = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+      const toLab = (r, g, b) => {
+        r = toLin(r); g = toLin(g); b = toLin(b);
+        const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+        const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+        const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+        return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+      };
+      this._ok = { a: toLab(42, 127, 255), b: toLab(218, 92, 44) };
+    }
+    const fromLab = (L, A, B) => {
+      const l = Math.pow(L + 0.3963377774 * A + 0.2158037573 * B, 3);
+      const m = Math.pow(L - 0.1055613458 * A - 0.0638541728 * B, 3);
+      const s = Math.pow(L - 0.0894841775 * A - 1.291485548 * B, 3);
+      const enc = (c) => 255 * Math.max(0, Math.min(1, c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055));
+      return [enc(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s), enc(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s), enc(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s)];
+    };
+    const f = (Math.max(60, Math.min(80, t)) - 60) / 20;
+    const A = this._ok.a, Bc = this._ok.b;
+    const rgb = fromLab(A[0] + (Bc[0] - A[0]) * f, A[1] + (Bc[1] - A[1]) * f, A[2] + (Bc[2] - A[2]) * f);
+    return [rgb[0], rgb[1], rgb[2], 0.9];
+  }
+
+  logEv(msg, kind) {
+    const s = this.sim;
+    s.log.unshift({ t: this.clockNow(), msg: msg, kind: kind || '' });
+    if (s.log.length > 40) s.log.pop();
+  }
+
+  fmtMin(sec) {
+    const m = Math.max(0, Math.round(sec / 60));
+    return m < 60 ? m + ' min' : Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+  }
+
+  clockNow() {
+    const d = new Date();
+    let h = d.getHours();
+    const ap = h >= 12 ? 'pm' : 'am';
+    h = h % 12 || 12;
+    return h + ':' + String(d.getMinutes()).padStart(2, '0') + ' ' + ap;
+  }
+
+  renderVals() {
+    const s = this.ensure();
+    const self = this;
+    const segOn = 'flex: 1; min-height: 44px; padding: 0 8px; background: #eeeeee; color: #000000; border: 1px solid #eeeeee; border-radius: 2px; font-size: 13px; font-weight: 700; cursor: pointer';
+    const segOff = 'flex: 1; min-height: 44px; padding: 0 8px; background: transparent; color: #eeeeee; border: 1px solid #3a3a3a; border-radius: 2px; font-size: 13px; cursor: pointer';
+    const seg = (list, cur, set) => list.map((label) => ({ label: label.toUpperCase(), pressed: cur === label, style: cur === label ? segOn : segOff, pick: () => { set(label); self.forceUpdate(); } }));
+    const faulted = s.fault !== 'None';
+    const air = s.W || s.Y || s.fan === 'On';
+    const heatMode = s.mode === 'Heat' || s.mode === 'Auto';
+    const coolMode = s.mode === 'Cool' || s.mode === 'Auto';
+
+    let statusWord = 'IDLE', statusMark = '·', statusColor = '#b4b4b4', statusSub = 'holding ' + s.target + '°';
+    if (faulted) { statusWord = 'PAUSED'; statusMark = '⊘'; statusColor = '#eeeeee'; statusSub = 'temperature sensor problem: heating and cooling paused'; }
+    else if (s.W) { statusWord = 'HEATING'; statusMark = '▲'; statusColor = '#da5c2c'; statusSub = (heatMode ? 'to ' + s.target + '° · ' : 'finishing up · ') + this.fmtMin(s.t - s.wOn) + ' so far'; }
+    else if (s.Y) { statusWord = 'COOLING'; statusMark = '▼'; statusColor = '#2a7fff'; statusSub = (coolMode ? 'to ' + s.target + '° · ' : 'finishing up · ') + this.fmtMin(s.t - s.yOn) + ' so far'; }
+    else if (s.mode === 'Off') { statusWord = 'OFF'; statusSub = 'system is off'; }
+    else if (s.fan === 'On') { statusWord = 'FAN'; statusSub = 'fan only'; }
+
+    const boxBase = 'border-radius: 2px; padding: 12px; display: flex; flex-direction: column; gap: 6px; background: #0b0b0b; ';
+    const vent = (left, top, w, h, on) => 'position: absolute; left: ' + left + '; top: ' + top + '; width: ' + w + '; height: ' + h + '; border: 1px solid ' + (on ? '#eeeeee' : '#505050') + '; border-radius: 1px; box-sizing: border-box';
+    const ventOn = s.W || s.Y;
+
+    const HR = s.tm.heatRun * 60, HO = s.tm.heatOff * 60, CR = s.tm.coolRun * 60, CO = s.tm.coolOff * 60;
+    const wLeft = HR - (s.t - s.wOn), yLeft = CR - (s.t - s.yOn);
+    const wOffLeft = HO - (s.t - s.wOff), yOffLeft = CO - (s.t - s.yOff);
+    const bar = (frac, color) => 'height: 2px; width: ' + Math.round(Math.max(0, Math.min(1, frac)) * 100) + '%; background: ' + color;
+    const safety = [
+      { name: 'furnace min run', val: s.W && wLeft > 0 ? Math.ceil(wLeft / 60) + ' min left' : '✓ ok', valStyle: 'color: #eeeeee', bar: bar(s.W ? 1 - wLeft / HR : 0, '#da5c2c') },
+      { name: 'furnace min off', val: !s.W && wOffLeft > 0 ? Math.ceil(wOffLeft / 60) + ' min left' : '✓ ready', valStyle: 'color: #eeeeee', bar: bar(!s.W && wOffLeft > 0 ? 1 - wOffLeft / HO : 0, '#7e7e7e') },
+      { name: 'ac min run', val: s.Y && yLeft > 0 ? Math.ceil(yLeft / 60) + ' min left' : '✓ ok', valStyle: 'color: #eeeeee', bar: bar(s.Y ? 1 - yLeft / CR : 0, '#2a7fff') },
+      { name: 'ac min off', val: !s.Y && yOffLeft > 0 ? Math.ceil(yOffLeft / 60) + ' min left' : '✓ ready', valStyle: 'color: #eeeeee', bar: bar(!s.Y && yOffLeft > 0 ? 1 - yOffLeft / CO : 0, '#7e7e7e') },
+      { name: 'interlock', val: '✓ armed', valStyle: 'color: #eeeeee', bar: bar(0, '#eeeeee') },
+      { name: 'temperature sensor', val: faulted ? '⚠ ' + s.fault.toLowerCase() : '✓ ok', valStyle: faulted ? 'color: #eeeeee; font-weight: 700' : 'color: #eeeeee', bar: bar(0, '#eeeeee') }
+    ];
+
+    const toPts = (key, lo, hi) => s.hist.map((h, i) => i + ',' + (30 - ((h[key] - lo) / (hi - lo)) * 30).toFixed(2)).join(' ');
+    const barStyle = (on, color) => on ? 'flex: 1; min-width: 0; height: 8px; background: ' + color : 'flex: 1; min-width: 0; height: 2px; background: #202020';
+    const rows = [
+      { label: 'heat W', bars: s.hist.map((h) => barStyle(h.w, '#da5c2c')) },
+      { label: 'cool Y', bars: s.hist.map((h) => barStyle(h.y, '#2a7fff')) },
+      { label: 'fan G', bars: s.hist.map((h) => barStyle(h.g, '#b4b4b4')) }
+    ];
+    const count = (k) => s.hist.filter((h) => h[k]).length * 6;
+
+    const periodBase = 'display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 4px 0; border-bottom: 1px solid #202020; ';
+    const cur = s.day === 'weekday' ? 'return' : '';
+    const periods = s.sched[s.day].map((p, i) => ({
+      name: p[0], time: p[1], level: p[2], mark: p[0] === cur ? '›' : '',
+      timeLabel: p[0] + ' time', levelLabel: p[0] + ' level',
+      style: periodBase + (p[0] === cur ? 'color: #eeeeee; font-weight: 700' : 'color: #b4b4b4') + (s.schedOn ? '' : '; opacity: 0.4'),
+      onTime: (e) => { p[1] = e.target.value; self.forceUpdate(); },
+      onLevel: (e) => { p[2] = e.target.value; self.forceUpdate(); }
+    }));
+    const sw = (on) => 'min-width: 64px; min-height: 32px; background: ' + (on ? '#eeeeee' : 'transparent') + '; color: ' + (on ? '#000000' : '#b4b4b4') + '; border: 1px solid ' + (on ? '#eeeeee' : '#3a3a3a') + '; border-radius: 2px; font-size: 12px; font-weight: 700; cursor: pointer';
+    const toMin = (hm) => { const a = hm.split(':'); return Number(a[0]) * 60 + Number(a[1]); };
+    const dayBar = (rows) => {
+      const pts = rows.map((r) => ({ m: toMin(r[1]), lvl: r[2], name: r[0] })).sort((a, b) => a.m - b.m);
+      const segs = [];
+      const last = pts[pts.length - 1];
+      if (pts[0].m > 0) segs.push({ w: pts[0].m, lvl: last.lvl, name: '' });
+      pts.forEach((p, i) => segs.push({ w: (i + 1 < pts.length ? pts[i + 1].m : 1440) - p.m, lvl: p.lvl, name: p.name }));
+      return segs.filter((g) => g.w > 0).map((g) => ({ label: g.w >= 150 ? g.name : '', style: 'flex: ' + g.w + ' 1 0; min-width: 0; overflow: hidden; display: flex; align-items: center; padding-left: 6px; font-size: 11px; ' + (g.lvl === 'Comfort' ? 'background: #eeeeee; color: #000000' : 'background: #3a3a3a; color: #eeeeee') }));
+    };
+    const nd = new Date();
+    const nowPct = ((nd.getHours() * 60 + nd.getMinutes()) / 1440 * 100).toFixed(1);
+    const scale = [];
+    for (let k = 0; k <= 20; k++) { const c = this.heatColor(60 + k); scale.push('flex: 1; background: rgba(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ',' + Math.max(0.06, c[3]).toFixed(2) + ')'); }
+    const knob = (id, label, val, min, max, step, txt, set) => ({ id: id, label: label, val: val, min: min, max: max, step: step, txt: txt, set: (e) => { set(Number(e.target.value)); self.forceUpdate(); } });
+    const timer = (key, label, min, max) => ({ label: label, val: s.tm[key], min: min, max: max, set: (e) => { s.tm[key] = Math.max(min, Math.min(max, Number(e.target.value) || min)); self.forceUpdate(); } });
+
+    const up = Math.floor((Date.now() - s.start) / 1000);
+
+    return {
+      clock: this.clockNow(),
+      tabs: ['HOME', 'SCHEDULE', 'SIMULATION', 'SYSTEM'].map((t) => ({ label: t, cls: t === 'SIMULATION' ? 'desk' : '', selected: s.tab === t, pick: () => { s.tab = t; self.forceUpdate(); }, style: 'background: transparent; border: none; border-bottom: 2px solid ' + (s.tab === t ? '#eeeeee' : 'transparent') + '; color: ' + (s.tab === t ? '#eeeeee' : '#7e7e7e') + '; padding: 8px 0 12px; font-size: 12px; letter-spacing: 0.08em; cursor: pointer; white-space: nowrap' })),
+      schedLine: !s.schedOn ? 'Schedule off' : (s.hold ? 'Holding ' + s.target + '° until 10:30 pm' : (s.level === 'Comfort' ? 'Comfort' : 'Eco') + ' until 10:30 pm'),
+      roomTxt: s.room.toFixed(1) + '°',
+      targetTxt: s.mode === 'Off' ? 'OFF' : s.target + '°',
+      outdoorTxt: Math.round(s.outdoor) + '°F',
+      weather: s.weather, fault: s.fault, outdoor: Math.round(s.outdoor),
+      statusWord: statusWord, statusMark: statusMark, statusColor: statusColor, statusSub: statusSub,
+      supplyTxt: s.W ? '108°F' : (s.Y ? '55°F' : '—'),
+      airTxt: air ? 'on' : 'still',
+      sensorLine: faulted ? '⚠ ' + s.fault.toLowerCase() : 'sensor ' + s.room.toFixed(1) + '°F',
+      tstatNum: s.mode === 'Off' ? '--' : String(s.target),
+      tstatStyle: 'width: 22px; height: 32px; border: 1px solid ' + (faulted ? '#eeeeee' : '#b4b4b4') + '; border-radius: 2px; background: #111111; display: flex; align-items: center; justify-content: center; color: #eeeeee',
+      ventStyleA: vent('16%', '2px', '14%', '6px', ventOn),
+      ventStyleB: vent('60%', '2px', '14%', '6px', ventOn),
+      ventStyleC: vent('calc(100% - 8px)', '64%', '6px', '16%', ventOn),
+      condBox: boxBase + 'border: 1px solid ' + (s.Y ? '#2a7fff' : '#202020'),
+      condColor: s.Y ? '#2a7fff' : '#7e7e7e',
+      condFanClass: s.Y ? 'spinc' : '',
+      condState: s.Y ? '● running · ' + this.fmtMin(s.t - s.yOn) : '○ off',
+      coilBox: boxBase + 'border: 1px solid ' + (s.Y ? '#2a7fff' : '#202020'),
+      coilColor: s.Y ? '#2a7fff' : '#7e7e7e',
+      coilState: s.Y ? '● cooling air' : '○ idle',
+      lockColor: '#7e7e7e',
+      lockLine: 'interlock armed · never both',
+      furnBox: boxBase + 'border: 1px solid ' + (s.W ? '#da5c2c' : '#202020'),
+      furnColor: s.W ? '#da5c2c' : '#7e7e7e',
+      furnState: s.W ? '● firing · ' + this.fmtMin(s.t - s.wOn) : '○ off',
+      blowBox: boxBase + 'border: 1px solid ' + (air ? '#b4b4b4' : '#202020'),
+      blowColor: air ? '#eeeeee' : '#7e7e7e',
+      blowFanClass: air ? 'spin12' : 'spin12slow',
+      blowState: air ? '● moving air' : '○ still',
+      targetLabel: s.mode === 'Off' ? 'TARGET' : (s.hold ? 'HOLD' : (s.level === 'Comfort' ? 'COMFORT TARGET' : 'ECO TARGET')),
+      tgtSub: s.level === 'Eco' && !s.hold ? 'comfort ' + s.comfort + '°' : (s.hold ? 'until the next period' : ''),
+      minus: () => { s.target = Math.max(50, s.target - 1); s.hold = true; self.forceUpdate(); },
+      plus: () => { s.target = Math.min(90, s.target + 1); s.hold = true; self.forceUpdate(); },
+      resume: () => { s.hold = false; s.target = s.level === 'Comfort' ? s.comfort : s.comfort - s.eco; self.forceUpdate(); },
+      hold: s.hold,
+      modes: seg(['Off', 'Heat', 'Cool', 'Auto'], s.mode, (v) => { s.mode = v; }),
+      fans: seg(['Auto', 'On'], s.fan, (v) => { s.fan = v; }),
+      levels: seg(['Comfort', 'Eco'], s.level, (v) => { s.level = v; s.hold = false; s.target = v === 'Comfort' ? s.comfort : s.comfort - s.eco; }),
+      safety: safety,
+      rows: rows,
+      roomPts: toPts('room', 60, 80),
+      targetPts: toPts('target', 60, 80),
+      heatTotal: this.fmtMin(count('w') * 60),
+      coolTotal: this.fmtMin(count('y') * 60),
+      fanTotal: this.fmtMin(count('g') * 60),
+      periods: periods,
+      isHome: s.tab === 'HOME', isSched: s.tab === 'SCHEDULE', isSim: s.tab === 'SIMULATION', isSystem: s.tab === 'SYSTEM',
+      showRoom: s.tab === 'HOME' || s.tab === 'SIMULATION',
+      goSchedule: () => { s.tab = 'SCHEDULE'; self.forceUpdate(); },
+      goSystem: () => { s.tab = 'SYSTEM'; self.forceUpdate(); },
+      dayName: s.day === 'weekend' ? 'WEEKEND' : 'WEEKDAY',
+      todayBar: dayBar(s.sched.weekday),
+      nowMark: 'position: absolute; top: 0; width: 1px; height: 12px; background: #da5c2c; left: ' + nowPct + '%',
+      weekRows: [{ label: 'mon – fri', bar: dayBar(s.sched.weekday) }, { label: 'sat – sun', bar: dayBar(s.sched.weekend) }],
+      holdState: !s.schedOn ? 'schedule off' : (s.hold ? 'holding ' + s.target + '° until 10:30 pm' : 'no hold · following the schedule'),
+      statusRows: [
+        { name: 'equipment', val: s.W ? 'furnace firing' : (s.Y ? 'ac running' : 'all off') },
+        { name: 'interlock', val: '✓ armed' },
+        { name: 'sensor', val: faulted ? '⚠ ' + s.fault.toLowerCase() : '✓ ok' },
+        { name: 'home assistant', val: '● connected' }
+      ],
+      alerts: [['sensor', 'sensor fault'], ['interlock', 'interlock fault'], ['offline', 'thermostat offline 10 min']].map((a) => ({ label: a[1], on: s.alerts[a[0]], txt: s.alerts[a[0]] ? 'ON' : 'OFF', style: sw(s.alerts[a[0]]), toggle: () => { s.alerts[a[0]] = !s.alerts[a[0]]; self.forceUpdate(); } })),
+      device: [{ k: 'name', v: 'tab5-thermostat' }, { k: 'address', v: '192.0.2.10' }, { k: 'firmware', v: 'main c6ab2a8 · esphome 2026.10.1' }, { k: 'wi-fi', v: '2.4 GHz' }, { k: 'uptime', v: Math.floor(up / 60) + 'm ' + (up % 60) + 's' }, { k: 'clock', v: 'sntp + rtc · valid' }],
+      log: s.log.map((e) => ({ t: e.t, msg: e.msg, style: e.kind === 'fault' ? 'color: #eeeeee; font-weight: 700' : (e.kind === 'heat' ? 'color: #da5c2c' : (e.kind === 'cool' ? 'color: #2a7fff' : 'color: #b4b4b4')) })),
+      scale: scale,
+      humTxt: Math.round(s.hum) + '%',
+      schedOn: s.schedOn, schedOnTxt: s.schedOn ? 'ON' : 'OFF', schedSwitch: sw(s.schedOn),
+      toggleSched: () => { s.schedOn = !s.schedOn; self.forceUpdate(); },
+      days: seg(['Weekday', 'Weekend'], s.day === 'weekday' ? 'Weekday' : 'Weekend', (v) => { s.day = v.toLowerCase(); }),
+      ecoTxt: s.eco + '°',
+      comfortDown: () => { s.comfort = Math.max(50, s.comfort - 1); self.forceUpdate(); },
+      comfortUp: () => { s.comfort = Math.min(90, s.comfort + 1); self.forceUpdate(); },
+      ecoDown: () => { s.eco = Math.max(2, s.eco - 1); self.forceUpdate(); },
+      ecoUp: () => { s.eco = Math.min(10, s.eco + 1); self.forceUpdate(); },
+      timers: [timer('heatRun', 'furnace min run', 2, 20), timer('heatOff', 'furnace min off', 2, 20), timer('coolRun', 'ac min run', 3, 20), timer('coolOff', 'ac min off', 5, 20), timer('lockout', 'auto changeover lockout', 10, 120)],
+      simKnobs: [
+        knob('sim-tau', 'insulation (hours to drift)', s.tau, 1, 24, 1, s.tau + ' h', (v) => { s.tau = v; }),
+        knob('sim-heat', 'furnace heating rate', s.heatFph, 2, 20, 1, s.heatFph + '°F/h', (v) => { s.heatFph = v; }),
+        knob('sim-cool', 'ac cooling rate', s.coolFph, 1, 15, 1, s.coolFph + '°F/h', (v) => { s.coolFph = v; }),
+        knob('sim-hum', 'humidity', s.hum, 20, 80, 1, Math.round(s.hum) + '%', (v) => { s.hum = v; })
+      ],
+      screenKnobs: [
+        knob('scr-bright', 'brightness in use', s.bright, 1, 100, 1, s.bright + '%', (v) => { s.bright = v; }),
+        knob('scr-dim', 'dim brightness', s.dim, 0, 100, 1, s.dim + '%', (v) => { s.dim = v; })
+      ],
+      dark: s.dark, darkTxt: s.dark ? 'ON' : 'OFF', darkSwitch: sw(s.dark),
+      toggleDark: () => { s.dark = !s.dark; self.forceUpdate(); },
+      brightTxt: s.bright + '%', dimTxt: s.dim + '%',
+      comfortTxt: s.comfort + '°',
+      uptime: Math.floor(up / 60) + 'm ' + (up % 60) + 's',
+      onOutdoor: (e) => { s.outdoor = Number(e.target.value); s.weather = 'Fixed'; self.forceUpdate(); },
+      onWeather: (e) => { s.weather = e.target.value; self.forceUpdate(); },
+      onFault: (e) => { s.fault = e.target.value; self.logEv(s.fault === 'None' ? 'sensor recovered' : 'SENSOR FAULT · ' + s.fault.toLowerCase(), s.fault === 'None' ? '' : 'fault'); self.forceUpdate(); },
+      setCanvas: this._setCanvas || (this._setCanvas = (el) => { self._cv = el; })
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,1 +1,320 @@
-[]
+- id: chestnut_axiom_theme
+  alias: "Chestnut: Axiom theme"
+  description: "Makes the Axiom theme HA's default (light and dark) for every user, at startup."
+  mode: single
+  triggers:
+    - trigger: homeassistant
+      event: start
+  actions:
+    - action: frontend.set_theme
+      data:
+        name: axiom
+        name_dark: axiom
+
+# The three alert switches start on: once, at the first HA start. After that HA restores them,
+# so a switch turned off stays off.
+- id: chestnut_alert_switches_first_start
+  alias: "Chestnut: alert switches on at first start"
+  description: "Turns the three alert switches on at the first HA start; after that they keep the user's choice."
+  mode: single
+  triggers:
+    - trigger: homeassistant
+      event: start
+  conditions:
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_switches_set_up
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id:
+          - input_boolean.chestnut_alert_sensor_fault
+          - input_boolean.chestnut_alert_interlock_fault
+          - input_boolean.chestnut_alert_offline
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.chestnut_alert_switches_set_up
+
+# The alert automations below name the thermostat's entity ids as HA makes them for the device
+# "Main Thermostat". If HA named them differently (a renamed device, ids left from an older name),
+# their triggers would never fire and nothing would say so. So at every start, check they exist.
+- id: chestnut_alert_entity_check
+  alias: "Chestnut: alert entity check"
+  description: "At startup, notifies if an entity the alert automations watch doesn't exist."
+  mode: restart
+  triggers:
+    - trigger: homeassistant
+      event: start
+  actions:
+    # By then the entity registry has given every known entity a state (unavailable if offline).
+    - delay: "00:00:30"
+    - variables:
+        missing: >-
+          {% set ids = ['binary_sensor.main_thermostat_sensor_fault',
+                        'binary_sensor.main_thermostat_interlock_fault',
+                        'climate.main_thermostat_main_thermostat'] %}
+          {{ ids | reject('in', expand(ids) | map(attribute='entity_id') | list) | list }}
+    - if:
+        - condition: template
+          value_template: "{{ missing | length > 0 }}"
+      then:
+        - action: persistent_notification.create
+          data:
+            notification_id: chestnut_alert_entity_check
+            title: "Chestnut"
+            message: "Alerts can't watch {{ missing | join(', ') }}: no such entity in Home Assistant. Check the thermostat's entity ids (home-assistant/README.md, Alerts)."
+      else:
+        - action: persistent_notification.dismiss
+          data:
+            notification_id: chestnut_alert_entity_check
+
+# Fault and offline alerts. Each alert is gated by its System-tab switch
+# (input_boolean.chestnut_alert_*). Each also remembers that it fired
+# (input_boolean.chestnut_*_alerted, reset to off when HA starts, as persistent notifications
+# are): a fault seen again after a Tab5 reconnect (on -> unavailable -> on) doesn't alert twice,
+# and "cleared" is sent only after an alert actually fired. The fault notification itself is
+# always dismissed on recovery, even if the switch was turned off meanwhile.
+- id: chestnut_alert_sensor_fault
+  alias: "Chestnut: alert, sensor fault"
+  description: "Notifies when the temperature sensor faults (while its alert switch is on)."
+  mode: queued
+  triggers:
+    # From off, or from unavailable/unknown (a fault first seen as the Tab5 reconnects).
+    - trigger: state
+      entity_id: binary_sensor.main_thermostat_sensor_fault
+      to: "on"
+      not_from: "on"
+    # Already on when HA starts (its notifications don't survive a restart).
+    - trigger: homeassistant
+      event: start
+  conditions:
+    - condition: state
+      entity_id: binary_sensor.main_thermostat_sensor_fault
+      state: "on"
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_sensor_fault
+      state: "on"
+    - condition: state
+      entity_id: input_boolean.chestnut_sensor_fault_alerted
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.chestnut_sensor_fault_alerted
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_sensor_fault_cleared
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_sensor_fault
+        title: "Chestnut"
+        message: "Main Thermostat: temperature sensor problem. Heating and cooling paused."
+    # Phone push through whatever `notify.notify` is set up to reach (HA's default notify group,
+    # empty until the Companion app is added). continue_on_error: no notify service yet is not a failure.
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat: temperature sensor problem. Heating and cooling paused."
+
+- id: chestnut_alert_sensor_fault_cleared
+  alias: "Chestnut: alert, sensor fault cleared"
+  description: "Replaces the sensor fault alert with a recovery notice."
+  mode: queued
+  triggers:
+    # From on, or from unavailable/unknown (the fault gone when the Tab5 comes back).
+    - trigger: state
+      entity_id: binary_sensor.main_thermostat_sensor_fault
+      to: "off"
+      not_from: "off"
+  actions:
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_sensor_fault
+    # The notice only after an alert fired (not after a plain reconnect), and only while the switch is on.
+    - condition: state
+      entity_id: input_boolean.chestnut_sensor_fault_alerted
+      state: "on"
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.chestnut_sensor_fault_alerted
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_sensor_fault
+      state: "on"
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_sensor_fault_cleared
+        title: "Chestnut"
+        message: "Main Thermostat: temperature sensor problem cleared."
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat: temperature sensor problem cleared."
+
+- id: chestnut_alert_interlock_fault
+  alias: "Chestnut: alert, interlock fault"
+  description: "Notifies when the heat/cool interlock trips (while its alert switch is on)."
+  mode: queued
+  triggers:
+    # From off, or from unavailable/unknown (a fault first seen as the Tab5 reconnects).
+    - trigger: state
+      entity_id: binary_sensor.main_thermostat_interlock_fault
+      to: "on"
+      not_from: "on"
+    # Already on when HA starts (its notifications don't survive a restart).
+    - trigger: homeassistant
+      event: start
+  conditions:
+    - condition: state
+      entity_id: binary_sensor.main_thermostat_interlock_fault
+      state: "on"
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_interlock_fault
+      state: "on"
+    - condition: state
+      entity_id: input_boolean.chestnut_interlock_fault_alerted
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.chestnut_interlock_fault_alerted
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_interlock_fault_cleared
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_interlock_fault
+        title: "Chestnut"
+        message: "Main Thermostat: the heat and cool relays were found on together, so both were cut. Clear it on the System tab once it's checked; it takes effect once both units have been off for their minimum off time (5 min by default)."
+    # Phone push through whatever `notify.notify` is set up to reach (HA's default notify group,
+    # empty until the Companion app is added). continue_on_error: no notify service yet is not a failure.
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat: the heat and cool relays were found on together, so both were cut. Clear it on the System tab once it's checked; it takes effect once both units have been off for their minimum off time (5 min by default)."
+
+- id: chestnut_alert_interlock_fault_cleared
+  alias: "Chestnut: alert, interlock fault cleared"
+  description: "Replaces the interlock fault alert with a recovery notice."
+  mode: queued
+  triggers:
+    # From on, or from unavailable/unknown (the latch clears on a Tab5 reboot: on -> unavailable -> off).
+    - trigger: state
+      entity_id: binary_sensor.main_thermostat_interlock_fault
+      to: "off"
+      not_from: "off"
+  actions:
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_interlock_fault
+    # The notice only after an alert fired (not after a plain reconnect), and only while the switch is on.
+    - condition: state
+      entity_id: input_boolean.chestnut_interlock_fault_alerted
+      state: "on"
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.chestnut_interlock_fault_alerted
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_interlock_fault
+      state: "on"
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_interlock_fault_cleared
+        title: "Chestnut"
+        message: "Main Thermostat: interlock fault cleared."
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat: interlock fault cleared."
+
+- id: chestnut_alert_offline
+  alias: "Chestnut: alert, offline"
+  description: "Notifies when the thermostat has been unavailable for 10 minutes."
+  mode: queued
+  triggers:
+    - trigger: state
+      entity_id: climate.main_thermostat_main_thermostat
+      to: "unavailable"
+      for: "00:10:00"
+    # HA starting with the thermostat already unavailable: there is no transition to wait for
+    # (and a pending `for:` doesn't survive a restart), so wait the 10 minutes from the start.
+    - trigger: homeassistant
+      event: start
+      id: start
+  actions:
+    - if:
+        - condition: trigger
+          id: start
+        - condition: state
+          entity_id: climate.main_thermostat_main_thermostat
+          state: "unavailable"
+      then:
+        - delay: "00:10:00"
+    # Unavailable for the whole 10 minutes (since before HA's start, on the start path).
+    - condition: state
+      entity_id: climate.main_thermostat_main_thermostat
+      state: "unavailable"
+      for: "00:10:00"
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_offline
+      state: "on"
+    - condition: state
+      entity_id: input_boolean.chestnut_offline_alerted
+      state: "off"
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.chestnut_offline_alerted
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_offline_cleared
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_offline
+        title: "Chestnut"
+        message: "Main Thermostat is offline (no contact for 10 minutes). It keeps running on its own."
+    # Phone push through whatever `notify.notify` is set up to reach (HA's default notify group,
+    # empty until the Companion app is added). continue_on_error: no notify service yet is not a failure.
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat is offline (no contact for 10 minutes). It keeps running on its own."
+
+- id: chestnut_alert_offline_cleared
+  alias: "Chestnut: alert, offline cleared"
+  description: "Replaces the offline alert with a recovery notice."
+  mode: queued
+  triggers:
+    # Back from unavailable, directly or through unknown (unavailable -> unknown -> heat).
+    - trigger: state
+      entity_id: climate.main_thermostat_main_thermostat
+      from: ["unavailable", "unknown"]
+      not_to: ["unavailable", "unknown"]
+  actions:
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_offline
+    # The notice only after the 10 minute alert actually fired (not for a short blip), and only
+    # while the switch is on.
+    - condition: state
+      entity_id: input_boolean.chestnut_offline_alerted
+      state: "on"
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.chestnut_offline_alerted
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_offline
+      state: "on"
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_offline_cleared
+        title: "Chestnut"
+        message: "Main Thermostat: offline cleared."
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat: offline cleared."
