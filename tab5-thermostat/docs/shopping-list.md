@@ -2,22 +2,18 @@
 
 Parts for the bench prototype and beyond. Prices are USD, checked 2026-10-29. A `~` marks a price seen only in a search result, which may be out of date. Check items off as they're bought.
 
-## Buy first (about $25 plus shipping, plus the USB-C meter)
+## Buy first (about $22 plus shipping)
 
-These are the parts the real thermostat needs. All four M5Stack parts go into the final install.
-
-### M5Stack parts (about $25)
+These are the parts the real thermostat needs, and all three go into the final install. Reviewed one by one with Dang on 2026-10-29.
 
 Buy these from **Mouser** (US stock, arrives in days, but may add a tariff surcharge at checkout) or the **[M5Stack store](https://shop.m5stack.com)** (lowest list price, but ships from China: 15–20 business days by air or paid DHL, duties extra). Compare the totals at checkout. Amazon has no genuine M5Stack 4-Relay.
 
-- [ ] **M5Stack Unit ENV III** (U001-C; SHT30 + QMP6988). Temperature and humidity sensor. $5.95 ([store](https://shop.m5stack.com/products/env-iii-unit-with-temperature-humidity-air-pressure-sensor-sht30-qmp6988)). Replaces the **ENV IV (U001-D), which is discontinued**. The SHT30 is about as accurate as the SHT40 for room temperature (±0.2 °C typical). I2C 0x44 and 0x70; Port A is a separate bus from the Tab5's own chips, so the 0x44 doesn't clash.
-- [ ] **M5Stack Unit 4-Relay** (U097; Mouser 170-U097). Switches heat (W), cool (Y), fan (G) and the heat-pump reversing valve (O/B). $12.95 ([store](https://shop.m5stack.com/products/4-relay-unit)). I2C 0x26; four normally-open 10 A contacts. The coils run off Port A's 5 V (about 90 mA each), and Port A's current limit isn't documented: check it on the bench.
-- [ ] **M5Stack Grove Hub** (1-to-3; U006, Mouser 170-U006). Lets the sensor and relays share the Tab5's single Port A. $3.50 ([store](https://shop.m5stack.com/products/mini-hub-module)).
-- [ ] **Grove cable, 50 cm, 2-pack** (A034-C). Keeps the sensor away from the Tab5's heat. $1.95 ([store](https://shop.m5stack.com/products/4pin-buckled-grove-cable)).
+- [ ] **M5Stack Unit ENV III** (U001-C; SHT30 + QMP6988). Temperature and humidity sensor. $5.95 ([store](https://shop.m5stack.com/products/env-iii-unit-with-temperature-humidity-air-pressure-sensor-sht30-qmp6988)). Replaces the **ENV IV (U001-D), which is discontinued**. The SHT30 is about as accurate as the SHT40 for room temperature (±0.2 °C typical). I2C 0x44 and 0x70; Port A is a separate bus from the Tab5's own chips, so the 0x44 doesn't clash. Comes in a case with a 20 cm Grove cable. Chosen over the Adafruit SHT45 + PTFE (more accurate, dust filter, ~$15.50, but a bare board) for being plug-and-play. **Mount it below the Tab5**, in its own vented pocket, never above or behind it: the Tab5's warm air rises.
+- [ ] **M5Stack Unit 4-Relay** (U097; Mouser 170-U097). Switches heat (W), cool (Y), fan (G) and the heat-pump reversing valve (O/B). $12.95 ([store](https://shop.m5stack.com/products/4-relay-unit)). I2C 0x26; four normally-open 10 A contacts with an LED each; M5Stack publishes an official ESPHome component. It fails safe: if the Tab5 crashes or loses power, every relay opens. It comes with a 20 cm Grove cable and four plug-in terminals, and it's a 112 × 23 mm bar that fits behind the Tab5. The coils run off Port A's 5 V (about 90 mA each); Port A's current limit isn't documented, so check it on the bench.
+  - **Four relays cover** a single-stage furnace + AC, a heat pump with backup heat, split Rh/Rc transformers and a zone panel. **They don't cover** two-stage equipment (W2 or Y2 terminals in use) or a "communicating" system. The site survey confirms (see below).
+- [ ] **M5Stack Grove Hub** (1-to-3; U006, Mouser 170-U006). Lets the sensor and relays share the Tab5's single Port A; neither unit can be chained. $3.50 ([store](https://shop.m5stack.com/products/mini-hub-module)). The 20 cm cables that come with the sensor and relays are enough, so no extra cables.
 
-### USB-C power meter
-
-- [ ] **USB-C power meter**, any inline model that shows watts (one that logs energy is handy). Measures the Tab5's draw, including while it charges its battery. That figure sizes the 24 V AC → DC supply for the house (see "Later").
+**No USB-C power meter needed.** The Tab5's built-in monitor (INA226) measures the battery: unplugged, the Tab5 runs on the battery, so battery current × voltage is its real draw, and a negative current while plugged in is the charging draw. Those figures size the 24 V AC → DC supply (see "Later").
 
 ## Optional: a fake furnace for the desk (about $65–70)
 
@@ -34,6 +30,22 @@ Thermostat wire is sold in rolls, but the fake furnace needs only a few feet. Ma
 ## Before the house visit
 
 - [ ] **Multimeter** with AC volts and continuity, for the site survey. Pick a model when the visit is planned. On the bench, its continuity mode also confirms each relay switches.
+
+### Site survey checklist
+
+Photos anyone at the house can take now:
+- The old thermostat's **wiring terminals** (face pulled off): which letters have wires, their colors, and any jumper between Rh and Rc. This photo alone answers the system type, the stages, any heat pump and the C wire.
+- The old thermostat's **model label**.
+- The **furnace or air handler's model sticker** (behind the front panel) and the **outdoor unit's sticker**.
+- Near the furnace: whether there's a **zone panel**, and whether the top-floor thermostat runs to the same furnace or a separate system.
+- The thermostat's spot: which wall, how high, direct sun, nearby supply vents or doors, and the nearest outlet.
+
+At the visit, with the multimeter:
+- **R to C voltage** (about 24–28 V AC means a working C wire). If there's no C wire, look for a spare conductor at both ends of the cable.
+- The furnace control board's **terminal labels** (W1/W2, Y1/Y2, C) and its **fuse rating**.
+- Optional: the current on W, Y and G while each runs, to check the relay contacts.
+- **2.4 GHz Wi-Fi signal** at the thermostat's spot.
+- The **wall opening** (hole or box size) and the old thermostat's outline, for the enclosure design.
 
 ## Later: don't buy yet
 
