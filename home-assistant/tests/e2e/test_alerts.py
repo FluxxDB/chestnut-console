@@ -1,7 +1,8 @@
 """Fault alert automations (config/automations.yaml), against the host sim.
 
-Persistent notifications are read over the websocket (`persistent_notification/get`). The e2e
-overlay rewrites the automations' real-install entity ids to the sim's.
+Persistent notifications are read over the websocket (`persistent_notification/get`). The
+automations run as written: run.sh names the sim "Main Thermostat", like the Tab5, so HA gives
+it the entity ids they watch.
 
 Cost: the sim's own recovery from a sensor fault takes 5 min of good readings, so the recovery
 and interlock tests drive the binary_sensor state directly (POST /api/states: HA's state machine
@@ -22,7 +23,8 @@ from test_system import state
 
 SENSOR_TEXT = "Main Thermostat: temperature sensor problem. Heating and cooling paused."
 INTERLOCK_TEXT = ("Main Thermostat: the heat and cool relays were found on together, so both were cut. "
-                  "Clear it once it's checked.")
+                  "Clear it on the System tab once it's checked; it takes effect once both units have been "
+                  "off for their minimum off time (5 min by default).")
 OFFLINE_TEXT = "Main Thermostat is offline (no contact for 10 minutes). It keeps running on its own."
 SENSOR_CLEARED = "Main Thermostat: temperature sensor problem cleared."
 INTERLOCK_CLEARED = "Main Thermostat: interlock fault cleared."
@@ -92,6 +94,13 @@ def fake_binary(ha):
     yield set_state
     for entity, cur in saved.items():
         ha.post(f"/api/states/{entity}", {"state": cur["state"], "attributes": cur["attributes"]})
+
+
+def test_alert_switches_default_on(ha):
+    """A fresh HA (this one): the three switches start on. First in the file, before any test
+    touches them."""
+    for gate in GATES.values():
+        assert state(ha, gate) == "on", gate
 
 
 def test_sensor_fault_notifies(ha, sim, clean):
@@ -195,6 +204,61 @@ def test_fault_dismissed_even_if_switch_turned_off(ha, clean, fake_binary):
     assert SENSOR_CLEARED not in notifications(ha).values()
 
 
+def test_new_alert_dismisses_old_cleared_notice(ha, clean, fake_binary):
+    """A second fault replaces last time's "cleared" notice: the bell never shows both."""
+    fake_binary("sensor_fault", "on")
+    wait_for(ha, has_message(ha, SENSOR_TEXT), 15, "the sensor fault notification")
+    fake_binary("sensor_fault", "off")
+    wait_for(ha, has_message(ha, SENSOR_CLEARED), 15, "the recovery notification")
+    fake_binary("sensor_fault", "on")
+    wait_for(ha, has_message(ha, SENSOR_TEXT), 15, "the second sensor fault notification")
+    assert SENSOR_CLEARED not in notifications(ha).values(), "the old cleared notice is still up"
+
+
+@pytest.fixture
+def fake_climate(ha):
+    """set('heat'|'unavailable'|...): fake the sim climate's state; restored afterwards."""
+    entity = ha.sim_climate()
+    cur = ha.get_state(entity)
+
+    def set_state(value):
+        ha.post(f"/api/states/{entity}", {"state": value, "attributes": cur["attributes"]})
+
+    yield set_state
+    ha.post(f"/api/states/{entity}", {"state": cur["state"], "attributes": cur["attributes"]})
+
+
+def test_offline_cleared_through_unknown(ha, clean, fake_climate):
+    """Back from offline through unknown (unavailable -> unknown -> heat): the alert is still
+    cleared, and the next offline alert isn't muted by a flag left on."""
+    offline_alerted = "input_boolean.chestnut_offline_alerted"
+    ha.call("input_boolean", "turn_on", {"entity_id": offline_alerted})  # the 10 min alert fired
+    fake_climate("unavailable")
+    fake_climate("unknown")
+    fake_climate("heat")
+    wait_for(ha, has_message(ha, OFFLINE_CLEARED), 15, "the offline cleared notification")
+    assert state(ha, offline_alerted) == "off"
+
+
+def test_alert_entity_check_names_a_missing_entity(ha, clean):
+    """An entity the alerts watch doesn't exist (here: renamed in HA): the startup check says
+    which, and takes the notice down once it exists again."""
+    watched = ha.sim_entity("binary_sensor", "sensor_fault")
+    assert watched == "binary_sensor.main_thermostat_sensor_fault"  # the id automations.yaml names
+    check = "automation.chestnut_alert_entity_check"
+    renamed = "binary_sensor.chestnut_renamed_sensor_fault"
+    ha.ws({"type": "config/entity_registry/update", "entity_id": watched, "new_entity_id": renamed})
+    try:
+        ha.call("automation", "trigger", {"entity_id": check})
+        wait_for(ha, lambda: any(watched in m for m in notifications(ha).values()), 60,
+                 "the missing-entity notice")
+    finally:
+        ha.ws({"type": "config/entity_registry/update", "entity_id": renamed, "new_entity_id": watched})
+    ha.call("automation", "trigger", {"entity_id": check})
+    wait_for(ha, lambda: not any(watched in m for m in notifications(ha).values()), 60,
+             "the missing-entity notice taken down")
+
+
 # --- HA starting while the Tab5 is already down ------------------------------------------
 
 def restart_ha(ha):
@@ -206,10 +270,13 @@ def restart_ha(ha):
 def test_offline_alert_after_ha_start(ha, sim, clean):
     """HA (re)starts with the Tab5 already unavailable: no transition ever happens, so the alert
     must come from the start path, OFFLINE_TEST_DELAY (10 min in the real config) after start."""
+    # A muted alert stays muted across the restart (the switches are restored, not reset).
+    ha.call("input_boolean", "turn_off", {"entity_id": GATES["sensor_fault"]})
     sim.stop()
     ha.wait_state(ha.sim_climate(), lambda s: s["state"] == "unavailable", timeout=60)
     restart_ha(ha)
     assert ha.get_state(GATES["offline"])["state"] == "on"
+    assert ha.get_state(GATES["sensor_fault"])["state"] == "off", "the muted alert came back on"
     wait_for(ha, has_message(ha, OFFLINE_TEXT), 150, "the offline notification after HA start")
     sim.start(wait=True, timeout=240)
     wait_for(ha, has_message(ha, OFFLINE_CLEARED), 30, "the offline cleared notification")

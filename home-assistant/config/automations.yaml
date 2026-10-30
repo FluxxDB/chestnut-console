@@ -11,6 +11,63 @@
         name: axiom
         name_dark: axiom
 
+# The three alert switches start on: once, at the first HA start. After that HA restores them,
+# so a switch turned off stays off.
+- id: chestnut_alert_switches_first_start
+  alias: "Chestnut: alert switches on at first start"
+  description: "Turns the three alert switches on at the first HA start; after that they keep the user's choice."
+  mode: single
+  triggers:
+    - trigger: homeassistant
+      event: start
+  conditions:
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_switches_set_up
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id:
+          - input_boolean.chestnut_alert_sensor_fault
+          - input_boolean.chestnut_alert_interlock_fault
+          - input_boolean.chestnut_alert_offline
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.chestnut_alert_switches_set_up
+
+# The alert automations below name the thermostat's entity ids as HA makes them for the device
+# "Main Thermostat". If HA named them differently (a renamed device, ids left from an older name),
+# their triggers would never fire and nothing would say so. So at every start, check they exist.
+- id: chestnut_alert_entity_check
+  alias: "Chestnut: alert entity check"
+  description: "At startup, notifies if an entity the alert automations watch doesn't exist."
+  mode: restart
+  triggers:
+    - trigger: homeassistant
+      event: start
+  actions:
+    # By then the entity registry has given every known entity a state (unavailable if offline).
+    - delay: "00:00:30"
+    - variables:
+        missing: >-
+          {% set ids = ['binary_sensor.main_thermostat_sensor_fault',
+                        'binary_sensor.main_thermostat_interlock_fault',
+                        'climate.main_thermostat_main_thermostat'] %}
+          {{ ids | reject('in', expand(ids) | map(attribute='entity_id') | list) | list }}
+    - if:
+        - condition: template
+          value_template: "{{ missing | length > 0 }}"
+      then:
+        - action: persistent_notification.create
+          data:
+            notification_id: chestnut_alert_entity_check
+            title: "Chestnut"
+            message: "Alerts can't watch {{ missing | join(', ') }}: no such entity in Home Assistant. Check the thermostat's entity ids (home-assistant/README.md, Alerts)."
+      else:
+        - action: persistent_notification.dismiss
+          data:
+            notification_id: chestnut_alert_entity_check
+
 # Fault and offline alerts. Each alert is gated by its System-tab switch
 # (input_boolean.chestnut_alert_*). Each also remembers that it fired
 # (input_boolean.chestnut_*_alerted, reset to off when HA starts, as persistent notifications
@@ -44,6 +101,9 @@
     - action: input_boolean.turn_on
       target:
         entity_id: input_boolean.chestnut_sensor_fault_alerted
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_sensor_fault_cleared
     - action: persistent_notification.create
       data:
         notification_id: chestnut_alert_sensor_fault
@@ -119,18 +179,21 @@
     - action: input_boolean.turn_on
       target:
         entity_id: input_boolean.chestnut_interlock_fault_alerted
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_interlock_fault_cleared
     - action: persistent_notification.create
       data:
         notification_id: chestnut_alert_interlock_fault
         title: "Chestnut"
-        message: "Main Thermostat: the heat and cool relays were found on together, so both were cut. Clear it once it's checked."
+        message: "Main Thermostat: the heat and cool relays were found on together, so both were cut. Clear it on the System tab once it's checked; it takes effect once both units have been off for their minimum off time (5 min by default)."
     # Phone push through whatever `notify.notify` is set up to reach (HA's default notify group,
     # empty until the Companion app is added). continue_on_error: no notify service yet is not a failure.
     - action: notify.notify
       continue_on_error: true
       data:
         title: "Chestnut"
-        message: "Main Thermostat: the heat and cool relays were found on together, so both were cut. Clear it once it's checked."
+        message: "Main Thermostat: the heat and cool relays were found on together, so both were cut. Clear it on the System tab once it's checked; it takes effect once both units have been off for their minimum off time (5 min by default)."
 
 - id: chestnut_alert_interlock_fault_cleared
   alias: "Chestnut: alert, interlock fault cleared"
@@ -204,6 +267,9 @@
     - action: input_boolean.turn_on
       target:
         entity_id: input_boolean.chestnut_offline_alerted
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_offline_cleared
     - action: persistent_notification.create
       data:
         notification_id: chestnut_alert_offline
@@ -222,10 +288,11 @@
   description: "Replaces the offline alert with a recovery notice."
   mode: queued
   triggers:
+    # Back from unavailable, directly or through unknown (unavailable -> unknown -> heat).
     - trigger: state
       entity_id: climate.main_thermostat_main_thermostat
-      from: "unavailable"
-      not_to: "unknown"
+      from: ["unavailable", "unknown"]
+      not_to: ["unavailable", "unknown"]
   actions:
     - action: persistent_notification.dismiss
       data:
