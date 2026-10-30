@@ -218,34 +218,9 @@ For example a Honeywell T6 Pro Z-Wave, an Ecobee (local via HomeKit), or a Venst
 
 ---
 
-## 10. Bench prototype shopping list (2026-10-28)
+## 10. Bench prototype shopping list
 
-Prices are rough (2026, USD) and change often.
-
-**Buy now: the bench rig** (about $80–100 total)
-
-| Item | Why | ~Price |
-|---|---|---|
-| M5Stack **Unit ENV IV** (SHT40 + BMP280) | Temperature and humidity sensor. ESPHome supports it natively (`sht4x`). | $8–10 |
-| M5Stack **Unit 4-Relay** (U097) | Switches W / Y / G / O-B. I²C at 0x26, with an ESPHome component from M5Stack. | $13–16 |
-| M5Stack **Grove Hub** (1-to-3) + one **50 cm Grove cable** | Port A is a single connector; the hub lets the sensor and relays share it, and the long cable keeps the sensor away from the Tab5's heat. | $5 |
-| **24 V AC plug-in transformer**, 20–40 VA | Stands in for the furnace transformer. **Must say "24V AC" output**; many look-alikes are 24 V DC. | $15 |
-| **24 V AC/DC LED indicator lights**, 4 colors | Stand in for the furnace: red = heat (W), blue = cool (Y), green = fan (G), yellow = heat-pump reversing valve (O/B). | $10 |
-| **Wago 221 lever connectors** + a few feet of **18-gauge thermostat wire** | Clean, solder-free bench wiring, the same kind as a real install. | $15–20 |
-| **Inline fuse holder + 1 A fuse** | Same habit as the real install: fuse the 24 V AC side. | $5 |
-| **USB-C power meter** | Measures the Tab5's draw, which decides the power-supply design. | $15 |
-
-**Buy before the house visit**
-- **Multimeter** with AC volts and continuity (about $30), for the site survey.
-
-**Don't buy yet**
-- **24 V AC → DC supply for the Tab5:** wait until the Tab5's draw is measured. Likely a bridge rectifier, a filter capacitor, and a buck converter rated ≥ 50 V input (for example a Pololu D36V28F5), or a ready-made module.
-- **Home Assistant box:** prototype on a Home Assistant VM on Proxmox; it being on and off doesn't matter for the bench. Buy the house box later: **Home Assistant Green**, $199 after the 2026 price increases, about 1.7 W idle, or a Pi 5 (4 GB) at about $127 bare plus storage and power supply. Against a PC idling around 50–80 W, it pays for itself in roughly 2–3 years, and it has to be at the house anyway.
-- **Final install parts:** wall plate or enclosure, mechanical freeze backup thermostat, final relay board. These depend on the site survey.
-
-**Notes**
-- With everything on, the 4-Relay unit draws a few hundred mA from Port A's 5 V. In practice only 2 relays are on at once (heat or cool, plus fan), but check it on the bench.
-- ESPHome's `interlock:` only works with GPIO switches. With the I²C relay unit, enforce "never heat and cool together" in config.
+Moved to [shopping-list.md](shopping-list.md), which is kept current. The list first drafted here on 2026-10-28 is out of date: the ENV IV sensor it named is discontinued (the ENV III replaces it).
 
 ---
 

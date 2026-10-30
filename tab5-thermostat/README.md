@@ -1,6 +1,24 @@
 # Tab5 thermostat firmware
 
-ESPHome config for the Main Thermostat. This folder is mounted as `/config` in the `esphome` container.
+ESPHome config for the Main Thermostat. This folder is mounted as `/config` in the ESPHome containers.
+
+## Start it
+
+From the repo root, with the Tab5 on Wi-Fi:
+
+```bash
+docker compose run --rm esphome run tab5-thermostat.yaml --device <tab5-ip>
+```
+
+This builds the firmware, installs it over Wi-Fi, then shows the Tab5's log until you press Ctrl-C. The Tab5 shows its IP on screen. The first time, do the [first-time setup](#first-time-setup) and the [first flash over USB](#flashing) instead. After that, this one command is all an update needs. Then [add the Tab5 to Home Assistant](#connecting-to-home-assistant).
+
+**No Tab5?** The [host sim](#host-sim-for-home-assistant) runs the same logic and virtual house on your computer:
+
+```bash
+docker compose run --rm esphome-host run main-thermostat-sim.yaml
+```
+
+**Optional:** ESPHome's own web UI, the Device Builder, runs at http://localhost:6052 after `docker compose up -d esphome`. Nothing needs it; the commands above do everything.
 
 ## First-time setup
 
@@ -11,7 +29,7 @@ ESPHome config for the Main Thermostat. This folder is mounted as `/config` in t
 2. **Secrets.** `cp secrets.yaml.example secrets.yaml` and fill it in. The Tab5 only joins **2.4 GHz** Wi-Fi.
 3. **Compile** (from the repo root):
    ```bash
-   docker compose run --rm --no-deps esphome compile tab5-thermostat.yaml
+   docker compose run --rm esphome compile tab5-thermostat.yaml
    ```
    The first build downloads the ESP-IDF toolchain and takes a while. Later builds are quick.
 
@@ -19,7 +37,7 @@ ESPHome config for the Main Thermostat. This folder is mounted as `/config` in t
 
 **First flash over USB-C.** The factory image is `.esphome/build/tab5-thermostat/build/firmware.factory.bin`. Any of these work:
 
-- **Linux with the Tab5 attached:** `docker compose run --rm --no-deps --device /dev/ttyACM0 esphome run tab5-thermostat.yaml --device /dev/ttyACM0`
+- **Linux with the Tab5 attached:** `docker compose run --rm --device /dev/ttyACM0 esphome run tab5-thermostat.yaml --device /dev/ttyACM0`
 - **WSL (what the PC uses, no admin needed):** run the official Windows build of esptool ([releases](https://github.com/espressif/esptool/releases), `esptool-vX-windows-amd64.zip`) against the Tab5's COM port (it shows up as `303a:1001 USB JTAG/serial debug unit`):
   ```bash
   cp tab5-thermostat/.esphome/build/tab5-thermostat/build/firmware.factory.bin /mnt/c/Users/<you>/AppData/Local/Temp/
@@ -30,13 +48,13 @@ ESPHome config for the Main Thermostat. This folder is mounted as `/config` in t
 
 **After that, updates go over Wi-Fi:**
 ```bash
-docker compose run --rm --no-deps esphome run tab5-thermostat.yaml --device <tab5-ip>
+docker compose run --rm esphome run tab5-thermostat.yaml --device <tab5-ip>
 ```
 The Tab5 shows its IP address on screen. mDNS (`tab5-thermostat.local`) won't resolve from inside WSL's NAT, so use the IP.
 
 **Logs over Wi-Fi:**
 ```bash
-docker compose run --rm --no-deps esphome logs tab5-thermostat.yaml --device <tab5-ip>
+docker compose run --rm esphome logs tab5-thermostat.yaml --device <tab5-ip>
 ```
 The I2C scan in the boot log tells you the revision: touch at `0x14` is the original, `0x55` is ST7123/ST7121.
 
@@ -69,11 +87,11 @@ The Tab5 runs the thermostat itself (ESPHome `thermostat` climate `main_thermost
 | File | What it is |
 |---|---|
 | `thermostat/logic.yaml` + `chestnut_logic.h` | the logic package: the only thing that switches a relay |
-| `sim/virtual-house.yaml` + `house_model.h` | the virtual house: stands in for the ENV IV sensor and the Unit 4-Relay until the bench parts arrive (milestone 4). Its room warms or cools toward outdoor and responds to the virtual relays. |
+| `sim/virtual-house.yaml` + `house_model.h` | the virtual house: stands in for the ENV III sensor and the Unit 4-Relay until the bench parts arrive (milestone 4). Its room warms or cools toward outdoor and responds to the virtual relays. |
 | `main-thermostat-sim.yaml` | the same two packages on ESPHome's host platform, for Home Assistant and the tests |
 | `tests/` | `run.sh` plus the unit and scenario tests |
 
-**Playing with the virtual house:** use the Tab5's own web page (see *Phone page*). Next to the thermostat it lists the sim's knobs: **Sim Outdoor F**, **Sim Weather** (Fixed, or a Winter / Summer day curve), **Sim Tau H** (how leaky the house is), **Sim Heat FPH** / **Sim Cool FPH** (how fast the equipment changes the room), **Sim Humidity**, and **Sim Room F** (the true room temperature). **Sim Fault** breaks the temperature sensor on purpose (Unplugged, Frozen, Out of range, Spike) so you can watch the sensor checks react: a lasting fault raises **Sensor Fault** and the thermostat stops calling (Unplugged also makes the humidity unknown after two minutes). A fault never survives a reboot. The relays are internal: nothing but the logic can switch them.
+**Playing with the virtual house:** use the Simulation tab of the Chestnut dashboard in HA (on a computer), or the Tab5's own web page (see *Phone page*). Next to the thermostat it lists the sim's knobs: **Sim Outdoor F**, **Sim Weather** (Fixed, or a Winter / Summer day curve), **Sim Tau H** (how leaky the house is), **Sim Heat FPH** / **Sim Cool FPH** (how fast the equipment changes the room), **Sim Humidity**, and **Sim Room F** (the true room temperature). **Sim Fault** breaks the temperature sensor on purpose (Unplugged, Frozen, Out of range, Spike) so you can watch the sensor checks react: a lasting fault raises **Sensor Fault** and the thermostat stops calling (Unplugged also makes the humidity unknown after two minutes). A fault never survives a reboot. The relays are internal: nothing but the logic can switch them.
 
 ### Tests
 
@@ -92,10 +110,9 @@ The host sim runs the same logic and virtual house as a separate device, **Main 
 
 Add `sim_api_encryption_key` to `secrets.yaml` (a different key from the Tab5's; see `secrets.yaml.example` for how to generate one). Then, from the repo root:
 ```bash
-docker compose --profile dev run --rm esphome-host compile main-thermostat-sim.yaml
-docker compose --profile dev run --rm esphome-host run main-thermostat-sim.yaml
+docker compose run --rm esphome-host run main-thermostat-sim.yaml
 ```
-`run` stays in the foreground, showing the sim's log, until you press Ctrl-C.
+`run` builds the sim first if needed, then stays in the foreground, showing the sim's log, until you press Ctrl-C.
 It uses host networking, with the API on port 6053 (Linux; Docker Desktop on a Mac doesn't expose host-network ports to the Mac). The `esphome-host` service builds without ESPHome's precompiled header, which breaks host builds in 2026.10.1.
 
 To add it to HA: Settings → Devices & services → Add integration → ESPHome → host = the machine running the sim, port 6053, with the `sim_api_encryption_key`.
@@ -105,12 +122,13 @@ To add it to HA: Settings → Devices & services → Add integration → ESPHome
 Runs the console on your computer (ESPHome's host platform in an SDL window under Xvfb) and saves screenshots, with no Tab5 needed. It uses the dev stand-in, whose `Scenario` select drives every state.
 
 ```bash
-docker compose --profile dev build preview
-docker compose --profile dev run --rm preview preview/console-preview.yaml /config/preview/shots/mine "Heating" "Eco auto band" --themes light,dark
+docker compose build preview
+docker compose run --rm preview preview/console-preview.yaml /config/preview/shots/mine "Heating" "Eco auto band" --themes light,dark
 ```
 
 Screenshots land in `tab5-thermostat/preview/shots/mine/` (gitignored).
 
 **Tests:**
 - `tools/preview/test_all.sh` runs every preview test: layout, all 11 scenarios in both themes, the − / + debounce, the theme toggle, and idle/wake.
-- `tools/preview/test_device.sh` flashes the real Tab5 and checks its logs. Set `TAB5_IP` if it isn't 10.0.0.193.
+- `TAB5_IP=<tab5-ip> tools/preview/test_device.sh` flashes the real Tab5 and checks its logs.
+- Both need `secrets.yaml`, because they build the Tab5 firmware.

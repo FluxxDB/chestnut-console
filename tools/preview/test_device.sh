@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Task 7 test: the console runs on the real Tab5. Builds, flashes over Wi-Fi, then reads 60 s
 # of logs: no errors, the console's entities exist, and LVGL never blocks for long.
-#   TAB5_IP=10.0.0.193 tools/preview/test_device.sh
+#   TAB5_IP=<tab5-ip> tools/preview/test_device.sh   (the Tab5 shows its IP on screen)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-ip=${TAB5_IP:-10.0.0.193}
+ip=${TAB5_IP:?set TAB5_IP to the IP address shown on the Tab5 screen}
 out=tab5-thermostat/preview/shots/device
 mkdir -p "$out"
 [ ! -e tab5-thermostat/ui/hello.yaml ] || { echo "FAIL: ui/hello.yaml still exists"; exit 1; }

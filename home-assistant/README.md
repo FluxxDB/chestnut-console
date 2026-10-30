@@ -1,10 +1,24 @@
 # Home Assistant
 
-Runs from the repo root's `docker-compose.yml`, with `config/` mounted at `/config`.
+## Start it
 
-- Only hand-written YAML is committed. Users, integrations, devices and history live in `config/.storage` and the database, which are gitignored.
-- **First run on a new machine:** open http://localhost:8123 and go through onboarding. Set the location to the house so time zone and weather are right.
-- **Add the Tab5:** Settings → Devices & services → Add integration → ESPHome. See [tab5-thermostat/README.md](../tab5-thermostat/README.md#connecting-to-home-assistant).
+From the repo root:
+
+```bash
+docker compose up -d homeassistant
+```
+
+Then open http://localhost:8123. HA keeps running in the background and starts again with Docker; `docker compose stop homeassistant` stops it. The first time on a machine:
+
+1. Go through onboarding. Set the location to the house so the time zone and weather are right.
+2. Open **Settings → Dashboards → Chestnut** and choose **Set as default**. You only need to do this once per HA install (see [Applying it to a running HA](#applying-it-to-a-running-ha)).
+3. Add the thermostat: Settings → Devices & services → Add integration → ESPHome, with the Tab5's IP ([details](../tab5-thermostat/README.md#connecting-to-home-assistant)), or the host sim on port 6053.
+
+After pulling new changes, run `docker compose restart homeassistant`, then reload the dashboard's code in each browser and phone ([how](#applying-it-to-a-running-ha)).
+
+## Notes
+
+- `config/` is mounted at `/config`. Only hand-written YAML is committed. Users, integrations, devices and history live in `config/.storage` and the database, which are gitignored.
 - **On WSL (dev PC):** HA runs inside WSL's NAT network. Device discovery (mDNS) doesn't reach the LAN, so add ESPHome devices by IP. Other devices on the LAN can't reach HA unless you go through Tailscale.
 
 ## The Chestnut dashboard
