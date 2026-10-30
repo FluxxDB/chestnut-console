@@ -176,6 +176,7 @@ A `sim` package that provides the contract ids `room_temperature`, `room_humidit
 
 - **Model** (Mac call for the defaults): `dT/dt = (T_outdoor − T) / τ + heat_rate·W + cool_rate·Y`. Defaults: τ = 8 h, furnace +10°F/h, AC −5°F/h. The room starts at 68°F. It steps every second and publishes `room_temperature` every 10 s with about ±0.05°C noise. G alone doesn't change the temperature.
 - **Knobs in the browser and HA**: outdoor temperature (°F); weather = Fixed / Winter day (outdoor follows a daily curve, about 25–45°F) / Summer day (about 70–95°F); leakiness (τ); furnace and AC strength; humidity (default 45%).
+- **Read-outs** *(added 2026-10-29, Dang, for the HA dashboard)*: `sim_room_f` (the true room °F) and `sim_outdoor_now_f` (the outdoor °F the physics is using right now — the Fixed setting or the day curve), both read-only and gone with the sim at M4.
 - **Break-it-on-purpose control** (`select`): None / Unplugged (stops publishing) / Frozen (repeats the last value with no noise) / Out of range (publishes 60°C) / Spike (one 10°C jump).
 - **Relays** are template switches, optimistic, `restore_mode: ALWAYS_OFF`, `internal: true`. The `call_*` sensors show them.
 - **Test-only hooks** live in the test entry point, never in the logic or sim packages the Tab5 uses: forcing both relays on (for the interlock test), setting the schedule's clock, and scaling the physics and the timers.
