@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -11,8 +12,8 @@ import websocket
 HA_URL = os.environ.get("HA_URL", "http://localhost:8124")
 CLIENT_ID = f"{HA_URL}/"
 AUTH_FILE = Path(os.environ.get("E2E_WORK", "/work")) / "auth.json"
-SIM_DEVICE = os.environ.get("SIM_DEVICE_NAME", "Main Thermostat (Sim)")
-SIM_SLUG = "main_thermostat_sim"  # HA's slug of SIM_DEVICE, the prefix of the sim's entity ids
+SIM_DEVICE = os.environ.get("SIM_DEVICE_NAME", "Main Thermostat")  # run.sh names the sim like the Tab5
+SIM_SLUG = re.sub(r"[^a-z0-9]+", "_", SIM_DEVICE.lower()).strip("_")  # HA's prefix of the sim's entity ids
 
 
 def wait_until(predicate, timeout, interval=0.5, message="condition"):
@@ -137,7 +138,7 @@ class HA:
     def sim_entity(self, domain, object_id):
         """The entity id of the sim's ESPHome entity `object_id` in `domain` (None if absent).
 
-        HA names it `<domain>.main_thermostat_sim_<object_id>` (device name + entity name)."""
+        HA names it `<domain>.<SIM_SLUG>_<object_id>` (device name + entity name)."""
         entity_id = f"{domain}.{SIM_SLUG}_{object_id}"
         return entity_id if self.get_state(entity_id) is not None else None
 

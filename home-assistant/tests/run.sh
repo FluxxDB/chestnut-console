@@ -4,17 +4,20 @@
 #   home-assistant/tests/run.sh unit             node unit tests (home-assistant/tests/unit)
 #   home-assistant/tests/run.sh e2e [pytest...]  end-to-end: throwaway HA + host sim + Playwright
 #                                                (extra args go to pytest, e.g. -k theme, or
-#                                                 e2e/test_frame.py to run one file)
+#                                                 test_frame.py to run one file)
 #   home-assistant/tests/run.sh all              unit, then e2e
+#
+# Linux (WSL) only: it uses ss, GNU sed and stat, flock and Docker host networking.
 #
 # e2e never touches the dev HA (container `homeassistant`, port 8123, config/.storage) or the
 # Tab5. It runs:
 #   1. a temp copy of the hand-written HA config (configuration/automations/scripts/scenes.yaml,
-#      dashboards/, themes/, www/) plus the ha-test/ overlay (port 8124 via ha.env, the
-#      dashboard's device_name and the alerts' entity ids switched to the sim, and the offline
-#      alert's 10 minutes shortened to 30 s);
-#   2. a temp copy of the host sim's config with a fresh random API key in its own secrets.yaml
-#      (tab5-thermostat/secrets.yaml is never read or written);
+#      dashboards/, themes/, www/) plus the ha-test/ overlay (port 8124 via ha.env, and the
+#      offline alert's 10 minutes shortened to 30 s). The dashboard and the alert automations
+#      run as written: the sim is named like the real device;
+#   2. a temp copy of the host sim's config, named "Main Thermostat" like the Tab5, with a fresh
+#      random API key in its own secrets.yaml (tab5-thermostat/secrets.yaml is never read or
+#      written);
 #   3. containers chestnut-e2e-sim (the sim, API on 6053) and chestnut-e2e-ha (HA on 8124), host
 #      networking; then the chestnut-ha-e2e image onboards HA, adds the sim through ESPHome's
 #      config flow (e2e/ha_setup.py) and runs pytest + Playwright;
@@ -70,7 +73,7 @@ BUILD_CT=chestnut-e2e-build
 RUNNER_CT=chestnut-e2e-runner
 HA_PORT="$(sed -n 's/^SETUP_PORT=//p' "$here/ha-test/ha.env")"
 SIM_PORT=6053
-SIM_DEVICE_NAME="Main Thermostat (Sim)"   # friendly_name in tab5-thermostat/main-thermostat-sim.yaml
+SIM_DEVICE_NAME="Main Thermostat"   # the Tab5's friendly_name; the sim copy is renamed to it
 CACHE_VOL=chestnut-console_esphome-cache  # shared toolchain cache (as the compose services use)
 BUILD_VOL=chestnut-ha-e2e-esphome-build   # the sim's build dir, kept between runs (fast rebuilds)
 SIM_PROGRAM=/build/build/main-thermostat-sim/.pioenvs/main-thermostat-sim/program
@@ -81,7 +84,10 @@ sim_src="$repo/tab5-thermostat"
 
 port_busy() { ss -Hltn "sport = :$1" 2>/dev/null | grep -q .; }
 
-# Another run in progress? Its runner container is up for the whole run.
+# One run at a time: the lock is held for the whole run (the sim compile included), so a second
+# run can't remove the first one's containers.
+exec 9>"${TMPDIR:-/tmp}/chestnut-e2e.lock"
+flock -n 9 || die "another e2e run is in progress"
 if [ "$(docker inspect -f '{{.State.Running}}' "$RUNNER_CT" 2>/dev/null)" = true ]; then
   die "another e2e run is in progress (if it's stale: docker rm -f $RUNNER_CT $HA_CT $SIM_CT)"
 fi
@@ -125,23 +131,13 @@ done
 for d in dashboards themes www; do
   if [ -d "$ha_config/$d" ]; then cp -r "$ha_config/$d" "$tmp/ha/"; fi
 done
-dash="$tmp/ha/dashboards/chestnut.yaml"
-if [ -f "$dash" ]; then
-  sed -i -E "s/^(\s*device_name:\s*)\"Main Thermostat\"\s*$/\1\"$SIM_DEVICE_NAME\"/" "$dash"
-  grep -qF "device_name: \"$SIM_DEVICE_NAME\"" "$dash" || die "overlay: no device_name: \"Main Thermostat\" in dashboards/chestnut.yaml"
-fi
-
-# The alert automations name the real install's entity ids; point them at the sim device's.
+# The dashboard and the alert automations are tested as written: they must name the real device.
+grep -qF 'device_name: "Main Thermostat"' "$tmp/ha/dashboards/chestnut.yaml" \
+  || die "dashboards/chestnut.yaml doesn't name the device \"Main Thermostat\""
 auto="$tmp/ha/automations.yaml"
-sed -i -E \
-  -e "s/\b(binary_sensor\.main_thermostat)_(sensor_fault|interlock_fault)\b/\1_sim_\2/g" \
-  -e "s/\bclimate\.main_thermostat_main_thermostat\b/climate.main_thermostat_sim_main_thermostat/g" "$auto"
-for e in binary_sensor.main_thermostat_sim_sensor_fault binary_sensor.main_thermostat_sim_interlock_fault climate.main_thermostat_sim_main_thermostat; do
-  grep -qF "$e" "$auto" || die "overlay: $e missing from automations.yaml after the entity id rewrite"
+for e in binary_sensor.main_thermostat_sensor_fault binary_sensor.main_thermostat_interlock_fault climate.main_thermostat_main_thermostat; do
+  grep -qF "$e" "$auto" || die "automations.yaml doesn't watch $e"
 done
-if grep -nE "binary_sensor\.main_thermostat_(sensor|interlock)_fault|climate\.main_thermostat_main_thermostat" "$auto"; then
-  die "overlay: a real-install entity id is left in automations.yaml after the rewrite"
-fi
 # The offline alert's 10 minutes (its `for:` and the wait after HA starts) shrink to
 # OFFLINE_TEST_DELAY, so the e2e tests can wait for it (e2e/test_alerts.py reads the same value).
 OFFLINE_TEST_DELAY="00:00:30"
@@ -152,8 +148,13 @@ grep -qF "\"$OFFLINE_TEST_DELAY\"" "$auto" || die "overlay: no offline delay fou
 # 2. The sim's config, with its own secrets.yaml holding a fresh key (never the real one).
 mkdir -p "$tmp/esphome"
 cp -r "$sim_src/main-thermostat-sim.yaml" "$sim_src/sim" "$sim_src/thermostat" "$tmp/esphome/"
+sim_yaml="$tmp/esphome/main-thermostat-sim.yaml"
+sed -i -E "s/^(\s*friendly_name:\s*).*$/\1\"$SIM_DEVICE_NAME\"/" "$sim_yaml"
+grep -qF "friendly_name: \"$SIM_DEVICE_NAME\"" "$sim_yaml" || die "couldn't rename the sim to \"$SIM_DEVICE_NAME\""
 SIM_KEY="$(openssl rand -base64 32)"
 (umask 077; printf 'sim_api_encryption_key: "%s"\n' "$SIM_KEY" >"$tmp/esphome/secrets.yaml")
+# The test HA's admin password, fresh per run (it listens on every interface while it runs).
+E2E_PASSWORD="$(openssl rand -hex 16)"
 
 # 3a. The test image (cached after the first build).
 stamp "building the test image"
@@ -191,6 +192,7 @@ docker run --rm --name "$RUNNER_CT" --network host \
   -e HOME=/tmp \
   -e HA_URL="http://localhost:$HA_PORT" \
   -e SIM_KEY="$SIM_KEY" \
+  -e E2E_PASSWORD="$E2E_PASSWORD" \
   -e SIM_PORT="$SIM_PORT" \
   -e SIM_CONTAINER="$SIM_CT" \
   -e HA_CONTAINER="$HA_CT" \

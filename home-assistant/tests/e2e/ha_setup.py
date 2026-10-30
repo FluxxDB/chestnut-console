@@ -13,7 +13,8 @@ import requests
 
 from ha_client import AUTH_FILE, CLIENT_ID, HA, HA_URL, wait_until
 
-USER = {"name": "Test", "username": "test", "password": "test-pass-123", "language": "en"}
+# The password comes fresh from run.sh each run (the test HA listens on every interface).
+USER = {"name": "Test", "username": "test", "password": os.environ["E2E_PASSWORD"], "language": "en"}
 SIM_HOST = os.environ.get("SIM_HOST", "127.0.0.1")
 SIM_PORT = int(os.environ.get("SIM_PORT", "6053"))
 
