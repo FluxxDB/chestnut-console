@@ -1,6 +1,6 @@
 # Chestnut Console: context for agents
 
-Read this first. Deep background is in [tab5-thermostat/docs/research.md](tab5-thermostat/docs/research.md).
+Read this first. How to start each part (one command each) is in [README.md](README.md#start-here). Deep background is in [tab5-thermostat/docs/research.md](tab5-thermostat/docs/research.md).
 
 ## What this is
 
@@ -18,8 +18,8 @@ Dang is turning an **M5Stack Tab5** (ESP32-P4 + ESP32-C6 Wi-Fi, 5" 720×1280 tou
 - **Phone control:** the Tab5 serves its own web page (ESPHome `web_server` v3, digest auth). HA's app is the nicer option when HA is up.
 - **HA hosting:** for now, Docker Compose on Dang's dev PC (WSL). At the house: the same compose file on an Ubuntu server VM (his Proxmox box), with a low-power box (HA Green or Pi) as a likely future purchase.
 - **Safety requirements:** compressor/furnace min run/off times, `startup_delay: true`, a heat/cool interlock (never both on), sensor sanity checks (bad reading → stop calling + alert), and a mechanical freeze backup thermostat at install time.
-- **Temperature sensing:** the Tab5 has no temperature sensor and runs warm, so it uses an external SHT40 (M5Stack ENV IV) on a cable, away from the screen.
-- **Bench hardware isn't bought yet** ([shopping list](tab5-thermostat/docs/shopping-list.md)). Dang will say when it arrives. Until then, use simulation.
+- **Temperature sensing:** the Tab5 has no temperature sensor and runs warm, so it uses an external sensor on a cable, away from the screen: the M5Stack ENV III (SHT30), since the ENV IV (SHT40) is discontinued.
+- **Bench hardware isn't bought yet, and won't be for a while** (Dang, 2026-10-29; [shopping list](tab5-thermostat/docs/shopping-list.md)). Dang will say when it arrives. Until then, use simulation.
 
 ## Anti-goals
 
@@ -30,7 +30,7 @@ Dang is turning an **M5Stack Tab5** (ESP32-P4 + ESP32-C6 Wi-Fi, 5" 720×1280 tou
 ## Repo layout
 
 ```
-docker-compose.yml           HA 2026.10.4 + ESPHome 2026.10.1 (host networking); `esphome-host` and `preview` services (dev profile)
+docker-compose.yml           HA 2026.10.4 + ESPHome 2026.10.1 (host networking). `up -d` starts HA only; `esphome`, `esphome-host` and `preview` run when named
 tools/preview/               desktop preview rig + console tests (test_all.sh, test_device.sh)
 home-assistant/config/       HA config (runtime state gitignored)
   www/chestnut/              the Chestnut dashboard: custom element (one JS file per tab), self-hosted fonts
@@ -53,10 +53,11 @@ tab5-thermostat/             ESPHome config dir (mounted at /config in the espho
 
 Validate and compile:
 ```bash
-docker compose run --rm --no-deps esphome config tab5-thermostat.yaml
-docker compose run --rm --no-deps esphome compile tab5-thermostat.yaml
+docker compose run --rm esphome config tab5-thermostat.yaml
+docker compose run --rm esphome compile tab5-thermostat.yaml
 tab5-thermostat/tests/run.sh all     # milestone 2 tests
 home-assistant/tests/run.sh all      # HA dashboard tests (~7 min; needs ports 8124 and 6053 free)
+tools/preview/test_all.sh            # wall-screen tests in the desktop preview (needs secrets.yaml)
 ```
 
 ## Hardware facts that bite
@@ -65,7 +66,7 @@ home-assistant/tests/run.sh all      # HA dashboard tests (~7 min; needs ports 8
 - For ST7123/ST7121, **don't set a touch reset pin**: the LCD reset enables touch, and toggling the touch reset line can knock the controller offline.
 - Wi-Fi is 2.4 GHz only (ESP32-C6 via `esp32_hosted`).
 - CPU at 360 MHz: ESPHome's 400 MHz default for the P4 is flagged as possibly unbootable.
-- Port A (HY2.0-4P, I2C on G53/G54) is where the ENV IV and the Unit 4-Relay (I2C 0x26) will go, through a Grove hub.
+- Port A (HY2.0-4P, I2C on G53/G54) is where the ENV III and the Unit 4-Relay (I2C 0x26) will go, through a Grove hub.
 - RS485 power input accepts 6–24 V DC, never raw rectified 24 VAC.
 
 ## Milestones
@@ -73,7 +74,7 @@ home-assistant/tests/run.sh all      # HA dashboard tests (~7 min; needs ports 8
 1. **Bring-up** (PC, needs the Tab5 on USB): hello screen, touch, Wi-Fi, HA connection, web page, identify the screen revision. *Done (merged).*
 2. **Thermostat logic, simulated.** ESPHome `thermostat` climate driven by a simulated room (a "virtual house" whose temperature drifts toward outdoor and responds to virtual heat/cool/fan relays), plus all the safety requirements above. Develop it on ESPHome's **`host` platform**, which runs natively on Linux/macOS with no hardware, then run the same packages on the Tab5. *Done (merged 2026-10-29).*
 3. **Thermostat UI** in LVGL. Dang's call (2026-10-28): **functional first, polish later**. A clean, simple screen (big temperature, setpoint, mode, fan, humidity) built on the milestone 2 climate entity, tuned on the wall with Dang. *Done (merged).* **Dang likes it as it is (2026-10-29): no restyle, and no Axiom design pass for the wall screen.** Axiom is for the HA dashboard only. Wall-screen changes are bug fixes and behaviour unless Dang asks. The Tab5 can't show HA's own dashboard (it has no browser). The UI lives in `ui/` packages, separate from the logic.
-4. **Bench rig** (when Dang buys the parts): real ENV IV + Unit 4-Relay + 24 VAC lamps, then 24 VAC → DC power.
+4. **Bench rig** (when Dang buys the parts, not soon): real ENV III + Unit 4-Relay + 24 VAC lamps, then 24 VAC → DC power. Until then the Tab5 runs the logic against the virtual house.
 5. **House:** site survey, then install.
 
 ### Package contract (milestones 2–4)
@@ -82,8 +83,8 @@ Hardware and simulation packages provide the same ids, so the logic package does
 
 | id | type | provided by |
 |---|---|---|
-| `room_temperature` | sensor (°C) | `sim` package now, SHT40 later |
-| `room_humidity` | sensor (%) | `sim` package now, SHT40 later |
+| `room_temperature` | sensor (°C) | `sim` package now, ENV III (SHT30) later |
+| `room_humidity` | sensor (%) | `sim` package now, ENV III (SHT30) later |
 | `relay_heat` (W), `relay_cool` (Y), `relay_fan` (G), `relay_ob` (O/B, unused unless heat pump) | switch, `restore_mode: ALWAYS_OFF`, `internal: true`; only the logic package drives them | `sim` template switches now, Unit 4-Relay later |
 | `main_thermostat` | climate (thermostat) | logic package |
 

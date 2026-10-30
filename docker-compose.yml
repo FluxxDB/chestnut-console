@@ -1,11 +1,16 @@
-# Chestnut Console: Home Assistant + ESPHome Device Builder.
+# Chestnut Console: Home Assistant + the ESPHome tools.
 # The same file runs on the dev PC now and on the Ubuntu server VM at the house later.
+# Run from the repo root. Each line is one service, started with one command:
 #
-#   docker compose up -d        start both
-#   docker compose down         stop both
+#   docker compose up -d homeassistant      Home Assistant, http://<host>:8123 (stays running)
+#   docker compose run --rm esphome run tab5-thermostat.yaml --device <tab5-ip>
+#                                           build the Tab5 firmware and install it over Wi-Fi
+#   docker compose run --rm esphome-host run main-thermostat-sim.yaml
+#                                           the host sim (thermostat + virtual house), API on 6053
+#   docker compose up -d esphome            optional: the ESPHome Device Builder, http://<host>:6052
 #
-# Home Assistant:  http://<host>:8123
-# ESPHome:         http://<host>:6052
+# Plain `docker compose up -d` starts Home Assistant only: every other service is in a profile,
+# and naming a service on the command line starts it without passing --profile.
 
 name: chestnut-console
 
@@ -22,9 +27,13 @@ services:
       - ./home-assistant/config:/config
       - /etc/localtime:/etc/localtime:ro
 
+  # ESPHome for the Tab5: one-off CLI runs (compile, run, logs) and, when started with `up`, the
+  # Device Builder web UI. Nothing depends on the web UI (HA talks to the Tab5 directly), so it
+  # no longer starts with Home Assistant.
   esphome:
     image: esphome/esphome:2026.10.1
     container_name: esphome
+    profiles: [esphome]
     network_mode: host
     restart: unless-stopped
     environment:
@@ -38,7 +47,7 @@ services:
   # Dev only: ESPHome host builds (milestone 2's play sim for HA, and its tests). ESPHome
   # 2026.10.1's precompiled header breaks host builds that have a datetime entity, so it's off
   # here. The esphome service keeps it: Tab5 (ESP-IDF) builds are faster with it.
-  #   docker compose --profile dev run --rm esphome-host compile main-thermostat-sim.yaml
+  #   docker compose run --rm esphome-host run main-thermostat-sim.yaml
   esphome-host:
     image: esphome/esphome:2026.10.1
     profiles: [dev]
@@ -51,7 +60,7 @@ services:
       - esphome-cache:/cache
 
   # Dev only: desktop preview of the console (ESPHome host + SDL under Xvfb).
-  #   docker compose --profile dev run --rm preview <yaml> <outdir> [scenario ...]
+  #   docker compose run --rm preview <yaml> <outdir> [scenario ...]
   preview:
     build: tools/preview
     image: chestnut-preview
