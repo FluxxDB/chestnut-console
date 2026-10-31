@@ -14,12 +14,15 @@
   3. **Safe control logic.** The logic has to run on the device itself, not in Home Assistant, and must protect the compressor and fail safe.
   4. **Mounting.** A 3D-printed wall plate or enclosure that also holds the relays and power supply.
 - **The one thing that blocks a final design is what's inside the wall at home.** A 10-minute site survey (photos plus a multimeter, checklist in section 4) will answer it for certain. Everything else can be prototyped in the apartment without touching any HVAC.
+- **Update 2026-10-30:** the middle floor's wiring is photographed: a single-stage gas furnace + central AC, 4 wires (R, W, Y, G), **no C wire**. Whether the cable has a spare conductor (checked at the furnace) now decides the power design. See [site-survey.md](site-survey.md).
 
 ---
 
 ## 0. What public records say about the house (2026-10-28)
 
 *Addresses and listing links are left out on purpose: this repo is public.*
+
+> **Confirmed for the middle floor (2026-10-30, photos of the old thermostat's wiring):** gas furnace + central AC, single stage, one transformer, 4 wires, no C. The top floor is still unconfirmed. See [site-survey.md](site-survey.md).
 
 The listing sites (Redfin, Zillow, Realtor.com, Homes.com) block automated access, and the county parcel database was unreachable, so this comes from search snippets and neighboring listings.
 
@@ -103,36 +106,15 @@ A digital thermostat with a backlight from around 2000 is **almost certainly a 2
 | **Millivolt (wall/floor furnace, gas fireplace)** | 2 wires, no transformer | A relay can switch it, but there's no 24 V to power the Tab5. |
 | **Line voltage 120/240 V** (electric baseboard) | Thick wires with wire nuts, often labelled 120/240 V | 🛑 **Stop.** A totally different (and dangerous) project. Unlikely given your description. |
 
+**The middle floor is the first row** (confirmed 2026-10-30): R, W, Y, G, no C, and a gas furnace.
+
 Your apartment may well be a different type from your house. Apartments often have heat pumps, or electric baseboard heat with **line-voltage** thermostats.
 
 ---
 
 ## 4. Site survey checklist (next visit, or anyone at the house)
 
-**Without opening anything:**
-1. Photo of the thermostat front, and the **brand and model number** (often behind a flip-down door or on the back plate once it's pulled off).
-2. Does it take batteries? That strongly suggests no C wire is in use.
-3. Photo of the **outdoor unit's nameplate** (it tells AC from heat pump) and the **furnace / air handler nameplate**.
-
-**Thermostat cover off.** This is low voltage, but switch off the furnace's service switch or breaker first so a stray short can't blow the furnace fuse:
-
-4. Photo of the terminals with the wires attached: **letters and colors**.
-5. **Count every conductor in the cable**, including any cut short and folded back into the wall. Those spares are gold.
-6. Read the cable jacket if visible (for example "18/5" means 5 conductors of 18 AWG).
-
-**At the furnace / air handler** (remove the access panel, with power off):
-
-7. Photo of the **low-voltage terminal strip** on the control board (R, C, W, Y, G…) and which thermostat-cable colors land where. **Check whether the spare conductor is connected or just cut off.**
-8. Photo of the **transformer label** (its VA rating, usually 40 VA).
-9. Note the **fuse rating** on the control board (often 3 A or 5 A).
-
-**Multimeter, power on:**
-
-10. At the thermostat: **R to C** (if there is a C), expected around 24–30 VAC.
-11. If no C is connected at the wall but there's a spare conductor: connect it to C at the furnace, then measure R to that spare at the wall.
-12. Optional: with the old thermostat calling for heat, measure the current in W with a clamp meter or an in-series meter. That helps size the relays (usually well under 1 A).
-
-**With those photos, I can tell you exactly which design works, with no guessing.**
+Moved to [site-survey.md](site-survey.md), together with what's been found so far (the middle-floor thermostat, 2026-10-30), the photos to ask the family for, and the checks for the visit.
 
 ---
 
@@ -142,7 +124,7 @@ Ranked from best to worst:
 
 1. **C wire already connected at both ends.** Use it.
 2. **Spare conductor in the cable.** Connect it to `C` at the furnace board and you're done. This is common and takes about 15 minutes.
-3. **Only 4 conductors (R/W/Y/G), no spare.** Options:
+3. **Only 4 conductors (R/W/Y/G), no spare.** The middle floor is here unless the furnace end turns up a spare (2026-10-30). Options:
    - **Split design** (section 6B): move the relays to the furnace and use 2 of the existing conductors purely as R/C power for the wall display. This is the cleanest option.
    - Give up `G` (fan-only mode) and repurpose that conductor as `C`. The fan still runs with heat and cool, and HA can't run it on its own.
    - Venstar Add-A-Wire (ACC0410, about $33): installs at the equipment end and multiplexes signals to free a conductor. I haven't verified how it behaves with a relay-based thermostat, so treat it as a fallback.
@@ -175,6 +157,8 @@ For example a Honeywell T6 Pro Z-Wave, an Ecobee (local via HomeKit), or a Venst
 - ➕ Zero HVAC DIY. ➖ The Tab5 isn't really the thermostat. This is the fallback if the site survey turns up something awkward.
 
 **My take:** A is what you described, and it's a fine first prototype because it exercises every piece. **Pick A or B for the house after the site survey.** If there's a C or spare wire, A is reasonable. If there isn't, B is the cleaner, non-hacky answer.
+
+**Update 2026-10-30:** the middle floor has no C at the wall. A spare conductor in the cable keeps A; without one, B is the likely answer. B moves the logic to the furnace board, so it gets its own design pass with Dang before any milestone 4/5 hardware.
 
 ---
 
@@ -210,11 +194,16 @@ For example a Honeywell T6 Pro Z-Wave, an Ecobee (local via HomeKit), or a Venst
 
 ## 9. Open questions
 
-- What's in the wall at home? (Site survey, section 4.) Can someone at the house take the photos before your next visit?
-- Climate and region: heat pump, or furnace + AC?
-- Which Tab5 do you have (bare unit or Kit with battery), and which display revision?
-- Do you already run Home Assistant anywhere?
-- What do you want it to do beyond basic control: schedules, remote sensors in other rooms, occupancy, weather, voice (the Tab5 has mics and a speaker)?
+Still open (2026-10-30):
+- **Does the middle-floor cable have a spare conductor?** Checked at the furnace end, or folded back in the wall. It decides architecture A or B ([site-survey.md](site-survey.md)).
+- **The top floor:** a separate system or a zone of the same furnace, and is it a heat pump?
+- **Where HA lives at the house:** a VM on the Proxmox box, or a Home Assistant Green.
+
+Answered:
+- Middle floor: single-stage gas furnace + central AC, 4 wires, no C (photos, 2026-10-30).
+- The Tab5: the Kit (with the NP-F550 battery), ST7123 screen.
+- Home Assistant: Docker Compose on the dev PC for now.
+- Beyond basic control: schedules, Comfort/Eco and phone control are built (milestones 2–3 and the HA dashboard).
 
 ---
 
