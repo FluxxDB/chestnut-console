@@ -24,7 +24,7 @@ The wall plate's terminals, and the old thermostat's circuit board, with the fac
 Whether the cable in the wall has a **spare conductor**: a fifth wire (often blue, black or brown) that was cut short or folded back, at either end. Research [section 5](research.md#5-getting-power-to-the-wall) ranks the options:
 
 1. **A spare conductor exists:** connect it to C at the furnace. The Tab5 stays all-in-one at the wall, as built (architecture A). Best case.
-2. **No spare:** the cleanest answer is the split design (architecture B): the relays move to a small board at the furnace, and two of the four existing wires carry power up to the Tab5. The logic would then run on the furnace board, with the Tab5 as display and sensor. This changes milestone 4 and 5 hardware, so it gets its own brainstorm with Dang first.
+2. **No spare:** the cleanest answer is the split design (architecture B): the relays move to a small board at the furnace, and two of the four existing wires carry power up to the Tab5. The logic would then run on the furnace board, with the Tab5 as display and sensor. This changes milestone 4 and 5 hardware, so it gets its own brainstorm with Dang first. One point for that brainstorm: the room sensor stays at the wall, so the furnace board needs the temperature from the Tab5 (over Wi-Fi, ESP-NOW, or the other two existing wires, since the Tab5 has RS485), and its own fallback when that link drops, because Wi-Fi going down must never stop heating.
 3. Fallbacks: give up the separate fan wire (G becomes C), a Venstar Add-a-Wire, pulling a new cable, or a nearby outlet.
 
 The answer is at the furnace end, which is why the family photos below come first.
@@ -33,8 +33,8 @@ The answer is at the furnace end, which is why the family photos below come firs
 
 > Thanks for the thermostat photos! A few more would settle the rest. Please don't disconnect or move any wires, and switch the furnace's power off (a light switch on or near it) before opening its front panel.
 >
-> 1. **The old thermostat:** clip it back on the wall plate if it's still off, and check the heat comes on when you turn it up.
-> 2. **The thermostat cable at the wall:** pull the faceplate off again and gently ease the cable out of the hole an inch. Are there any other wires (blue, black, brown, orange) folded back into the wall? A close photo of the cable, and of any writing on its outer jacket (like "18/5").
+> 1. **The thermostat cable at the wall:** with the faceplate off, gently ease the cable out of the hole an inch. Are there any other wires (blue, black, brown, orange) folded back into the wall? A close photo of the cable, and of any writing on its outer jacket (like "18/5").
+> 2. **The old thermostat:** clip it back on the wall plate, and check the heat comes on when you turn it up.
 > 3. **The furnace:** where is it (basement, closet, attic)? A photo of the label with the brand and model (usually inside the front panel).
 > 4. **Inside the furnace panel:** a photo of the small screw terminals where the thin thermostat wires connect (labelled R, C, W, Y, G or similar). Do any extra thin wires in that cable go nowhere (cut short or tucked back)?
 > 5. **Near the furnace:** is there a separate box with lots of thin wires labelled "Zone 1 / Zone 2"? Or are there two furnaces?

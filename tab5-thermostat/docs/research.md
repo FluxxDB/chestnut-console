@@ -13,7 +13,7 @@
   2. **Temperature sensing.** The Tab5 has no temperature sensor and runs warm (a reviewer measured 39 °C on the back after 30 minutes at full brightness). You need an external sensor kept away from the device.
   3. **Safe control logic.** The logic has to run on the device itself, not in Home Assistant, and must protect the compressor and fail safe.
   4. **Mounting.** A 3D-printed wall plate or enclosure that also holds the relays and power supply.
-- **The one thing that blocks a final design is what's inside the wall at home.** A 10-minute site survey (photos plus a multimeter, checklist in section 4) will answer it for certain. Everything else can be prototyped in the apartment without touching any HVAC.
+- **The one thing that blocks a final design is what's inside the wall at home.** A 10-minute site survey (photos plus a multimeter, checklist in [site-survey.md](site-survey.md)) will answer it for certain. Everything else can be prototyped in the apartment without touching any HVAC.
 - **Update 2026-10-30:** the middle floor's wiring is photographed: a single-stage gas furnace + central AC, 4 wires (R, W, Y, G), **no C wire**. Whether the cable has a spare conductor (checked at the furnace) now decides the power design. See [site-survey.md](site-survey.md).
 
 ---
