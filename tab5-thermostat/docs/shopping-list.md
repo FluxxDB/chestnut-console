@@ -10,7 +10,7 @@ Buy these from **Mouser** (US stock, arrives in days, but may add a tariff surch
 
 - [ ] **M5Stack Unit ENV III** (U001-C; SHT30 + QMP6988). Temperature and humidity sensor. $5.95 ([store](https://shop.m5stack.com/products/env-iii-unit-with-temperature-humidity-air-pressure-sensor-sht30-qmp6988)). Replaces the **ENV IV (U001-D), which is discontinued**. The SHT30 is about as accurate as the SHT40 for room temperature (±0.2 °C typical). I2C 0x44 and 0x70; Port A is a separate bus from the Tab5's own chips, so the 0x44 doesn't clash. Comes in a case with a 20 cm Grove cable. Chosen over the Adafruit SHT45 + PTFE (more accurate, dust filter, ~$15.50, but a bare board) for being plug-and-play. **Mount it below the Tab5**, in its own vented pocket, never above or behind it: the Tab5's warm air rises.
 - [ ] **M5Stack Unit 4-Relay** (U097; Mouser 170-U097). Switches heat (W), cool (Y), fan (G) and the heat-pump reversing valve (O/B). $12.95 ([store](https://shop.m5stack.com/products/4-relay-unit)). I2C 0x26; four normally-open 10 A contacts with an LED each; M5Stack publishes an official ESPHome component. It fails safe: if the Tab5 crashes or loses power, every relay opens. It comes with a 20 cm Grove cable and four plug-in terminals, and it's a 112 × 23 mm bar that fits behind the Tab5. The coils run off Port A's 5 V (about 90 mA each); Port A's current limit isn't documented, so check it on the bench.
-  - **Four relays cover** a single-stage furnace + AC, a heat pump with backup heat, split Rh/Rc transformers and a zone panel. **They don't cover** two-stage equipment (W2 or Y2 terminals in use) or a "communicating" system. The site survey confirms (see below).
+  - **Four relays cover** a single-stage furnace + AC, a heat pump with backup heat, split Rh/Rc transformers and a zone panel. **They don't cover** two-stage equipment (W2 or Y2 terminals in use) or a "communicating" system. **The middle floor needs three** (confirmed 2026-10-30, a single-stage gas furnace + AC: W, Y, G), so one is spare; the top floor is still unknown.
 - [ ] **M5Stack Grove Hub** (1-to-3; U006, Mouser 170-U006). Lets the sensor and relays share the Tab5's single Port A; neither unit can be chained. $3.50 ([store](https://shop.m5stack.com/products/mini-hub-module)). The 20 cm cables that come with the sensor and relays are enough, so no extra cables.
 
 **No USB-C power meter needed.** The Tab5's built-in monitor (INA226) measures the battery: unplugged, the Tab5 runs on the battery, so battery current × voltage is its real draw, and a negative current while plugged in is the charging draw. Measured 2026-10-29: see "Notes".
@@ -31,22 +31,9 @@ Thermostat wire is sold in rolls, but the fake furnace needs only a few feet. Ma
 
 - [ ] **Multimeter** with AC volts and continuity, for the site survey. Pick a model when the visit is planned. On the bench, its continuity mode also confirms each relay switches.
 
-### Site survey checklist
+### Site survey
 
-Photos anyone at the house can take now:
-- The old thermostat's **wiring terminals** (face pulled off): which letters have wires, their colors, and any jumper between Rh and Rc. This photo alone answers the system type, the stages, any heat pump and the C wire.
-- The old thermostat's **model label**.
-- The **furnace or air handler's model sticker** (behind the front panel) and the **outdoor unit's sticker**.
-- Near the furnace: whether there's a **zone panel**, and whether the top-floor thermostat runs to the same furnace or a separate system.
-- The thermostat's spot: which wall, how high, direct sun, nearby supply vents or doors, and the nearest outlet.
-
-At the visit, with the multimeter:
-- **R to C voltage** (about 24–28 V AC means a working C wire). If there's no C wire, look for a spare conductor at both ends of the cable.
-- The furnace control board's **terminal labels** (W1/W2, Y1/Y2, C) and its **fuse rating**.
-- Optional: the current on W, Y and G while each runs, to check the relay contacts.
-- **2.4 GHz Wi-Fi signal** at the thermostat's spot.
-- The **furnace transformer's VA rating** (on its label, usually 40 VA). The Tab5 adds about 3 VA normally, up to about 8 VA while recharging its battery if it's kept in.
-- The **wall opening** (hole or box size) and the old thermostat's outline, for the enclosure design.
+Moved to [site-survey.md](site-survey.md): what the middle-floor photos settled (2026-10-30), the photos to ask the family for, and the checks for the visit. **Those photos need nothing bought;** the multimeter is for the visit.
 
 ## Later: don't buy yet
 
@@ -54,10 +41,10 @@ At the visit, with the multimeter:
 - [ ] **24 V AC → DC supply for the Tab5.** The Tab5's draw is now measured (see "Notes"), so 1 A at 12 V is plenty. Candidate: Altronix VR1T (24 V AC → 12 V DC, 1 A), ~$33, into the Tab5's 6–24 V DC input ([listing](https://www.surveillance-video.com/power-supply-vr1t.html)). Two cautions:
   - an HVAC transformer at light load can read 26–29 V AC, so check the module's input margin;
   - with a bridge rectifier, the Tab5's ground isn't C: never tie it to C, and don't plug the Tab5 into a grounded computer while it runs on 24 V AC.
-- [ ] **If the house has no C wire**: Venstar ACC0410 Add-a-Wire, ~$33 ([SupplyHouse](https://www.supplyhouse.com/Venstar-ACC0410-Add-a-Wire)).
+- [ ] **Only if the cable has no spare conductor, and this fallback is chosen over the split design**: Venstar ACC0410 Add-a-Wire, ~$33 ([SupplyHouse](https://www.supplyhouse.com/Venstar-ACC0410-Add-a-Wire)). The middle floor has no C wire at the wall (2026-10-30); the furnace end decides ([site-survey.md](site-survey.md)).
 - [ ] **Mechanical low-limit "freeze" thermostat**, wired in parallel on R–W, set to about 45–50 °F, as an independent backup: Honeywell T822K1042 (35–85 °F, no batteries), ~$60 ([listing](https://www.industrialstores.com/product_detail/honeywell-t822k1042-mercury-free-heat-thermostat)). It covers the Tab5 failing to call for heat, not a relay stuck on. Mount it where it reads house air, away from the warm Tab5.
 - [ ] **Wall plate / enclosure** for the Tab5, relays and power supply. Nothing ready-made fits, so it'll be 3D-printed. The Tab5 is 128 × 80 × 12 mm, wider than a double-gang plate. A Honeywell 50002883-001 cover plate (~$15–20) can hide the old thermostat's outline.
-- [ ] **Final relay board**, depending on the site survey.
+- [ ] **Final relay board.** The Unit 4-Relay covers the middle floor. If the split design is chosen (no spare conductor), it moves to the furnace with a small ESP32 board to drive it, picked then.
 
 ## Notes
 

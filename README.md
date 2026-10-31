@@ -54,4 +54,4 @@ The test runners are scripts rather than compose services because each one start
 
 ## Status
 
-Milestones 1–3 are done: bring-up, the thermostat logic with its safety features, and the wall screen. The Home Assistant dashboard is done too. The Tab5 runs the real thermostat logic against a simulated house. Next is milestone 4, a bench rig with a real sensor and relays, once the parts are bought (not soon). After that comes milestone 5, the house itself. See [AGENTS.md](AGENTS.md#milestones).
+Milestones 1–3 are done: bring-up, the thermostat logic with its safety features, and the wall screen. The Home Assistant dashboard is done too. The Tab5 runs the real thermostat logic against a simulated house. Next is milestone 4, a bench rig with a real sensor and relays, once the parts are bought (not soon). After that comes milestone 5, the house itself. Its site survey has started: the middle-floor thermostat's wiring is confirmed ([site-survey.md](tab5-thermostat/docs/site-survey.md)). See [AGENTS.md](AGENTS.md#milestones).
