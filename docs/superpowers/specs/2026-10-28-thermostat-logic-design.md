@@ -125,7 +125,7 @@ Dang did not ask for a fast-forward mode for playing with it: the browser sim ru
 4. **Sensor sanity** (thresholds are a Mac call, tunable in one place). The logic package feeds the thermostat a *checked* temperature, not `room_temperature` directly. A reading counts as bad when:
    - it's NaN or missing, or no new reading has arrived for 2 minutes;
    - it's outside −10–50°C (14–122°F). *(Dang, final review: widened from 2–40°C so a freezing or baking house still gets heated or cooled back after an outage; only impossible readings count.)*
-   - it hasn't changed at all for 30 minutes. (The SHT40 always has a little noise, so an identical value for that long means a stuck sensor. The sim adds similar noise.)
+   - it hasn't changed at all for 30 minutes. (The room sensor, an SHT30 in the M5Stack ENV III since the ENV IV's SHT40 is discontinued, always has a little noise, so an identical value for that long means a stuck sensor. The sim adds similar noise.)
 
    A single-reading jump of more than 2°C is held back for one more reading before it's believed: a spike is filtered, a real change gets through. On a bad reading:
    - the checked temperature becomes NaN, and a **`sensor_fault`** problem sensor turns on at once;

@@ -1,5 +1,5 @@
-# Virtual house (milestone 2): stands in for the SHT40 (ENV IV) and the Unit 4-Relay until the
-# bench parts arrive. Provides the package contract ids room_temperature (°C), room_humidity
+# Virtual house (milestone 2): stands in for the ENV III (SHT30) sensor and the Unit 4-Relay
+# until the bench parts arrive. Provides the package contract ids room_temperature (°C), room_humidity
 # and relay_heat / relay_cool / relay_fan / relay_ob from the physics in house_model.h, plus
 # knobs to play with (outdoor, weather, house) and a break-it-on-purpose fault select.
 # Also runs on the Tab5, so no test-only hooks here (those live in tests/main-thermostat-test.yaml).
