@@ -21,7 +21,7 @@ Dang is turning an **M5Stack Tab5** (ESP32-P4 + ESP32-C6 Wi-Fi, 5" 720×1280 tou
 - **Safety requirements:** compressor/furnace min run/off times, `startup_delay: true`, a heat/cool interlock (never both on), sensor sanity checks (bad reading → stop calling + alert), and a mechanical freeze backup thermostat at install time.
 - **Temperature sensing:** the Tab5 has no temperature sensor and runs warm, so it uses an external sensor on a cable, away from the screen: the M5Stack ENV III (SHT30), since the ENV IV (SHT40) is discontinued.
 - **Open: power at the wall.** There's no C wire at the middle floor. A spare conductor in the cable (checked at the furnace) keeps the all-in-one design. Without one, the likely answer is the split design: relays and logic on a small board at the furnace, the Tab5 as display and sensor, powered over two of the existing wires. That changes milestone 4/5 hardware, so it gets a brainstorm with Dang first. Nothing in milestones 1–3 depends on it.
-- **Bench hardware isn't bought yet, and won't be for a while** (Dang, 2026-10-29; [shopping list](tab5-thermostat/docs/shopping-list.md)). Dang will say when it arrives. Until then, use simulation.
+- **Bench hardware: the ENV III, Unit 4-Relay and Grove Hub were ordered 2026-11-07** from the M5Stack store (about 15–20 business days; [shopping list](tab5-thermostat/docs/shopping-list.md)). Dang will say when they arrive. Until then, use simulation.
 
 ## Anti-goals
 
@@ -76,7 +76,7 @@ tools/preview/test_all.sh            # wall-screen tests in the desktop preview 
 1. **Bring-up** (PC, needs the Tab5 on USB): hello screen, touch, Wi-Fi, HA connection, web page, identify the screen revision. *Done (merged).*
 2. **Thermostat logic, simulated.** ESPHome `thermostat` climate driven by a simulated room (a "virtual house" whose temperature drifts toward outdoor and responds to virtual heat/cool/fan relays), plus all the safety requirements above. Develop it on ESPHome's **`host` platform**, which runs natively on Linux/macOS with no hardware, then run the same packages on the Tab5. *Done (merged 2026-10-29).*
 3. **Thermostat UI** in LVGL. Dang's call (2026-10-28): **functional first, polish later**. A clean, simple screen (big temperature, setpoint, mode, fan, humidity) built on the milestone 2 climate entity, tuned on the wall with Dang. *Done (merged).* **Dang likes it as it is (2026-10-29): no restyle, and no Axiom design pass for the wall screen.** Axiom is for the HA dashboard only. Wall-screen changes are bug fixes and behaviour unless Dang asks. The Tab5 can't show HA's own dashboard (it has no browser). The UI lives in `ui/` packages, separate from the logic.
-4. **Bench rig** (when Dang buys the parts, not soon): real ENV III + Unit 4-Relay + 24 VAC lamps, then 24 VAC → DC power. Until then the Tab5 runs the logic against the virtual house.
+4. **Bench rig** (the sensor, relays and hub were ordered 2026-11-07; starts when they arrive): real ENV III + Unit 4-Relay + 24 VAC lamps, then 24 VAC → DC power. Until then the Tab5 runs the logic against the virtual house.
 5. **House:** site survey (the middle-floor wiring is done, 2026-10-30; next the furnace end, which decides power, and the top floor), then install.
 
 ### Package contract (milestones 2–4)
