@@ -58,6 +58,7 @@ esp_ldo:
 
 pi4ioe5v6408:
   - id: pi4ioe1
+    i2c_id: bsp_bus
     address: 0x43
     # 0: O - wifi_antenna_int_ext
     # 1: O - speaker_enable
@@ -68,6 +69,7 @@ pi4ioe5v6408:
     # 6: O - camera reset
     # 7: I - headphone detect
   - id: pi4ioe2
+    i2c_id: bsp_bus
     address: 0x44
     # 0: O - wifi_power
     # 1: NC
@@ -178,6 +180,7 @@ binary_sensor:
 
 sensor:
   - platform: ina226
+    i2c_id: bsp_bus
     address: 0x41
     adc_averaging: 16
     max_current: 8.192A
