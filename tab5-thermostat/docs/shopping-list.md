@@ -6,7 +6,7 @@ Parts for the bench prototype and beyond. Prices are USD, checked 2026-10-29. A 
 
 These are the parts the real thermostat needs, and all three go into the final install. Reviewed one by one with Dang on 2026-10-29.
 
-**Ordered 2026-11-07** from the M5Stack store ($22.40 plus shipping; ships from China, about 15–20 business days). Dang will say when they arrive.
+**Arrived 2026-11-18** (ordered 2026-11-07 from the M5Stack store, $22.40 plus shipping).
 
 Buy these from **Mouser** (US stock, arrives in days, but may add a tariff surcharge at checkout) or the **[M5Stack store](https://shop.m5stack.com)** (lowest list price, but ships from China: 15–20 business days by air or paid DHL, duties extra). Compare the totals at checkout. Amazon has no genuine M5Stack 4-Relay.
 
