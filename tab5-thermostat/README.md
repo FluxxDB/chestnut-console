@@ -135,7 +135,7 @@ Tests: `tools/bench/test_unit.sh` (the link state machine, seconds) and `TAB5_IP
 
 1. **Relays follow the thermostat**, from the screen and from HA: Heat with the target above the room → relay 1 after the startup delay; Cool below → relays 2 and 3; Fan On → relay 3; a call keeps running for its minimum run after the target is moved back.
 2. **Pull the sensor cable** → sensor fault on the screen and in HA within 2 minutes; heating and cooling stop.
-3. **Pull the relay unit's cable during a call** → relay fault within about 5 s; about 10 s later Port A's power is cut (the sensor faults too); the phone alert arrives. Plug it back → the fault clears after a retry, with every relay off until the thermostat calls again.
+3. **Pull the relay unit's cable during a call** → relay fault within about 5 s; about 10 s later Port A's power is cut (the sensor faults too); the phone alert arrives. Plug it back → the fault clears after a retry, with heat and cool off until the thermostat calls again (the fan relay follows the fan mode: on again with Fan On).
 4. **Restart from HA during a call** → the relay drops as the Tab5 restarts and stays off until the thermostat calls again after its startup delay. The same after pulling USB with the battery out.
 5. **Boot with the relay cable out** → the Tab5 starts, the relay fault shows after about 5 s, and Port A is cycled every 30 s until it's plugged in.
 6. **Boot with the sensor cable out** → a sensor fault (the sensor isn't set up without it); plug it in and restart to clear it.
