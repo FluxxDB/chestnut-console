@@ -87,7 +87,7 @@ The Tab5 runs the thermostat itself (ESPHome `thermostat` climate `main_thermost
 | File | What it is |
 |---|---|
 | `thermostat/logic.yaml` + `chestnut_logic.h` | the logic package: the only thing that switches a relay |
-| `sim/virtual-house.yaml` + `house_model.h` | the virtual house: stands in for the ENV III sensor and the Unit 4-Relay until the bench parts arrive (milestone 4). Its room warms or cools toward outdoor and responds to the virtual relays. |
+| `sim/virtual-house.yaml` + `house_model.h` | the virtual house: stands in for the ENV III sensor and the Unit 4-Relay, for demos and the host sim (the Tab5 runs the real parts since milestone 4; see the `io:` line in `tab5-thermostat.yaml`). Its room warms or cools toward outdoor and responds to the virtual relays. |
 | `main-thermostat-sim.yaml` | the same two packages on ESPHome's host platform, for Home Assistant and the tests |
 | `tests/` | `run.sh` plus the unit and scenario tests |
 
@@ -116,6 +116,18 @@ docker compose run --rm esphome-host run main-thermostat-sim.yaml
 It uses host networking, with the API on port 6053 (Linux; Docker Desktop on a Mac doesn't expose host-network ports to the Mac). The `esphome-host` service builds without ESPHome's precompiled header, which breaks host builds in 2026.10.1.
 
 To add it to HA: Settings → Devices & services → Add integration → ESPHome → host = the machine running the sim, port 6053, with the `sim_api_encryption_key`.
+
+## Bench rig (milestone 4)
+
+The Tab5 runs the real room sensor and relays on Port A (the ENV III and the Unit 4-Relay, through the Grove Hub). One line in `tab5-thermostat.yaml` picks them or the virtual house: `io: !include hardware/bench-io.yaml` or `io: !include sim/virtual-house.yaml`. With the virtual house, Port A stays unpowered.
+
+| File | What it is |
+|---|---|
+| `hardware/bench-io.yaml` | the Port A bus and power, the ENV III (`room_temperature` with the HA-settable `temperature_offset`, `room_humidity`), the four relay switches, the relay check and `relay_fault`, and the recovery-mode Port A cut |
+| `hardware/relay_unit.h` | the relay unit's registers, the relay byte, and the link state machine (when to raise the relay fault and cut Port A's power) |
+| `hardware/bench_io.h` | the I2C glue: register writes and reads, and the direct IO-expander write that cuts Port A in recovery mode |
+
+Tests: `tools/bench/test_unit.sh` (the link state machine, seconds) and `TAB5_IP=<tab5-ip> tools/bench/test_bench.sh` (flashes the Tab5, then checks the relay unit answers, the room temperature is sane, and heat and cool are off after boot). Both need only Docker; the bench test also needs `secrets.yaml`.
 
 ## Desktop preview
 

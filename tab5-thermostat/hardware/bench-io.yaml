@@ -1,0 +1,179 @@
+# The bench rig (milestone 4): the real room sensor and relays on Port A, in place of the virtual
+# house. Provides the package contract ids: room_temperature (°C), room_humidity, relay_heat /
+# relay_cool / relay_fan / relay_ob (Unit 4-Relay relays 1-4 = W, Y, G, O/B), relay_fault and
+# temperature_offset. Spec: docs/superpowers/specs/2026-11-18-bench-rig-design.md.
+#
+# The relay unit is driven by our own small driver (not M5Stack's unit4relay component): all four
+# relays are written as one byte from the switch states, and read back every second. When the unit
+# stops answering, relay_fault turns on and Port A's power is cut (relay_unit.h has the timings),
+# which drops every relay whatever the unit's chip was holding. Port A's bus is never touched while
+# it's unpowered: the unpowered units hold its lines low and every transfer then stalls the loop.
+
+esphome:
+  includes:
+    # Resolved next to this file. A list, so it merges with the other packages' includes.
+    - relay_unit.h
+    - bench_io.h
+  on_boot:
+    # After the IO expander and its switches (which turn Port A off), before the sensors set up:
+    # power Port A and give the units a moment, so the ENV III answers at its own setup.
+    - priority: 700
+      then:
+        - lambda: |-
+            id(external_5v_power).turn_on();
+            delay(300);  // NOLINT: blocking on purpose, during setup
+            chestnut_hw::relay_link().start(millis());
+            id(relay_fault).publish_state(false);
+
+# Recovery (safe) mode sets up neither the buses nor the IO expander, so Port A would keep its
+# power and the relay unit whatever relays it held (checked on the bench). Cut it directly.
+safe_mode:
+  on_safe_mode:
+    - lambda: |-
+        const bool ok = chestnut_hw::cut_port_a_power_raw();
+        ESP_LOGW("bench-io", "recovery mode: Port A power %s", ok ? "cut" : "NOT cut (IO expander write failed)");
+
+i2c:
+  - id: port_a
+    sda: GPIO53
+    scl: GPIO54
+    frequency: 100kHz
+    # No scan: at the bus's setup Port A is still off, and a scan of an unpowered Port A stalls.
+    scan: false
+
+script:
+  # Sends the four relay switches' states to the unit as one byte (no read first). The 1 s check
+  # below sends it again and reads it back, so a write lost here is corrected within a second.
+  - id: relay_send
+    then:
+      - lambda: |-
+          if (!id(external_5v_power).state) return;
+          chestnut_hw::write_reg(id(port_a), chestnut_hw::REG_RELAYS,
+                                 chestnut_hw::relay_byte(id(relay_heat).state, id(relay_cool).state,
+                                                         id(relay_fan).state, id(relay_ob).state));
+
+# The relays: what the logic package drives. Internal, so only the logic can switch them (the logic
+# package's call_* sensors show their state). on_turn_on / on_turn_off run after the new state is
+# published, so relay_send sees it (turn_on_action would see the previous state).
+switch:
+  - platform: template
+    id: relay_heat
+    name: "Relay W (heat)"
+    internal: true
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    on_turn_on: {script.execute: relay_send}
+    on_turn_off: {script.execute: relay_send}
+  - platform: template
+    id: relay_cool
+    name: "Relay Y (cool)"
+    internal: true
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    on_turn_on: {script.execute: relay_send}
+    on_turn_off: {script.execute: relay_send}
+  - platform: template
+    id: relay_fan
+    name: "Relay G (fan)"
+    internal: true
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    on_turn_on: {script.execute: relay_send}
+    on_turn_off: {script.execute: relay_send}
+  # O/B reversing valve: only for a heat pump; the logic never turns it on.
+  - platform: template
+    id: relay_ob
+    name: "Relay OB (reversing valve)"
+    internal: true
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    on_turn_on: {script.execute: relay_send}
+    on_turn_off: {script.execute: relay_send}
+
+binary_sensor:
+  # Contract: the relay unit isn't answering (heating and cooling stop; Port A is power-cycled).
+  - platform: template
+    id: relay_fault
+    name: "Relay Fault"
+    device_class: problem
+
+number:
+  # Contract: a correction added to the sensor's reading before the logic's sanity checks. °F, and
+  # deliberately no device_class: HA in metric would convert it as an absolute temperature.
+  - platform: template
+    id: temperature_offset
+    name: "Temperature Offset"
+    icon: mdi:thermometer-plus
+    unit_of_measurement: "°F"
+    entity_category: config
+    mode: box
+    min_value: -5
+    max_value: 5
+    step: 0.1
+    initial_value: 0
+    optimistic: true
+    restore_value: true
+
+sensor:
+  # The ENV III (SHT30). Read only from the check below, every 10 s while Port A has power.
+  - platform: sht3xd
+    id: env_iii
+    i2c_id: port_a
+    address: 0x44
+    update_interval: never
+    temperature:
+      # Contract: the room temperature as the thermostat sees it (°C), offset applied.
+      id: room_temperature
+      name: "Room Temperature"
+      accuracy_decimals: 2
+      filters:
+        - lambda: return x + id(temperature_offset).state * 5.0f / 9.0f;
+    humidity:
+      # Contract: relative humidity (%).
+      id: room_humidity
+      name: "Room Humidity"
+      accuracy_decimals: 1
+
+interval:
+  # The relay unit check, once a second: send the relay byte and read it back (the unit mirrors the
+  # relays into the LED bits, so only the low four bits are compared), then let the link decide the
+  # relay fault and Port A's power.
+  - interval: 1s
+    then:
+      - lambda: |-
+          static uint32_t last_env = 0;
+          const bool powered = id(external_5v_power).state;
+          const uint8_t want = chestnut_hw::relay_byte(id(relay_heat).state, id(relay_cool).state,
+                                                       id(relay_fan).state, id(relay_ob).state);
+          bool answered = false;
+          if (powered) {
+            uint8_t back = 0;
+            answered = chestnut_hw::write_reg(id(port_a), chestnut_hw::REG_RELAYS, want) &&
+                       chestnut_hw::read_reg(id(port_a), chestnut_hw::REG_RELAYS, &back) &&
+                       (back & 0x0F) == want;
+          }
+          const uint32_t now = millis();
+          const chestnut_hw::LinkOut out = chestnut_hw::relay_link().step(answered, now);
+          if (out.resync && powered) {
+            chestnut_hw::write_reg(id(port_a), chestnut_hw::REG_MODE, chestnut_hw::MODE_LEDS_FOLLOW);
+            chestnut_hw::write_reg(id(port_a), chestnut_hw::REG_RELAYS, want);
+            ESP_LOGI("bench-io", "relay unit answering, relays 0x%02X", want);
+          }
+          if (out.port_power != powered) {
+            if (out.port_power) {
+              id(external_5v_power).turn_on();
+              ESP_LOGW("bench-io", "Port A power restored");
+            } else {
+              id(external_5v_power).turn_off();
+              ESP_LOGW("bench-io", "Port A power cut (relay unit not answering)");
+            }
+          }
+          if (out.fault != id(relay_fault).state) {
+            id(relay_fault).publish_state(out.fault);
+            if (out.fault) ESP_LOGW("bench-io", "relay unit not answering");
+            else ESP_LOGW("bench-io", "relay unit answering again");
+          }
+          if (powered && out.port_power && now - last_env >= 10000) {
+            last_env = now;
+            id(env_iii).update();
+          }
