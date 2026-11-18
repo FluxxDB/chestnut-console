@@ -95,5 +95,14 @@ The exact pin check, the I2C frequency, the fault timing, file and entity names 
 
 ## Risks to check first
 
+**Checked on the bench 2026-11-18** (a throwaway build, Dang watching the relays):
+
+- **Port A:** GPIO53 is SDA, GPIO54 is SCL. The board's `external_5v_power` switch does feed Port A: off, the unpowered units drag the bus lines low and every I2C attempt fails slowly (about 50 ms each); on, the relay unit (0x26), the ENV III (0x44) and its pressure chip (0x70) answer. **So the firmware never touches Port A's bus while it's off, and doesn't scan it:** a full scan with Port A off blocked the main loop for about 6 s and the watchdog restarted the Tab5.
+- **The relay unit:** relay 1–4 match the numbers printed on it (W, Y, G, O/B). Reading register 0x11 back returns the relays mirrored into the LED bits (writing 0x01 reads back 0x11), so the driver compares only the low four bits. The first write right after power-up can go unanswered while the unit starts.
+- **The sensor** read 23.6 °C (74.5 °F) and 56% humidity on the desk.
+- **Current:** on battery with the screen dark, 0.137 A; with relays 1 and 3 on, 0.263 A, so two relay coils add about 0.13 A (about 1 W). Port A handles it.
+- **Restart:** Port A keeps its power through a Tab5 restart, and the relay unit keeps its relays: at the very start of boot, relay 1 was still on. It drops when the board's IO expander setup switches Port A off, well under a second into boot (Dang saw it as instant). The `ALWAYS_OFF` on `external_5v_power` covers this.
+- **Recovery (safe) mode:** without a fix, Port A stays powered and **relay 1 stayed on** (Dang watched), because recovery mode never sets up the IO expander. **Fixed and verified:** an `on_safe_mode` hook clears the expander's Port A bit directly through the chip's I2C driver (the board's buses aren't running in recovery mode); with it, relay 1 went dark on entering recovery mode and stayed dark. Updates over Wi-Fi from recovery mode work on this board.
+
 - **The relay component on ESPHome 2026.10.1 and the ESP32-P4:** it's a plain I2C component, so it should build, but check before anything else with a throwaway build that reads the ENV III and clicks each relay once.
 - **Port A's 5 V current:** M5Stack doesn't document its limit. Two relay coils (about 90 mA each) plus the sensor is about 200 mA; measure it on the bench with the Tab5's battery monitor or a USB meter.
