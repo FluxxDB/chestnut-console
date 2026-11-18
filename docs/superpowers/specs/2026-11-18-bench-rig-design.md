@@ -1,6 +1,6 @@
 # Milestone 4: the bench rig
 
-*Design, 2026-11-18. Owner: pc-chestnut-console. Status: draft for Dang's approval; decided with Dang in three surveys on 2026-11-18. Builder check by a fresh reviewer done (3 points, settled below); mac-chestnut-console to review its side.*
+*Design, 2026-11-18. Owner: pc-chestnut-console. Status: **approved by Dang 2026-11-18**; decided with Dang in three surveys that day. Builder check by a fresh reviewer done (3 points, settled below); mac-chestnut-console to review its side.*
 
 Marks: **Dang** = he decided it; **PC call** = my default, open to change; **Mac** = the Mac agent's side to settle.
 
