@@ -4,6 +4,8 @@ The test entry runs the physics 600x faster (one 1 s step = 10 simulated minutes
 publishes room_temperature every 250 ms. The relays are internal, so the tests see their
 effect through sim_room_f, the true room temperature.
 """
+from aioesphomeapi import EntityCategory
+
 from conftest import f_to_c
 
 
@@ -127,3 +129,70 @@ async def test_knobs_survive_restart_fault_does_not(device_keep_prefs):
     assert await dev.wait_for("sim_fault", lambda v: v is not None, 3) == "None"
     # The room itself is not restored: it starts again at 68.
     assert abs(await dev.wait_for("sim_room_f", lambda v: v is not None, 3) - 68) < 3
+
+
+# --- Milestone 4: the relay unit's fault and the temperature offset (contract ids) ---
+
+async def test_relay_fault_follows_sim_fault(device):
+    assert await device.wait_for("relay_fault", lambda v: v is not None, 3) is False
+    await device.select("sim_fault", "Relay unit unplugged")
+    await device.wait_for("relay_fault", lambda v: v is True, 1)
+    # Only the relay unit "fails": the sensor keeps reading.
+    n = device.updates("room_temperature")
+    await device.sleep(1)
+    assert device.updates("room_temperature") > n
+    await device.select("sim_fault", "None")
+    await device.wait_for("relay_fault", lambda v: v is False, 1)
+
+
+async def test_relay_fault_schema(device):
+    info = device.info("relay_fault")
+    assert info.device_class == "problem"
+    assert info.name == "Relay Fault"
+
+
+async def test_temperature_offset_schema(device):
+    info = device.info("temperature_offset")
+    assert info.name == "Temperature Offset"
+    assert info.unit_of_measurement == "°F"
+    assert info.device_class == ""  # a temperature class would make a metric HA convert it
+    assert (info.min_value, info.max_value) == (-5.0, 5.0)
+    assert abs(info.step - 0.1) < 1e-6
+    assert info.entity_category == EntityCategory.CONFIG
+    assert await device.wait_for("temperature_offset", lambda v: v is not None, 3) == 0
+
+
+async def reading_minus_true_c(dev, n=8):
+    """The mean of the next n room_temperature readings, minus the true room (°C)."""
+    readings = [await dev.next_value("room_temperature", 3) for _ in range(n)]
+    return sum(readings) / n - f_to_c(await dev.state("sim_room_f"))
+
+
+async def test_offset_moves_reading(device):
+    await fixed_weather(device, 68)  # the room starts at 68, so it stays put
+    await device.sleep(1)
+    assert abs(await reading_minus_true_c(device)) < 0.06
+    await device.set_number("temperature_offset", 1.8)  # +1.8°F = +1.0 °C
+    await device.next_value("room_temperature", 3)
+    assert abs(await reading_minus_true_c(device) - 1.0) < 0.06
+    await device.set_number("temperature_offset", -1.8)
+    await device.next_value("room_temperature", 3)
+    assert abs(await reading_minus_true_c(device) + 1.0) < 0.06
+
+
+async def test_offset_restored_and_true_room_unchanged(device_keep_prefs):
+    dev = device_keep_prefs
+    await dev.set_number("temperature_offset", 2.5)
+    await dev.restart()
+    assert await dev.wait_for("temperature_offset", lambda v: v is not None, 3) == 2.5
+    # The offset is on the sensor's reading only: the true room still starts at 68.
+    assert abs(await dev.wait_for("sim_room_f", lambda v: v is not None, 3) - 68) < 3
+
+
+async def test_relay_fault_not_restored(device_keep_prefs):
+    dev = device_keep_prefs
+    await dev.select("sim_fault", "Relay unit unplugged")
+    await dev.wait_for("relay_fault", lambda v: v is True, 1)
+    await dev.restart()
+    assert await dev.wait_for("sim_fault", lambda v: v is not None, 3) == "None"
+    assert await dev.wait_for("relay_fault", lambda v: v is not None, 3) is False
