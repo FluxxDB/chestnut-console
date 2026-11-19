@@ -271,6 +271,7 @@ class ChestnutRoomView extends HTMLElement {
       fanOn: String(fanMode || '').toLowerCase() === 'on',
       sensorFault: a.on('sensor_fault') === true,
       interlock: a.on('interlock_fault'),
+      relayFault: a.on('relay_fault') === true,
       minutes: this._minutes(a),
     };
     v.air = v.heat || v.cool || v.fan || v.fanOn;
@@ -370,12 +371,14 @@ class ChestnutRoomView extends HTMLElement {
 
     let st;
     if (!v) st = { mark: '·', word: a ? 'OFFLINE' : '', color: '#b4b4b4' };
-    else st = statusFor({ mode: v.mode, action: v.action, sensorFault: v.sensorFault, interlockFault: v.interlock === true, callHeat: v.heat, callCool: v.cool, callFan: v.fan, targetText: deg(v.eff), minutesSoFar: v.minutes });
+    else st = statusFor({ mode: v.mode, action: v.action, sensorFault: v.sensorFault, interlockFault: v.interlock === true, relayFault: v.relayFault, callHeat: v.heat, callCool: v.cool, callFan: v.fan, targetText: deg(v.eff), minutesSoFar: v.minutes });
     this._text('st-mark', st.mark);
     this._text('st-word', st.word);
     if (this._el.st.style.color !== st.color) this._el.st.style.color = st.color;
     let sub = '';
     if (!v) sub = a ? 'the thermostat is not connected · field paused' : '';
+    // A relay fault cycles Port A's power, so the sensor drops with it: name the cause first.
+    else if (v.relayFault) sub = '⚠ relay unit not responding · heating and cooling paused';
     else if (v.sensorFault) sub = '⚠ sensor fault · field frozen at the last good reading';
     else if (v.interlock === true) sub = '⚠ interlock tripped · heating and cooling stopped';
     else if (room == null) sub = 'no room reading · field paused';

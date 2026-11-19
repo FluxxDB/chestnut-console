@@ -84,6 +84,7 @@ ${SIMULATION_HTML}
       <div class="kv"><span>equipment</span><span id="st-equip">${DASH}</span></div>
       <div class="kv"><span>interlock</span><span id="st-lock">${DASH}</span></div>
       <div class="kv"><span>sensor</span><span id="st-sensor">${DASH}</span></div>
+      <div class="kv"><span>relay unit</span><span id="st-relay">${DASH}</span></div>
       <div class="kv"><span>home assistant</span><span id="st-ha">${DASH}</span></div>
     </section>
   </div>

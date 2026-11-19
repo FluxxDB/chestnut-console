@@ -6,8 +6,8 @@ import re
 import pytest
 from playwright.sync_api import expect
 
-from ha_client import SIM_DEVICE
-from test_home import dash, eid, ready, tid
+from ha_client import SIM_DEVICE, wait_until
+from test_home import dash, eid, ready, tid, to_f
 from test_room import heat_forced  # noqa: F401 - fixture
 
 ALERTS = ("sensor_fault", "interlock_fault", "offline")
@@ -147,3 +147,56 @@ def test_device_dash_on_sim(page, ha):
         expect(tid(page, f"{k}-val")).to_have_text("—")
     expect(tid(page, "dark-theme")).to_be_disabled()
     expect(tid(page, "dark-theme")).to_have_text("—")
+
+
+def test_relay_unit_row_follows_fault(page, ha):
+    """Milestone 4: the relay unit stopped answering. Faked through the states API (the sim only
+    republishes relay_fault when Sim Fault changes), and put back afterwards."""
+    entity = eid(ha, "binary_sensor", "relay_fault")
+    cur = ha.get_state(entity)
+    assert cur["state"] == "off"
+    try:
+        system_tab(page)
+        expect(tid(page, "safety-relay-val")).to_have_text("✓ ok", timeout=10_000)
+        ha.post(f"/api/states/{entity}", {"state": "on", "attributes": cur["attributes"]})
+        expect(tid(page, "safety-relay-val")).to_have_text("⚠ fault", timeout=10_000)
+        expect(tid(page, "status-word")).to_have_text("PAUSED", timeout=10_000)
+    finally:
+        ha.post(f"/api/states/{entity}", {"state": cur["state"], "attributes": cur["attributes"]})
+    expect(tid(page, "safety-relay-val")).to_have_text("✓ ok", timeout=10_000)
+
+
+def test_offset_control_writes_fahrenheit(page, ha):
+    """The offset is °F with no device_class, so the metric test HA keeps it in °F, and the sensor's
+    reading moves by the same °F against the sim's true room (sim_room_f, no offset)."""
+    entity = eid(ha, "number", "temperature_offset")
+    st = ha.get_state(entity)
+    assert st["attributes"].get("unit_of_measurement") == "°F"
+    prev = float(st["state"])
+    room, true_room = eid(ha, "sensor", "room_temperature"), eid(ha, "sensor", "sim_room_f")
+
+    def gap_f():  # the sensor's reading minus the true room, in °F (noise is ±0.09 °F)
+        r, t = ha.get_state(room), ha.get_state(true_room)
+        return (to_f(r["state"], r["attributes"].get("unit_of_measurement"))
+                - to_f(t["state"], t["attributes"].get("unit_of_measurement")))
+
+    try:
+        if prev != 0:
+            ha.call("number", "set_value", {"entity_id": entity, "value": 0})
+            ha.wait_state(entity, lambda s: float(s["state"]) == 0, timeout=10)
+        system_tab(page)
+        field = tid(page, "offset")
+        expect(field).to_be_enabled(timeout=10_000)
+        expect(field).to_have_value("0")
+        expect(field).to_have_attribute("step", "0.1")
+        expect(field).to_have_attribute("min", "-5")
+        expect(field).to_have_attribute("max", "5")
+        wait_until(lambda: abs(gap_f()) < 0.3, 25, message="the reading to match the true room at offset 0")
+        field.fill("1.5")
+        field.press("Tab")
+        ha.wait_state(entity, lambda s: float(s["state"]) == 1.5, timeout=10)
+        assert ha.get_state(entity)["attributes"].get("unit_of_measurement") == "°F"
+        expect(field).to_have_value("1.5", timeout=5_000)
+        wait_until(lambda: abs(gap_f() - 1.5) < 0.3, 25, message="the reading to move by +1.5 °F")
+    finally:
+        ha.call("number", "set_value", {"entity_id": entity, "value": prev})

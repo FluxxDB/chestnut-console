@@ -16,6 +16,12 @@ test('paused_wins_over_heating', () => {
   eq(r.word, 'PAUSED'); eq(r.mark, '⊘'); eq(r.color, '#eeeeee'); eq(r.sub, '');
 });
 test('paused_finishing_while_call_on', () => eq(statusFor({ ...base, sensorFault: true, callHeat: true }).sub, 'Finishing up · stops soon'));
+// Milestone 4: a relay fault cuts heat and cool at once (the relays can't be reached), so no
+// "Finishing up" line even if a call is still reported on.
+test('paused_on_relay_fault', () => {
+  const r = statusFor({ ...base, relayFault: true, callHeat: true });
+  eq(r.word, 'PAUSED'); eq(r.mark, '⊘'); eq(r.sub, '');
+});
 test('mode_switch_mid_heat_finishing', () => eq(statusFor({ ...base, mode: 'cool', action: 'heating', callHeat: true }).sub, 'Finishing up · stops soon'));
 test('mode_switch_mid_cool_finishing', () => eq(statusFor({ ...base, mode: 'heat', action: 'cooling' }).sub, 'Finishing up · stops soon'));
 test('heating_running', () => {
@@ -365,6 +371,10 @@ test('safety_unknown_shows_dash', () => {
     eq(r.heatRun.frac, 0);
   }
   eq(at(null, 60).coolOff.val, '—');
+});
+test('event_text_relay_fault', () => {
+  assert.deepEqual(eventText('relay_fault', 'on'), { msg: 'relay unit not responding · heating and cooling paused', kind: 'fault' });
+  assert.deepEqual(eventText('relay_fault', 'off'), { msg: 'relay unit ok again', kind: '' });
 });
 test('event_text_plain_wording', () => {
   eq(eventText('call_heat', 'on').msg, 'furnace on');
