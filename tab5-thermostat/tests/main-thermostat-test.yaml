@@ -49,8 +49,6 @@ api:
         ms: int
       then:
         - lambda: id(g_test_latency_ms) = ms;
-    # Test-only: evaluate the schedule at this clock (dow 0=Mon..6=Sun, minute of day), or as
-    # if the clock weren't set (valid false).
     # Test-only: raise or clear the relay fault directly (the sim's Sim Fault option does it
     # too), so it can be on together with a sensor fault, as the hardware's Port A cut makes it.
     - action: test_set_relay_fault
@@ -58,6 +56,8 @@ api:
         active: bool
       then:
         - lambda: id(relay_fault).publish_state(active);
+    # Test-only: evaluate the schedule at this clock (dow 0=Mon..6=Sun, minute of day), or as
+    # if the clock weren't set (valid false).
     - action: test_clock
       variables:
         dow: int

@@ -587,7 +587,9 @@ interval:
           // Relay hold (milestone 4): the relay unit isn't answering, so it can't be trusted to
           // carry out a call. Starts on each fault's rising edge; ends once the fault is off and
           // the larger minimum off time has passed since that start (a compressor or furnace
-          // may have been cut mid-run), then the thermostat re-runs its action.
+          // may have been cut mid-run), then the thermostat re-runs its action. Until then its
+          // action stays HEATING or COOLING if it wanted a call (its guarded action never ran), so
+          // what's running comes from the relays (call_heat / call_cool), as call_wait_reason does.
           static bool fault_was = false;
           const bool fault = id(relay_fault).state;
           if (fault && !fault_was) {
