@@ -10,7 +10,7 @@ from ha_client import SIM_DEVICE, wait_until
 from test_home import dash, eid, ready, tid, to_f
 from test_room import heat_forced  # noqa: F401 - fixture
 
-ALERTS = ("sensor_fault", "interlock_fault", "offline")
+ALERTS = ("sensor_fault", "interlock_fault", "offline", "relay_fault")
 
 
 def system_tab(page):
@@ -94,6 +94,8 @@ def test_alert_toggle_flips_boolean(page, ha):
         ha.call("input_boolean", "turn_on", {"entity_id": entity})
         ha.wait_state(entity, lambda s: s["state"] == "on")
         system_tab(page)
+        for k in ALERTS:
+            expect(tid(page, f"alert-{k}")).to_be_visible()
         sw = tid(page, "alert-sensor_fault")
         expect(sw).to_have_attribute("aria-checked", "true", timeout=10_000)
         expect(sw).to_have_text("ON")

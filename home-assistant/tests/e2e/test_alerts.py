@@ -26,9 +26,12 @@ INTERLOCK_TEXT = ("Main Thermostat: the heat and cool relays were found on toget
                   "Clear it on the System tab once it's checked; it takes effect once both units have been "
                   "off for their minimum off time (5 min by default).")
 OFFLINE_TEXT = "Main Thermostat is offline (no contact for 10 minutes). It keeps running on its own."
+RELAY_TEXT = ("Main Thermostat: relay unit not responding. Heating and cooling paused. "
+              "Its power is being cycled, so a sensor fault may show too.")
 SENSOR_CLEARED = "Main Thermostat: temperature sensor problem cleared."
 INTERLOCK_CLEARED = "Main Thermostat: interlock fault cleared."
 OFFLINE_CLEARED = "Main Thermostat: offline cleared."
+RELAY_CLEARED = "Main Thermostat: relay unit responding again."
 HA_CONTAINER = os.environ.get("HA_CONTAINER", "chestnut-e2e-ha")
 OFFLINE_TEST_DELAY = os.environ.get("OFFLINE_TEST_DELAY", "00:00:30")
 # What the alert automations remember between an alert and its "cleared" notice.
@@ -36,11 +39,13 @@ ALERTED = [
     "input_boolean.chestnut_sensor_fault_alerted",
     "input_boolean.chestnut_interlock_fault_alerted",
     "input_boolean.chestnut_offline_alerted",
+    "input_boolean.chestnut_relay_fault_alerted",
 ]
 GATES = {
     "sensor_fault": "input_boolean.chestnut_alert_sensor_fault",
     "interlock_fault": "input_boolean.chestnut_alert_interlock_fault",
     "offline": "input_boolean.chestnut_alert_offline",
+    "relay_fault": "input_boolean.chestnut_alert_relay_fault",
 }
 
 
@@ -97,7 +102,7 @@ def fake_binary(ha):
 
 
 def test_alert_switches_default_on(ha):
-    """A fresh HA (this one): the three switches start on. First in the file, before any test
+    """A fresh HA (this one): the four switches start on. First in the file, before any test
     touches them."""
     for gate in GATES.values():
         assert state(ha, gate) == "on", gate
@@ -135,6 +140,53 @@ def test_recovery_notifies(ha, clean, fake_binary):
     fake_binary("sensor_fault", "off")
     wait_for(ha, has_message(ha, SENSOR_CLEARED), 15, "the recovery notification")
     assert SENSOR_TEXT not in notifications(ha).values(), "the alert is dismissed on recovery"
+
+
+def test_relay_fault_notifies(ha, clean):
+    """Milestone 4: the relay unit stopped answering (the sim's Relay unit unplugged)."""
+    fault = eid(ha, "select", "sim_fault")
+    try:
+        ha.call("select", "select_option", {"entity_id": fault, "option": "Relay unit unplugged"})
+        wait_for(ha, has_message(ha, RELAY_TEXT), 15, "the relay fault notification")
+    finally:
+        ha.call("select", "select_option", {"entity_id": fault, "option": "None"})
+    wait_for(ha, has_message(ha, RELAY_CLEARED), 15, "the relay cleared notification")
+
+
+def test_relay_fault_cleared(ha, clean, fake_binary):
+    fake_binary("relay_fault", "on")
+    wait_for(ha, has_message(ha, RELAY_TEXT), 15, "the relay fault notification")
+    fake_binary("relay_fault", "off")
+    wait_for(ha, has_message(ha, RELAY_CLEARED), 15, "the relay cleared notification")
+    assert RELAY_TEXT not in notifications(ha).values(), "the alert is dismissed on recovery"
+
+
+def test_entity_check_covers_relay_fault(ha):
+    watched = ha.sim_entity("binary_sensor", "relay_fault")
+    assert watched == "binary_sensor.main_thermostat_relay_fault"  # the id automations.yaml names
+    cfg = ha.get("/api/config/automation/config/chestnut_alert_entity_check")
+    assert watched in str(cfg["actions"])
+
+
+def test_relay_alert_switch_on_once_for_an_older_install(ha, clean):
+    """An HA set up before milestone 4 (the first-start set-up done, the relay switch never turned
+    on, like the dev HA): the next start turns the relay switch on once and leaves the others as
+    the user set them."""
+    first = "automation.chestnut_alert_switches_on_at_first_start"
+    done = "input_boolean.chestnut_alert_relay_fault_set_up"
+    assert state(ha, "input_boolean.chestnut_alert_switches_set_up") == "on"
+    ha.call("input_boolean", "turn_off", {"entity_id": GATES["relay_fault"]})
+    ha.call("input_boolean", "turn_off", {"entity_id": GATES["sensor_fault"]})  # the user's choice
+    ha.call("input_boolean", "turn_off", {"entity_id": done})
+    ha.call("automation", "trigger", {"entity_id": first})
+    ha.wait_state(GATES["relay_fault"], lambda s: s["state"] == "on", timeout=10)
+    assert state(ha, done) == "on"
+    assert state(ha, GATES["sensor_fault"]) == "off", "a switch the user turned off came back on"
+    # Once only: turned off by the user, it stays off at the next start.
+    ha.call("input_boolean", "turn_off", {"entity_id": GATES["relay_fault"]})
+    ha.call("automation", "trigger", {"entity_id": first})
+    time.sleep(3)
+    assert state(ha, GATES["relay_fault"]) == "off"
 
 
 def test_offline_automation_config(ha):

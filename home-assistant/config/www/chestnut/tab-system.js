@@ -43,6 +43,7 @@ const TIMERS = [
 const ALERTS = [
   ['sensor_fault', 'sensor fault'],
   ['interlock_fault', 'interlock fault'],
+  ['relay_fault', 'relay fault'],
   ['offline', 'thermostat offline 10 min'],
 ];
 const SCREEN = [

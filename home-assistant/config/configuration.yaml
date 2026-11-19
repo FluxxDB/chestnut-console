@@ -29,7 +29,7 @@ lovelace:
 # The System tab's ALERTS switches: whether each phone alert is sent (the automations read them),
 # and what the alert automations remember between an alert and its "cleared" notice.
 # The switches have no `initial`, so HA restores them: a muted alert stays muted across restarts.
-# They start on: the "alert switches on at first start" automation turns them on once.
+# They start on: the "alert switches on at first start" automation turns each on once.
 input_boolean:
   chestnut_alert_sensor_fault:
     name: "Alert: sensor fault"
@@ -40,9 +40,16 @@ input_boolean:
   chestnut_alert_offline:
     name: "Alert: thermostat offline 10 min"
     icon: mdi:lan-disconnect
-  # Set once that automation has run (restored too).
+  chestnut_alert_relay_fault:
+    name: "Alert: relay fault"
+    icon: mdi:electric-switch
+  # Set once that automation has run (restored too). The relay fault switch (milestone 4) has its
+  # own, so an HA set up before it existed still gets it turned on once.
   chestnut_alert_switches_set_up:
     name: "Chestnut: alert switches set up"
+    icon: mdi:check
+  chestnut_alert_relay_fault_set_up:
+    name: "Chestnut: relay fault alert switch set up"
     icon: mdi:check
   # Internal to the alert automations (not switches): that an alert fired and its "cleared"
   # notice is still owed. Off at every HA start, like HA's persistent notifications.
@@ -56,6 +63,10 @@ input_boolean:
     initial: false
   chestnut_offline_alerted:
     name: "Alerted: thermostat offline"
+    icon: mdi:bell-check
+    initial: false
+  chestnut_relay_fault_alerted:
+    name: "Alerted: relay fault"
     icon: mdi:bell-check
     initial: false
 
