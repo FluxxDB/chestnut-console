@@ -377,7 +377,7 @@ class ChestnutRoomView extends HTMLElement {
     if (this._el.st.style.color !== st.color) this._el.st.style.color = st.color;
     let sub = '';
     if (!v) sub = a ? 'the thermostat is not connected · field paused' : '';
-    // A relay fault cycles Port A's power, so the sensor drops with it: name the cause first.
+    // A relay fault cycles Port A's power, so the sensor can drop with it: name the cause first.
     else if (v.relayFault) sub = '⚠ relay unit not responding · heating and cooling paused';
     else if (v.sensorFault) sub = '⚠ sensor fault · field frozen at the last good reading';
     else if (v.interlock === true) sub = '⚠ interlock tripped · heating and cooling stopped';
