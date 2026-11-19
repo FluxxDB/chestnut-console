@@ -23,16 +23,16 @@ test('paused_on_relay_fault', () => {
   eq(r.word, 'PAUSED'); eq(r.mark, '⊘'); eq(r.sub, '');
 });
 test('mode_switch_mid_heat_finishing', () => eq(statusFor({ ...base, mode: 'cool', action: 'heating', callHeat: true }).sub, 'Finishing up · stops soon'));
-test('mode_switch_mid_cool_finishing', () => eq(statusFor({ ...base, mode: 'heat', action: 'cooling' }).sub, 'Finishing up · stops soon'));
+test('mode_switch_mid_cool_finishing', () => eq(statusFor({ ...base, mode: 'heat', action: 'cooling', callCool: true }).sub, 'Finishing up · stops soon'));
 test('heating_running', () => {
-  const r = statusFor({ ...base, action: 'heating', minutesSoFar: null });
+  const r = statusFor({ ...base, action: 'heating', callHeat: true, minutesSoFar: null });
   eq(r.word, 'HEATING'); eq(r.mark, '▲'); eq(r.color, '#da5c2c'); eq(r.sub, 'to 72° · just started');
-  eq(statusFor({ ...base, action: 'heating', minutesSoFar: 18 }).sub, 'to 72° · 18 min so far');
-  eq(statusFor({ ...base, action: 'heating', minutesSoFar: 65 }).sub, 'to 72° · 1 h 5 min so far');
-  eq(statusFor({ ...base, action: 'heating', minutesSoFar: 0 }).sub, 'to 72° · just started');
+  eq(statusFor({ ...base, action: 'heating', callHeat: true, minutesSoFar: 18 }).sub, 'to 72° · 18 min so far');
+  eq(statusFor({ ...base, action: 'heating', callHeat: true, minutesSoFar: 65 }).sub, 'to 72° · 1 h 5 min so far');
+  eq(statusFor({ ...base, action: 'heating', callHeat: true, minutesSoFar: 0 }).sub, 'to 72° · just started');
 });
 test('cooling_running', () => {
-  const r = statusFor({ ...base, mode: 'heat_cool', action: 'cooling', minutesSoFar: 3 });
+  const r = statusFor({ ...base, mode: 'heat_cool', action: 'cooling', callCool: true, callFan: true, minutesSoFar: 3 });
   eq(r.word, 'COOLING'); eq(r.mark, '▼'); eq(r.color, '#2a7fff'); eq(r.sub, 'to 72° · 3 min so far');
 });
 test('off_and_fan', () => {
@@ -371,6 +371,14 @@ test('safety_unknown_shows_dash', () => {
     eq(r.heatRun.frac, 0);
   }
   eq(at(null, 60).coolOff.val, '—');
+});
+// Milestone 4 (M2): after a relay fault clears, the logic holds W and Y off for the minimum off
+// time while the climate still reports heating or cooling. Nothing runs, so not HEATING/COOLING.
+test('held_action_without_relay_is_idle', () => {
+  let r = statusFor({ ...base, action: 'heating', callHeat: false, waitReason: 'Short-cycle protection' });
+  eq(r.word, 'IDLE'); eq(r.sub, 'Waiting · short-cycle protection');
+  r = statusFor({ ...base, mode: 'cool', action: 'cooling', callCool: false, waitReason: 'Short-cycle protection' });
+  eq(r.word, 'IDLE'); eq(r.sub, 'Waiting · short-cycle protection');
 });
 test('event_text_relay_fault', () => {
   assert.deepEqual(eventText('relay_fault', 'on'), { msg: 'relay unit not responding · heating and cooling paused', kind: 'fault' });

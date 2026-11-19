@@ -17,11 +17,19 @@ esphome:
   on_boot:
     # After the IO expander and its switches (which turn Port A off), before the sensors set up:
     # power Port A and give the units a moment, so the ENV III answers at its own setup.
+    # Then send the relays' states at once (all off: the switches boot ALWAYS_OFF). The off time
+    # above is only milliseconds; on the bench that drops the unit's relays, but a unit that rode
+    # through it would otherwise keep them until the first 1 s check after setup ends. No answer
+    # is fine (a unit still starting has its relays off anyway).
     - priority: 700
       then:
         - lambda: |-
             id(external_5v_power).turn_on();
             delay(300);  // NOLINT: blocking on purpose, during setup
+            chestnut_hw::write_reg(id(port_a), chestnut_hw::REG_MODE, chestnut_hw::MODE_LEDS_FOLLOW);
+            chestnut_hw::write_reg(id(port_a), chestnut_hw::REG_RELAYS,
+                                   chestnut_hw::relay_byte(id(relay_heat).state, id(relay_cool).state,
+                                                           id(relay_fan).state, id(relay_ob).state));
             chestnut_hw::relay_link().start(millis());
             id(relay_fault).publish_state(false);
 

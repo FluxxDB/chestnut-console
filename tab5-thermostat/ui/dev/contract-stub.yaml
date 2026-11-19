@@ -192,6 +192,7 @@ select:
       - Manual target
       - Relay fault
       - Relay and sensor fault
+      - Relay hold
     initial_option: Heating
     on_value:
       - script.execute:
@@ -274,6 +275,7 @@ script:
           else if (name == "Sensor fault mid-run") { room = NAN; sfault = true; wait = "Sensor fault"; heat = true; action = climate::CLIMATE_ACTION_HEATING; }
           else if (name == "Relay fault") { rfault = true; wait = "Relay fault"; }
           else if (name == "Relay and sensor fault") { room = NAN; rfault = true; sfault = true; wait = "Relay fault"; }
+          else if (name == "Relay hold") { action = climate::CLIMATE_ACTION_HEATING; wait = "Short-cycle protection"; }
           else if (name == "Eco hold in Auto") { mode = climate::CLIMATE_MODE_HEAT_COOL; level = "Eco"; room = 70; low = 67; high = 77; target = 72; hold = true; status = "Holding Eco until 10:30 pm"; }
           else if (name == "Temperature hold in Auto") { mode = climate::CLIMATE_MODE_HEAT_COOL; level = "Eco"; room = 70; low = 69; high = 71; target = 70; hold = true; status = "Holding 70° until 10:30 pm"; }
           else if (name == "Manual target") { sched_on = false; period = ""; next = ""; status = "Schedule off"; target = 70; manual = true; }

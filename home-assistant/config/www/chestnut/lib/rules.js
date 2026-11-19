@@ -22,11 +22,13 @@ export function statusFor(s) {
     const finishing = !s.relayFault && (s.callHeat || s.callCool);
     return { word: 'PAUSED', mark: '⊘', color: PAUSED, sub: finishing ? FINISHING : '' };
   }
-  if (s.action === 'heating') {
+  // Heating / cooling only while its relay is on: after a relay fault clears, the logic holds W and Y
+  // off for the minimum off time while the climate still reports the action (milestone 4).
+  if (s.action === 'heating' && s.callHeat) {
     const ok = s.mode === 'heat' || s.mode === 'heat_cool';
     return { word: 'HEATING', mark: '▲', color: HEAT, sub: ok ? running() : FINISHING };
   }
-  if (s.action === 'cooling') {
+  if (s.action === 'cooling' && s.callCool) {
     const ok = s.mode === 'cool' || s.mode === 'heat_cool';
     return { word: 'COOLING', mark: '▼', color: COOL, sub: ok ? running() : FINISHING };
   }
