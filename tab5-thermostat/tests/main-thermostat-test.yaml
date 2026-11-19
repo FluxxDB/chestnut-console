@@ -51,6 +51,13 @@ api:
         - lambda: id(g_test_latency_ms) = ms;
     # Test-only: evaluate the schedule at this clock (dow 0=Mon..6=Sun, minute of day), or as
     # if the clock weren't set (valid false).
+    # Test-only: raise or clear the relay fault directly (the sim's Sim Fault option does it
+    # too), so it can be on together with a sensor fault, as the hardware's Port A cut makes it.
+    - action: test_set_relay_fault
+      variables:
+        active: bool
+      then:
+        - lambda: id(relay_fault).publish_state(active);
     - action: test_clock
       variables:
         dow: int
@@ -117,6 +124,13 @@ sensor:
     name: "Test Latch Clear Ms"
     accuracy_decimals: 0
     update_interval: never
+  # The moment the logic saw the latest relay fault (g_relay_fault_ms), so the hold is timed
+  # from the logic's own clock.
+  - platform: template
+    id: test_relay_fault_ms
+    name: "Test Relay Fault Ms"
+    accuracy_decimals: 0
+    update_interval: never
 
 # The climate-call half of test_set_latency (on_control runs before the thermostat applies a
 # call, so the timers that call starts begin `ms` after the dispatch did).
@@ -159,6 +173,14 @@ interval:
           if (t != 0 && t != seen) {
             seen = t;
             id(test_trip_ms).publish_state(t - id(g_boot_ms));
+          }
+      # The same for the relay hold's fault time.
+      - lambda: |-
+          static uint32_t seen = 0;
+          const uint32_t t = id(g_relay_fault_ms);
+          if (t != 0 && t != seen) {
+            seen = t;
+            id(test_relay_fault_ms).publish_state(t - id(g_boot_ms));
           }
 
 time:
