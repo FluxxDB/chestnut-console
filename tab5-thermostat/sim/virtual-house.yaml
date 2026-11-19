@@ -1,7 +1,8 @@
 # Virtual house (milestone 2): stands in for the ENV III (SHT30) sensor and the Unit 4-Relay
-# until the bench parts arrive. Provides the package contract ids room_temperature (°C), room_humidity
-# and relay_heat / relay_cool / relay_fan / relay_ob from the physics in house_model.h, plus
-# knobs to play with (outdoor, weather, house) and a break-it-on-purpose fault select.
+# (hardware/bench-io.yaml on real hardware). Provides the package contract ids room_temperature
+# (°C), room_humidity and relay_heat / relay_cool / relay_fan / relay_ob from the physics in
+# house_model.h, plus relay_fault and temperature_offset (milestone 4), knobs to play with
+# (outdoor, weather, house) and a break-it-on-purpose fault select.
 # Also runs on the Tab5, so no test-only hooks here (those live in tests/main-thermostat-test.yaml).
 
 substitutions:
@@ -149,6 +150,22 @@ number:
     initial_value: 45
     optimistic: true
     restore_value: true
+  # Contract (milestone 4): a correction for a sensor that reads steadily off, set from HA, added
+  # to every reading as on the real sensor (the true room, sim_room_f, has none). °F with no
+  # device_class: HA in metric would convert a temperature-class number as an absolute
+  # temperature.
+  - platform: template
+    id: temperature_offset
+    name: "Temperature Offset"
+    unit_of_measurement: "°F"
+    entity_category: config
+    mode: box
+    min_value: -5.0
+    max_value: 5.0
+    step: 0.1
+    initial_value: 0
+    optimistic: true
+    restore_value: true
 
 select:
   # Fixed uses sim_outdoor_f; the day curves follow the local time of day (house_model.h).
@@ -162,14 +179,29 @@ select:
   # Break the temperature sensor on purpose. Unplugged: nothing is published (temperature or
   # humidity). Frozen: the last temperature repeats with no noise. Out of range: 60.0 °C.
   # Spike: one reading 10 °C high, then back to None.
+  # Or the relay unit: Relay unit unplugged turns relay_fault on, and the sensor keeps reading
+  # (the real hardware also cuts Port A's power after a while, which drops the sensor too; the
+  # sim doesn't copy that).
   # Not restored: it always boots as None, so a fault left on never survives a reboot.
   - platform: template
     id: sim_fault
     name: "Sim Fault"
-    options: ["None", "Unplugged", "Frozen", "Out of range", "Spike"]
+    options: ["None", "Unplugged", "Frozen", "Out of range", "Spike", "Relay unit unplugged"]
     initial_option: "None"
     optimistic: true
     restore_value: false
+    on_value:
+      - lambda: id(relay_fault).publish_state(x == "Relay unit unplugged");
+
+# Contract (milestone 4): the relay unit isn't answering. Here it follows sim_fault; with no
+# lambda, so the test entry can also raise it while a sensor fault is on (as the hardware's
+# Port A cut does).
+binary_sensor:
+  - platform: template
+    id: relay_fault
+    name: "Relay Fault"
+    device_class: problem
+    publish_initial_state: true
 
 interval:
   # Physics: one step per second, advancing 1 × sim_speed seconds of house time.
@@ -212,17 +244,19 @@ interval:
           const auto fault = id(sim_fault).current_option();
           if (fault == "Unplugged") return;
           const float noise_c = (random_float() * 2.0f - 1.0f) * 0.05f;
-          const float true_c = (float) ((id(g_sim_room_f) - 32.0) * 5.0 / 9.0);
+          // What the sensor reads before any fault: the true room plus the offset.
+          const float base_c = (float) ((id(g_sim_room_f) - 32.0) * 5.0 / 9.0) +
+                               id(temperature_offset).state * 5.0f / 9.0f;
           float c;
           if (fault == "Frozen") {
-            c = std::isnan(id(g_sim_last_c)) ? true_c : id(g_sim_last_c);
+            c = std::isnan(id(g_sim_last_c)) ? base_c : id(g_sim_last_c);
           } else if (fault == "Out of range") {
             c = 60.0f;
           } else if (fault == "Spike") {
-            c = true_c + noise_c + 10.0f;
+            c = base_c + noise_c + 10.0f;
             id(sim_fault).make_call().set_option("None").perform();
           } else {
-            c = true_c + noise_c;
+            c = base_c + noise_c;
           }
           id(g_sim_last_c) = c;
           id(room_temperature).publish_state(c);

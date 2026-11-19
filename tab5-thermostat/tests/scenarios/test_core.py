@@ -139,7 +139,8 @@ async def test_fan_on_calls_g_alone_in_off(device):
 async def test_ob_never_on(device):
     ids = device.object_ids()
     # The relays (relay_ob included) are internal: nothing outside the logic can switch them.
-    assert not [i for i in ids if i.startswith("relay")], ids
+    # relay_fault is the relay unit's fault sensor (a contract id, milestone 4), not a relay.
+    assert not [i for i in ids if i.startswith("relay") and i != "relay_fault"], ids
     # O/B has no call sensor: the call sensors are exactly W, Y and G (call_wait_reason is text).
     calls = [i for i in ids if i.startswith("call_") and i != "call_wait_reason"]
     assert calls == ["call_cool", "call_fan", "call_heat"]
