@@ -2,6 +2,8 @@
 # the package contract (room_temperature, room_humidity, relay_heat / relay_cool / relay_fan from
 # the sim or hardware package), plus the safety timer settings and read-only call sensors.
 # This is the only package that turns a relay on. relay_ob (O/B) is never touched.
+# relay_fault (the relay unit isn't answering; milestone 4) pauses heating and cooling at once:
+# the relay hold below, like the interlock latch but ending by itself.
 # The thermostat reads a sanity-checked temperature (checked_temperature_c), never
 # room_temperature directly; sensor_fault, call_wait_reason and action_elapsed report on it.
 # Its low / high setpoints are never set directly: apply_setpoints derives them from the mode,
@@ -86,6 +88,17 @@ globals:
     initial_value: "false"
   # millis() of the latest trip; the Clear button waits the minimum off time from here.
   - id: g_interlock_trip_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  # Relay hold (milestone 4): on while the relay unit's fault (relay_fault) is on, and after it
+  # clears until the larger minimum off time has passed since the fault began (g_relay_fault_ms,
+  # the latest start). Not restored: relays boot off, and startup_delay covers the off time.
+  - id: g_relay_hold
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  - id: g_relay_fault_ms
     type: uint32_t
     restore_value: false
     initial_value: "0"
@@ -420,13 +433,13 @@ climate:
 
     # Equipment calls (spec): heating W only, cooling Y + G, Fan On G in any mode, O/B never.
     # Heat and cool turn the opposite relay off before turning theirs on (interlock layer 2).
-    # While the interlock is latched the relays are not turned on (layer 3 guards the actions
-    # as well as cutting the relays); turning them off is always allowed.
+    # While the interlock is latched, or the relay hold is on, the relays are not turned on (the
+    # 100 ms interval also cuts them); turning them off is always allowed.
     heat_action:
       - switch.turn_off: relay_cool
       - if:
           condition:
-            lambda: return !id(g_interlock_latched);
+            lambda: return !id(g_interlock_latched) && !id(g_relay_hold);
           then:
             - switch.turn_on: relay_heat
             - if:
@@ -440,7 +453,7 @@ climate:
       - switch.turn_off: relay_heat
       - if:
           condition:
-            lambda: return !id(g_interlock_latched);
+            lambda: return !id(g_interlock_latched) && !id(g_relay_hold);
           then:
             - switch.turn_on: relay_cool
             - switch.turn_on: relay_fan  # the air handler needs G for the blower
@@ -571,12 +584,37 @@ interval:
             id(g_interlock_latched) = true;
             ESP_LOGE("interlock", "W and Y both on: both relays cut, interlock fault latched");
           }
-          if (id(g_interlock_latched)) {
+          // Relay hold (milestone 4): the relay unit isn't answering, so it can't be trusted to
+          // carry out a call. Starts on each fault's rising edge; ends once the fault is off and
+          // the larger minimum off time has passed since that start (a compressor or furnace
+          // may have been cut mid-run), then the thermostat re-runs its action.
+          static bool fault_was = false;
+          const bool fault = id(relay_fault).state;
+          if (fault && !fault_was) {
+            id(g_relay_fault_ms) = millis();
+            id(g_relay_hold) = true;
+            ESP_LOGW("relay", "relay unit fault: heating and cooling paused");
+          }
+          fault_was = fault;
+          bool resume = false;
+          if (id(g_relay_hold) && !fault) {
+            const uint32_t wait_ms =
+                (uint32_t) lroundf(fmaxf(id(heat_min_off).state, id(cool_min_off).state) *
+                                   ${timer_unit_s}) * 1000u;
+            if ((uint32_t) (millis() - id(g_relay_fault_ms)) >= wait_ms) {
+              id(g_relay_hold) = false;
+              resume = true;
+              ESP_LOGI("relay", "relay hold ended");
+            }
+          }
+          // Interlock latch or relay hold: W and Y off on every tick, G off unless fan mode On.
+          if (id(g_interlock_latched) || id(g_relay_hold)) {
             if (id(relay_heat).state) id(relay_heat).turn_off();
             if (id(relay_cool).state) id(relay_cool).turn_off();
             if (id(relay_fan).state && id(main_thermostat).fan_mode != climate::CLIMATE_FAN_ON)
               id(relay_fan).turn_off();
           }
+          if (resume && !id(g_interlock_latched)) id(resume_after_cut).execute();
 
   # Sensor sanity tick: stale and frozen faults (no reading needed) and recovery. The thermostat
   # gets a new checked value only when the verdict changes; readings publish their own.
@@ -639,6 +677,8 @@ interval:
           const char *reason = "";
           if (id(g_interlock_latched)) {
             reason = "Interlock fault";
+          } else if (id(relay_fault).state) {
+            reason = "Relay fault";
           } else if (sanity != nullptr && sanity->fault()) {
             reason = "Sensor fault";
           } else if (waiting && !started_up) {
@@ -857,12 +897,9 @@ script:
 
   # Clear button. Never changes the climate mode. The latch (and interlock_fault) stays on until
   # the larger of the two minimum off times has passed since the trip: either relay may have been
-  # the forced one, and a compressor must not restart early. Then the latch drops. The
-  # thermostat still believes it is HEATING or COOLING if it wanted a call while latched (its
-  # actions were guarded, or the watchdog cut the relays behind its back) and would never run its
-  # action again, because refresh() does nothing when the computed action is unchanged. So reset
-  # that belief to IDLE and refresh: it re-evaluates and runs the right action (or, if a minimum
-  # run timer is still counting, when that timer ends).
+  # the forced one, and a compressor must not restart early. Then the latch drops and the
+  # thermostat re-runs its action (resume_after_cut), unless the relay hold is still on: its own
+  # end does that.
   - id: clear_interlock
     mode: single
     then:
@@ -877,14 +914,28 @@ script:
                         (uint32_t) lroundf(fmaxf(id(heat_min_off).state, id(cool_min_off).state) *
                                            ${timer_unit_s}) * 1000u;
                     return (uint32_t) (millis() - id(g_interlock_trip_ms)) >= wait_ms;
-            - lambda: |-
-                id(g_interlock_latched) = false;
-                auto *t = id(main_thermostat);
-                if ((t->action == climate::CLIMATE_ACTION_HEATING && !id(relay_heat).state) ||
-                    (t->action == climate::CLIMATE_ACTION_COOLING && !id(relay_cool).state)) {
-                  t->action = climate::CLIMATE_ACTION_IDLE;
-                  t->refresh();
-                }
+            - lambda: id(g_interlock_latched) = false;
+            - if:
+                condition:
+                  lambda: return !id(g_relay_hold);  # else the hold's end resumes
+                then:
+                  - script.execute: resume_after_cut
+
+  # After the relays were cut behind the thermostat's back (the interlock latch or the relay
+  # hold): it still believes it is HEATING or COOLING if it wanted a call meanwhile, and would
+  # never run its action again, because refresh() does nothing when the computed action is
+  # unchanged. So reset that belief to IDLE and refresh: it re-evaluates and runs the right
+  # action (or, if a minimum run timer is still counting, when that timer ends).
+  - id: resume_after_cut
+    mode: single
+    then:
+      - lambda: |-
+          auto *t = id(main_thermostat);
+          if ((t->action == climate::CLIMATE_ACTION_HEATING && !id(relay_heat).state) ||
+              (t->action == climate::CLIMATE_ACTION_COOLING && !id(relay_cool).state)) {
+            t->action = climate::CLIMATE_ACTION_IDLE;
+            t->refresh();
+          }
 
 button:
   - platform: template
