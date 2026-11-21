@@ -10,6 +10,7 @@ display:
 
 touchscreen:
   - platform: st7123
+    i2c_id: bsp_bus
     id: touch
     interrupt_pin: GPIO23
     # No reset_pin on purpose: the LCD reset also enables the touch engine, and toggling

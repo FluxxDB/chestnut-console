@@ -58,6 +58,7 @@ esp_ldo:
 
 pi4ioe5v6408:
   - id: pi4ioe1
+    i2c_id: bsp_bus
     address: 0x43
     # 0: O - wifi_antenna_int_ext
     # 1: O - speaker_enable
@@ -68,6 +69,7 @@ pi4ioe5v6408:
     # 6: O - camera reset
     # 7: I - headphone detect
   - id: pi4ioe2
+    i2c_id: bsp_bus
     address: 0x44
     # 0: O - wifi_power
     # 1: NC
@@ -149,10 +151,15 @@ switch:
     pin:
       pi4ioe5v6408: pi4ioe1
       number: 0
+  # Port A's 5 V (the bench sensor and relays, milestone 4). Off at every boot, never restored: only
+  # hardware/bench-io.yaml turns it on, so a build without it (the virtual house) can't leave the
+  # relay unit holding a relay. The unit keeps its relays while Port A has power, even through a
+  # Tab5 restart (checked on the bench), so this off is what drops them.
   - platform: gpio
     id: external_5v_power
     name: "External 5V Power"
     internal: true
+    restore_mode: ALWAYS_OFF
     pin:
       pi4ioe5v6408: pi4ioe1
       number: 2
@@ -178,6 +185,7 @@ binary_sensor:
 
 sensor:
   - platform: ina226
+    i2c_id: bsp_bus
     address: 0x41
     adc_averaging: 16
     max_current: 8.192A

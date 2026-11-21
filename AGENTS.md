@@ -34,6 +34,7 @@ Dang is turning an **M5Stack Tab5** (ESP32-P4 + ESP32-C6 Wi-Fi, 5" 720×1280 tou
 ```
 docker-compose.yml           HA 2026.10.4 + ESPHome 2026.10.1 (host networking). `up -d` starts HA only; `esphome`, `esphome-host` and `preview` run when named
 tools/preview/               desktop preview rig + console tests (test_all.sh, test_device.sh)
+tools/bench/                 bench rig (milestone 4): relay-link unit test (test_unit.sh), bench test on the Tab5 (test_bench.sh)
 home-assistant/config/       HA config (runtime state gitignored)
   www/chestnut/              the Chestnut dashboard: custom element (one JS file per tab), self-hosted fonts
   dashboards/chestnut.yaml   the dashboard (replaces Overview); themes/axiom.yaml = the theme
@@ -46,6 +47,7 @@ tab5-thermostat/             ESPHome config dir (mounted at /config in the espho
   sim/                       the virtual house: virtual-house.yaml + house_model.h (contract ids, knobs, faults)
   tests/                     run.sh (unit | build | scenarios | all, Docker only), test entry, unit + scenario tests
   hardware/                  board support; display-*.yaml = one per Tab5 screen revision
+    bench-io.yaml            the real ENV III + Unit 4-Relay on Port A (milestone 4); relay_unit.h (relay byte, link state machine) + bench_io.h (I2C glue)
   ui/                        the console: fonts, theme, console (layout), console-logic (bindings)
     dev/contract-stub.yaml   DEV ONLY stand-in for milestone 2 (same entity ids, fake values); the preview's fixture
   preview/                   desktop preview entry point (host + SDL); shots/ is gitignored
@@ -60,6 +62,7 @@ docker compose run --rm esphome compile tab5-thermostat.yaml
 tab5-thermostat/tests/run.sh all     # milestone 2 tests
 home-assistant/tests/run.sh all      # HA dashboard tests (~7 min; needs ports 8124 and 6053 free)
 tools/preview/test_all.sh            # wall-screen tests in the desktop preview (needs secrets.yaml)
+tools/bench/test_unit.sh             # relay unit link (state machine) unit tests: seconds
 ```
 
 ## Hardware facts that bite
@@ -79,15 +82,17 @@ tools/preview/test_all.sh            # wall-screen tests in the desktop preview 
 4. **Bench rig** (the sensor, relays and hub arrived 2026-11-18; brainstorm first): real ENV III + Unit 4-Relay + 24 VAC lamps, then 24 VAC → DC power. Until then the Tab5 runs the logic against the virtual house.
 5. **House:** site survey (the middle-floor wiring 2026-10-30 and the furnace's outside 2026-11-18 are done; next the furnace's terminals and the cable's conductor count, which decide power, and the top floor), then install.
 
-### Package contract (milestones 2–4)
+### Package contract (milestones 2–5)
 
 Hardware and simulation packages provide the same ids, so the logic package doesn't care which one is loaded:
 
 | id | type | provided by |
 |---|---|---|
-| `room_temperature` | sensor (°C) | `sim` package now, ENV III (SHT30) later |
-| `room_humidity` | sensor (%) | `sim` package now, ENV III (SHT30) later |
-| `relay_heat` (W), `relay_cool` (Y), `relay_fan` (G), `relay_ob` (O/B; unused, the middle floor isn't a heat pump) | switch, `restore_mode: ALWAYS_OFF`, `internal: true`; only the logic package drives them | `sim` template switches now, Unit 4-Relay later |
+| `room_temperature` | sensor (°C) | `sim` package, or the ENV III (SHT30) via `hardware/bench-io.yaml` |
+| `room_humidity` | sensor (%) | `sim` package, or the ENV III (SHT30) via `hardware/bench-io.yaml` |
+| `relay_heat` (W), `relay_cool` (Y), `relay_fan` (G), `relay_ob` (O/B; unused, the middle floor isn't a heat pump) | switch, `restore_mode: ALWAYS_OFF`, `internal: true`; only the logic package drives them | `sim` template switches, or the Unit 4-Relay via `hardware/bench-io.yaml` |
+| `relay_fault` | binary sensor (problem), "Relay Fault" | `bench-io.yaml`: on while the relay unit isn't answering; `sim`: Sim Fault "Relay unit unplugged". The logic pauses heating and cooling at once |
+| `temperature_offset` | number, °F, −5..5 step 0.1, restored, no `device_class` | whichever package provides `room_temperature`, added to the reading before the logic's sanity checks |
 | `main_thermostat` | climate (thermostat) | logic package |
 
 ESPHome climate works in °C internally. Show °F in the UI and HA (Dang is in the US).

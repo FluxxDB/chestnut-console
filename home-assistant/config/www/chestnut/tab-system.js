@@ -1,10 +1,13 @@
-// The System tab: Safety (minimum-timer bars, interlock, sensor, editable timers, Clear
-// interlock fault), Alerts (three HA input_boolean helpers), Wall screen, Device and the Event log.
+// The System tab: Safety (minimum-timer bars, interlock, sensor, relay unit, editable timers, Clear
+// interlock fault), Alerts (HA input_boolean helpers), Wall screen, Device (with the temperature
+// offset) and the Event log.
 // Mockup Main.dc.html, System tab; spec "System tab".
 // - Bars: rules.safetyRows from the device's action_elapsed (published every 30 s, interpolated
 //   here) and the relays (call_heat / call_cool); the startup delay and changeover lockout show
 //   as call_wait_reason text.
 // - Timers: number.set_value clamped to each entity's min/max (minutes).
+// - Temperature offset: a number in °F with no device_class (so HA never converts it), written as
+//   typed (clamped and rounded to the entity's step) like the timers.
 // - Alerts: input_boolean.chestnut_alert_* are HA helpers (configuration.yaml), not device
 //   entities, so they are read from hass.states and toggled directly.
 // - Wall screen, IP, uptime, Wi-Fi signal and Clock Valid exist only on the Tab5; on the host sim
@@ -17,7 +20,7 @@ const DASH = '—';
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const DEAD = new Set(['unavailable', 'unknown', '']);
 const PENDING_GIVE_UP_MS = 5000;
-const LOG_IDS = ['call_heat', 'call_cool', 'sensor_fault', 'interlock_fault', 'schedule_hold', 'schedule_period'];
+const LOG_IDS = ['call_heat', 'call_cool', 'sensor_fault', 'interlock_fault', 'relay_fault', 'schedule_hold', 'schedule_period'];
 const LOG_HOURS = 24;
 const LOG_MAX = 40;
 const LOG_AFTER_CHANGE_MS = 2500; // the recorder writes in batches (commit interval)
@@ -40,6 +43,7 @@ const TIMERS = [
 const ALERTS = [
   ['sensor_fault', 'sensor fault'],
   ['interlock_fault', 'interlock fault'],
+  ['relay_fault', 'relay fault'],
   ['offline', 'thermostat offline 10 min'],
 ];
 const SCREEN = [
@@ -77,6 +81,7 @@ export const SYSTEM_HTML = `
         <div class="track"><div data-testid="safety-${id}-bar"></div></div></div>`).join('')}
       ${kv('safety-interlock-val', 'interlock')}
       ${kv('safety-sensor-val', 'temperature sensor')}
+      ${kv('safety-relay-val', 'relay unit')}
       ${kv('safety-wait-val', 'waiting')}
       <div class="sub-block">
         <span class="label">TIMERS · MINUTES</span>
@@ -101,6 +106,7 @@ export const SYSTEM_HTML = `
     <section class="card" aria-label="Device">
       <span class="label">DEVICE</span>
       ${DEVICE.map(([k, label]) => kv(`dev-${k}`, label)).join('')}
+      <label class="kv ctl-row"><span>temperature offset</span><span><input type="number" class="num" data-testid="offset" step="0.1" placeholder="${DASH}" aria-label="temperature offset (°F)" disabled> °F</span></label>
     </section>
     <section class="card log-card" aria-label="Event log">
       <span class="label">EVENT LOG</span>
@@ -131,6 +137,9 @@ export class SystemTab {
       c.el.addEventListener('change', () => this.writeTimer(c));
       return c;
     });
+    // The temperature offset writes and settles like a timer (pending until the device echoes it).
+    this.offset = { objId: 'temperature_offset', el: this.q('offset'), pending: null, until: 0 };
+    this.offset.el.addEventListener('change', () => this.writeTimer(this.offset));
     this.clear = this.q('clear-interlock');
     this.clearNote = this.q('clear-note');
     // The logic drops the latch only once the longer min off since the trip has passed (an early
@@ -193,6 +202,7 @@ export class SystemTab {
     let w = Math.round(v / step) * step;
     if (typeof lo === 'number') w = Math.max(lo, w);
     if (typeof hi === 'number') w = Math.min(hi, w);
+    w = Number(w.toFixed(6)); // 15 * 0.1 is 1.5000000000000002
     c.pending = w;
     c.until = Date.now() + PENDING_GIVE_UP_MS;
     c.el.value = String(w);
@@ -205,6 +215,7 @@ export class SystemTab {
     const online = !!a && a.online();
     this.renderSafety(online ? a : null, now);
     this.renderTimers(a, now);
+    this.renderOffset(a, now);
     this.renderAlerts();
     this.renderScreen(a, now);
     this.renderDevice(a, online, now);
@@ -239,8 +250,10 @@ export class SystemTab {
     }
     const lock = a ? a.on('interlock_fault') : null;
     const sensor = a ? a.on('sensor_fault') : null;
+    const relay = a ? a.on('relay_fault') : null;
     this.text(this.q('safety-interlock-val'), lock == null ? DASH : lock ? '⚠ tripped' : '✓ armed');
     this.text(this.q('safety-sensor-val'), sensor == null ? DASH : sensor ? '⚠ fault' : '✓ ok');
+    this.text(this.q('safety-relay-val'), relay == null ? DASH : relay ? '⚠ fault' : '✓ ok');
     const wait = a ? a.str('call_wait_reason') : null;
     this.text(this.q('safety-wait-val'), wait == null || DEAD.has(wait) ? (a ? 'none' : DASH) : wait);
     if (lock !== true || now > this.clearUntil) this.clearUntil = 0;
@@ -265,6 +278,20 @@ export class SystemTab {
       const shown = v == null ? '' : String(v);
       if (focused !== c.el && c.el.value !== shown) c.el.value = shown;
     }
+  }
+
+  renderOffset(a, now) {
+    const c = this.offset;
+    const cur = a ? a.num(c.objId) : null;
+    for (const k of ['min', 'max', 'step']) {
+      const v = a ? a.attr(c.objId, k) : null;
+      if (v != null && c.el.getAttribute(k) !== String(v)) c.el.setAttribute(k, String(v));
+    }
+    if (c.pending != null && (cur === c.pending || now > c.until)) c.pending = null;
+    c.el.disabled = cur == null;
+    const v = c.pending ?? cur;
+    const shown = v == null ? '' : String(v);
+    if (this.root.activeElement !== c.el && c.el.value !== shown) c.el.value = shown;
   }
 
   renderAlerts() {

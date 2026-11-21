@@ -244,6 +244,8 @@ script:
           const bool fan = id(call_fan).state;
           const bool sfault = id(sensor_fault).state;
           const bool ifault = id(interlock_fault).state;
+          const bool rfault = id(relay_fault).state;  // milestone 4: the relay unit stopped answering
+          const bool anyfault = sfault || ifault || rfault;
           const bool eco = std::string(id(comfort_level).current_option()) == "Eco";
           const bool hold = id(schedule_hold).state;
           // Schedule off and a − / + number in force (milestone 2): no level is in force.
@@ -308,15 +310,18 @@ script:
           // Switched to another mode mid-call: the furnace or AC finishes its minimum run first
           // (milestone 2, up to a few minutes), so don't say it's still heading for the target.
           const std::string finishing = "Finishing up · stops soon";
-          if (sfault || ifault) {
+          // Heating / cooling only while its relay is on: after a relay fault clears, the logic holds
+          // W and Y off for the minimum off time while the climate still reports the action (M4).
+          if (anyfault) {
             word = "Paused";
             // Milestone 2 lets a running call finish its minimum run after a sensor fault (an
             // interlock fault cuts both at once): say so, so it doesn't look like a stuck relay.
-            if (id(call_heat).state || id(call_cool).state) sub = finishing;
-          } else if (action == climate::CLIMATE_ACTION_HEATING) {
+            // A relay fault cuts both at once too (milestone 4), and the relays can't be reached.
+            if (!rfault && (id(call_heat).state || id(call_cool).state)) sub = finishing;
+          } else if (action == climate::CLIMATE_ACTION_HEATING && id(call_heat).state) {
             word = "Heating"; color = 0xFF7B1B;
             sub = mode == climate::CLIMATE_MODE_HEAT || mode == climate::CLIMATE_MODE_HEAT_COOL ? running(action_target()) : finishing;
-          } else if (action == climate::CLIMATE_ACTION_COOLING) {
+          } else if (action == climate::CLIMATE_ACTION_COOLING && id(call_cool).state) {
             word = "Cooling"; color = 0x4098FF;
             sub = mode == climate::CLIMATE_MODE_COOL || mode == climate::CLIMATE_MODE_HEAT_COOL ? running(action_target()) : finishing;
           } else if (off) {
@@ -341,9 +346,10 @@ script:
             lv_obj_set_style_bg_color(id(obj_marker), lv_color_hex(color), LV_PART_MAIN);
 
           // Fault banner replaces the history line.
-          show(id(obj_banner), sfault || ifault);
-          show(id(obj_hist), !(sfault || ifault));
+          show(id(obj_banner), anyfault);
+          show(id(obj_hist), !anyfault);
           if (ifault) set_text(id(lbl_banner), "Heating and cooling were both requested, so the system stopped. Clear it in Home Assistant once it's checked.");
+          else if (rfault) set_text(id(lbl_banner), "Relay unit not responding. Heating and cooling are paused.");
           else if (sfault) set_text(id(lbl_banner), "Temperature sensor problem. Heating and cooling are paused.");
 
           // History line, redrawn only when the samples or the target change.

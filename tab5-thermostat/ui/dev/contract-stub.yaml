@@ -65,6 +65,11 @@ binary_sensor:
     id: interlock_fault
     name: "Interlock Fault"
     device_class: problem
+  # Milestone 4: the relay unit stopped answering (bench-io on the Tab5, the sim's fault in the virtual house).
+  - platform: template
+    id: relay_fault
+    name: "Relay Fault"
+    device_class: problem
   - platform: template
     id: call_heat
     name: "Call Heat"
@@ -185,6 +190,9 @@ select:
       - Eco hold in Auto
       - Temperature hold in Auto
       - Manual target
+      - Relay fault
+      - Relay and sensor fault
+      - Relay hold
     initial_option: Heating
     on_value:
       - script.execute:
@@ -247,7 +255,7 @@ script:
       - lambda: |-
           // Baseline: heating at 71 toward 72, Comfort, schedule on, nothing wrong.
           float room = 71, target = 72, low = NAN, high = NAN, hum = 42;
-          bool heat = false, cool = false, fan = false, hold = false, sfault = false, ifault = false, sched_on = true;
+          bool heat = false, cool = false, fan = false, hold = false, sfault = false, ifault = false, rfault = false, sched_on = true;
           bool manual = false;
           id(manual_target).publish_state(false);  // so the level set below doesn't touch the target
           std::string level = "Comfort", period = "Return", next = "10:30 pm", status = "Comfort until 10:30 pm", wait = "";
@@ -265,6 +273,9 @@ script:
           else if (name == "Interlock fault") { ifault = true; wait = "Interlock fault"; }
           else if (name == "Interlock while heating") { ifault = true; wait = "Interlock fault"; action = climate::CLIMATE_ACTION_HEATING; }
           else if (name == "Sensor fault mid-run") { room = NAN; sfault = true; wait = "Sensor fault"; heat = true; action = climate::CLIMATE_ACTION_HEATING; }
+          else if (name == "Relay fault") { rfault = true; wait = "Relay fault"; }
+          else if (name == "Relay and sensor fault") { room = NAN; rfault = true; sfault = true; wait = "Relay fault"; }
+          else if (name == "Relay hold") { action = climate::CLIMATE_ACTION_HEATING; wait = "Short-cycle protection"; }
           else if (name == "Eco hold in Auto") { mode = climate::CLIMATE_MODE_HEAT_COOL; level = "Eco"; room = 70; low = 67; high = 77; target = 72; hold = true; status = "Holding Eco until 10:30 pm"; }
           else if (name == "Temperature hold in Auto") { mode = climate::CLIMATE_MODE_HEAT_COOL; level = "Eco"; room = 70; low = 69; high = 71; target = 70; hold = true; status = "Holding 70° until 10:30 pm"; }
           else if (name == "Manual target") { sched_on = false; period = ""; next = ""; status = "Schedule off"; target = 70; manual = true; }
@@ -282,6 +293,7 @@ script:
           id(schedule_hold).publish_state(hold);
           id(sensor_fault).publish_state(sfault);
           id(interlock_fault).publish_state(ifault);
+          id(relay_fault).publish_state(rfault);
           id(schedule_enabled).publish_state(sched_on);
           id(schedule_period).publish_state(period);
           id(schedule_next_change).publish_state(next);

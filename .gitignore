@@ -32,3 +32,6 @@ tab5-thermostat/.piolibdeps/
 # Desktop preview screenshots
 tab5-thermostat/preview/shots/
 tab5-thermostat/preview/.esphome/
+
+# Bench rig long-run logs (tools/bench/collect_log.sh)
+tools/bench/out/

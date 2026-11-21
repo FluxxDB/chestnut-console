@@ -1,6 +1,6 @@
 # Chestnut Console: the Main Thermostat, on an M5Stack Tab5.
-# Wi-Fi, Home Assistant API, local web page, the console screen, and (milestone 2) the
-# thermostat logic running against the virtual house until the bench relays arrive (M4).
+# Wi-Fi, Home Assistant API, local web page, the console screen, and the thermostat logic, running
+# the real room sensor and relays on Port A (milestone 4) or the virtual house (see `io:` below).
 
 substitutions:
   name: tab5-thermostat
@@ -29,10 +29,13 @@ packages:
   ui_theme: !include ui/theme.yaml
   ui_console: !include ui/console.yaml
   ui_logic: !include ui/console-logic.yaml
-  # Milestone 2: the thermostat logic, against the virtual house (the sim package stands in
-  # for the ENV III sensor and the Unit 4-Relay until M4; its knobs are on the web page).
+  # The thermostat logic (milestone 2).
   logic: !include thermostat/logic.yaml
-  sim: !include sim/virtual-house.yaml
+  # The room sensor and relays. Exactly one must be active: the real ENV III and Unit 4-Relay on
+  # Port A (milestone 4), or the virtual house for demos (its knobs are on the web page and HA's
+  # Simulation tab; Port A then stays unpowered, so a plugged-in relay unit can't hold a relay).
+  io: !include hardware/bench-io.yaml
+  # io: !include sim/virtual-house.yaml
 
 wifi:
   # The Tab5's radio is 2.4 GHz only.

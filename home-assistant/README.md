@@ -28,7 +28,7 @@ A custom dashboard that **replaces HA's Overview**, so opening HA (app or browse
 - **Home:** the room view (desktop only), current temperature, target, mode, fan and the schedule line.
 - **Schedule:** the weekly schedule.
 - **Simulation:** the virtual house controls (outdoor temperature, weather, faults, insulation). It exists only while the virtual house exists. Once the real sensors and relays replace it (milestone 4), the tab disappears and the room view stays as the live view of the house.
-- **System:** safety timers and interlock, the alert switches, device info.
+- **System:** safety timers, interlock, sensor and relay unit, the alert switches, device info and the temperature offset (a correction in °F added to the sensor's reading, for a sensor that reads steadily off).
 
 On a phone the room view and the Simulation tab are hidden. The theme is `axiom` (`config/themes/axiom.yaml`).
 
@@ -49,22 +49,24 @@ Then one manual step, which HA 2026.10 requires because the system default panel
 
 ### Alerts
 
-Three switches on the System tab (`input_boolean.chestnut_alert_sensor_fault`, `..._interlock_fault`, `..._offline`) decide which alerts are sent. They start on (an automation turns them on at the first HA start and records that in `input_boolean.chestnut_alert_switches_set_up`). After that HA restores them, so a switch you turn off stays off across restarts. Turning a switch on while its fault is already active doesn't alert; the next fault, or the next HA start with the fault still on, does.
+Four switches on the System tab (`input_boolean.chestnut_alert_sensor_fault`, `..._interlock_fault`, `..._relay_fault`, `..._offline`) decide which alerts are sent. They start on (an automation turns them on at the first HA start and records that in `input_boolean.chestnut_alert_switches_set_up`; the relay fault switch, added in milestone 4, has its own record, `input_boolean.chestnut_alert_relay_fault_set_up`, so an HA set up before it turns it on once at its next start). After that HA restores them, so a switch you turn off stays off across restarts. Turning a switch on while its fault is already active doesn't alert; the next fault, or the next HA start with the fault still on, does.
 
 | Alert | Fires when |
 |---|---|
 | Sensor fault | the thermostat reports a temperature sensor problem (bad or missing reading). It has stopped calling for heat/cool. |
 | Interlock fault | the heat/cool interlock tripped: the heat and cool relays were found on at the same time (a stuck relay or wiring fault), so both were cut. Clear it on the System tab once it's checked. The clear takes effect once both units have been off for their minimum off time since the trip (the longer of the two, 5 min by default; or the device reboots). An early press is remembered, so press once and wait; the System tab says the clear was requested. |
+| Relay fault | the relay unit stopped answering (unplugged, or its power or cable failed). The thermostat has stopped heating and cooling, and cuts and restores Port A's power to restart the unit, so the sensor may fault too. It clears by itself once the unit answers again. |
 | Offline | HA has had no contact with the thermostat for 10 minutes. It keeps running on its own. |
 
 Each alert also sends a "cleared" notice when the problem goes away, but only if that alert actually fired. A new alert takes down the last "cleared" notice of its kind. A fault that is first seen as the thermostat reconnects (it was unavailable, then reports the fault) still alerts; a fault that was already alerted and is still there after a reconnect doesn't alert again. A fault that is on, or a thermostat that is still offline, when HA starts alerts again (HA's notifications don't survive a restart); for offline that is 10 minutes after HA starts. An alert's notification is always removed when the problem clears, even if its switch was turned off meanwhile.
 
-What each alert remembers between its alert and its "cleared" notice lives in three more helpers, `input_boolean.chestnut_sensor_fault_alerted`, `..._interlock_fault_alerted` and `input_boolean.chestnut_offline_alerted` (off at every HA start). They are internal: don't toggle them by hand. Because they reset at a start, a problem that clears while HA is restarting gets no "cleared" notice (the alert from before the restart stays on the phone), and a thermostat that stays offline alerts again 10 minutes after every HA start.
+What each alert remembers between its alert and its "cleared" notice lives in four more helpers, `input_boolean.chestnut_sensor_fault_alerted`, `..._interlock_fault_alerted`, `..._relay_fault_alerted` and `input_boolean.chestnut_offline_alerted` (off at every HA start). They are internal: don't toggle them by hand. Because they reset at a start, a problem that clears while HA is restarting gets no "cleared" notice (the alert from before the restart stays on the phone), and a thermostat that stays offline alerts again 10 minutes after every HA start.
 
 **The entity ids.** `config/automations.yaml` names the ids HA makes for a device called "Main Thermostat":
 
 - `binary_sensor.main_thermostat_sensor_fault`
 - `binary_sensor.main_thermostat_interlock_fault`
+- `binary_sensor.main_thermostat_relay_fault` (milestone 4)
 - `climate.main_thermostat_main_thermostat`
 
 The dev HA has exactly these (checked 2026-10-29), and the e2e tests run the file as written. On a new install, HA can name them differently (ids left from an earlier device name, or a renamed device). So the "Chestnut: alert entity check" automation looks for them 30 s after every HA start, and if one is missing it posts a notification naming it. Then edit `automations.yaml` to match (Developer Tools → States, search for `main_thermostat`); otherwise that alert never fires.
