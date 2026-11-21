@@ -156,3 +156,45 @@ async def test_interlock_beats_relay_in_wait_reason(device):
     await device.action("test_force_relays", heat=True, cool=True)
     await device.wait_for("interlock_fault", is_on, 1)
     await device.wait_for("call_wait_reason", reason_is("Interlock fault"), 1.5)
+
+
+# --- The relay hold overlapping the interlock latch, and the fan mode during a hold ---
+
+async def test_latch_cleared_during_hold_waits_for_hold(device):
+    """Interlock latched, then a relay fault: Clear drops the latch, but heat waits for the hold."""
+    await heating(device)
+    await device.action("test_force_relays", heat=True, cool=True)  # latch
+    await device.wait_for("interlock_fault", is_on, 1)
+    fault_ms = await fault_on(device)
+    await device.press("clear_interlock_fault")
+    await device.wait_for("interlock_fault", is_off, HOLD_S + 2)
+    await device.sleep(1)
+    assert await device.state("call_heat") is False, "heat came back during the relay hold"
+    await fault_off(device)
+    w_on = await device.edge("call_heat", True, fault_ms, HOLD_S + 3)
+    assert w_on - fault_ms >= HOLD_S * 1000 - 150
+    assert await mode_of(device) == ClimateMode.HEAT
+
+
+async def test_hold_ends_during_latch_waits_for_clear(device):
+    """A relay fault, then the interlock latches: the hold's end doesn't resume; Clear does."""
+    await heating(device)
+    await fault_on(device)
+    await device.action("test_force_relays", heat=True, cool=True)  # latch
+    await device.wait_for("interlock_fault", is_on, 1)
+    await fault_off(device)
+    n = len(device.edges("call_heat", True))
+    await device.sleep(HOLD_S + 1)  # the hold is over; the latch isn't
+    assert len(device.edges("call_heat", True)) == n, "heat came back while latched"
+    await device.press("clear_interlock_fault")
+    await device.wait_for("interlock_fault", is_off, 2)
+    await device.wait_for("call_heat", is_on, 3)
+
+
+async def test_fan_on_to_auto_during_hold_drops_g(device):
+    await cooling(device, fan_mode="ON")
+    await fault_on(device)
+    await device.wait_for("call_cool", is_off, 1)
+    assert await device.state("call_fan") is True
+    await device.climate(fan_mode="AUTO")
+    await device.wait_for("call_fan", is_off, 1)
