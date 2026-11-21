@@ -10,6 +10,7 @@ display:
 
 touchscreen:
   - platform: gt911
+    i2c_id: bsp_bus
     id: touch
     interrupt_pin: GPIO23
     update_interval: never

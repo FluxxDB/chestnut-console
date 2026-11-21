@@ -87,7 +87,7 @@ The Tab5 runs the thermostat itself (ESPHome `thermostat` climate `main_thermost
 | File | What it is |
 |---|---|
 | `thermostat/logic.yaml` + `chestnut_logic.h` | the logic package: the only thing that switches a relay |
-| `sim/virtual-house.yaml` + `house_model.h` | the virtual house: stands in for the ENV III sensor and the Unit 4-Relay until the bench parts arrive (milestone 4). Its room warms or cools toward outdoor and responds to the virtual relays. |
+| `sim/virtual-house.yaml` + `house_model.h` | the virtual house: stands in for the ENV III sensor and the Unit 4-Relay, for demos and the host sim (the Tab5 runs the real parts since milestone 4; see the `io:` line in `tab5-thermostat.yaml`). Its room warms or cools toward outdoor and responds to the virtual relays. |
 | `main-thermostat-sim.yaml` | the same two packages on ESPHome's host platform, for Home Assistant and the tests |
 | `tests/` | `run.sh` plus the unit and scenario tests |
 
@@ -116,6 +116,30 @@ docker compose run --rm esphome-host run main-thermostat-sim.yaml
 It uses host networking, with the API on port 6053 (Linux; Docker Desktop on a Mac doesn't expose host-network ports to the Mac). The `esphome-host` service builds without ESPHome's precompiled header, which breaks host builds in 2026.10.1.
 
 To add it to HA: Settings → Devices & services → Add integration → ESPHome → host = the machine running the sim, port 6053, with the `sim_api_encryption_key`.
+
+## Bench rig (milestone 4)
+
+The Tab5 runs the real room sensor and relays on Port A (the ENV III and the Unit 4-Relay, through the Grove Hub). One line in `tab5-thermostat.yaml` picks them or the virtual house: `io: !include hardware/bench-io.yaml` or `io: !include sim/virtual-house.yaml`. With the virtual house, Port A stays unpowered.
+
+| File | What it is |
+|---|---|
+| `hardware/bench-io.yaml` | the Port A bus and power, the ENV III (`room_temperature` with the HA-settable `temperature_offset`, `room_humidity`), the four relay switches, the relay check and `relay_fault`, and the recovery-mode Port A cut |
+| `hardware/relay_unit.h` | the relay unit's registers, the relay byte, and the link state machine (when to raise the relay fault and cut Port A's power) |
+| `hardware/bench_io.h` | the I2C glue: register writes and reads, and the direct IO-expander write that cuts Port A in recovery mode |
+
+Tests: `tools/bench/test_unit.sh` (the link state machine, seconds) and `TAB5_IP=<tab5-ip> tools/bench/test_bench.sh` (flashes the Tab5, then checks the relay unit answers, the room temperature is sane, and heat and cool are off after boot). Both need only Docker; the bench test also needs `secrets.yaml`. `TAB5_IP=<tab5-ip> tools/bench/collect_log.sh` records the device log for 24 h (`HOURS=` to change it) and reports any errors.
+
+**Wiring:** the Grove Hub on Port A; the ENV III hanging below the Tab5 on its own 20 cm cable (the Tab5's warm air rises); the relay unit on the hub. Relay 1 = W (heat), 2 = Y (cool), 3 = G (fan), 4 = O/B (never used). On the bench the relays switch nothing: watch their LEDs.
+
+**Hands-on checks** (milestone 4 is done when all of these hold, plus a clean 24 h log):
+
+1. **Relays follow the thermostat**, from the screen and from HA: Heat with the target above the room → relay 1 after the startup delay; Cool below → relays 2 and 3; Fan On → relay 3; a call keeps running for its minimum run after the target is moved back.
+2. **Pull the sensor cable** → sensor fault on the screen and in HA within 2 minutes; heating and cooling stop.
+3. **Pull the relay unit's cable during a call** → relay fault within about 5 s (Paused, and the relay banner); about 10 s later Port A's power is cut for 3 s, and again every 30 s while it doesn't answer; the phone alert arrives. The sensor keeps reading: a 3 s cut is far inside the sensor checks' 2-minute limit. Plug it back → the fault clears within a cycle, with heat and cool off (the screen shows Idle · Waiting) until the longer of the two minimum off times has passed since the fault began, then the thermostat calls again. The fan relay follows the fan mode: on again with Fan On.
+4. **Restart from HA during a call** → the relay drops as the Tab5 restarts and stays off until the thermostat calls again after its startup delay. The same after pulling USB with the battery out.
+5. **Boot with the relay cable out** → the Tab5 starts, the relay fault shows after about 5 s, and Port A is cycled every 30 s until it's plugged in.
+6. **Boot with the sensor cable out** → a sensor fault (the sensor isn't set up without it); plug it in and restart to clear it.
+7. **Virtual-house build** (swap the `io:` line) with everything plugged in → no relay LED ever lights (Port A stays off) and HA's Simulation tab is back. Swap back afterwards.
 
 ## Desktop preview
 

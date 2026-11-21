@@ -11,29 +11,41 @@
         name: axiom
         name_dark: axiom
 
-# The three alert switches start on: once, at the first HA start. After that HA restores them,
-# so a switch turned off stays off.
+# The alert switches start on: each once, at the first HA start that has it. After that HA
+# restores them, so a switch turned off stays off. The relay fault switch (milestone 4) has its own
+# set-up flag, so an HA set up before it existed turns it on once too.
 - id: chestnut_alert_switches_first_start
   alias: "Chestnut: alert switches on at first start"
-  description: "Turns the three alert switches on at the first HA start; after that they keep the user's choice."
+  description: "Turns each alert switch on at the first HA start that has it; after that they keep the user's choice."
   mode: single
   triggers:
     - trigger: homeassistant
       event: start
-  conditions:
-    - condition: state
-      entity_id: input_boolean.chestnut_alert_switches_set_up
-      state: "off"
   actions:
-    - action: input_boolean.turn_on
-      target:
-        entity_id:
-          - input_boolean.chestnut_alert_sensor_fault
-          - input_boolean.chestnut_alert_interlock_fault
-          - input_boolean.chestnut_alert_offline
-    - action: input_boolean.turn_on
-      target:
-        entity_id: input_boolean.chestnut_alert_switches_set_up
+    - if:
+        - condition: state
+          entity_id: input_boolean.chestnut_alert_switches_set_up
+          state: "off"
+      then:
+        - action: input_boolean.turn_on
+          target:
+            entity_id:
+              - input_boolean.chestnut_alert_sensor_fault
+              - input_boolean.chestnut_alert_interlock_fault
+              - input_boolean.chestnut_alert_offline
+        - action: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.chestnut_alert_switches_set_up
+    - if:
+        - condition: state
+          entity_id: input_boolean.chestnut_alert_relay_fault_set_up
+          state: "off"
+      then:
+        - action: input_boolean.turn_on
+          target:
+            entity_id:
+              - input_boolean.chestnut_alert_relay_fault
+              - input_boolean.chestnut_alert_relay_fault_set_up
 
 # The alert automations below name the thermostat's entity ids as HA makes them for the device
 # "Main Thermostat". If HA named them differently (a renamed device, ids left from an older name),
@@ -52,6 +64,7 @@
         missing: >-
           {% set ids = ['binary_sensor.main_thermostat_sensor_fault',
                         'binary_sensor.main_thermostat_interlock_fault',
+                        'binary_sensor.main_thermostat_relay_fault',
                         'climate.main_thermostat_main_thermostat'] %}
           {{ ids | reject('in', expand(ids) | map(attribute='entity_id') | list) | list }}
     - if:
@@ -229,6 +242,86 @@
       data:
         title: "Chestnut"
         message: "Main Thermostat: interlock fault cleared."
+
+# Milestone 4: the relay unit stopped answering. The Tab5 then cycles Port A's power, which drops
+# the sensor too: its alert isn't held back, and this one's text says so.
+- id: chestnut_alert_relay_fault
+  alias: "Chestnut: alert, relay fault"
+  description: "Notifies when the relay unit stops answering (while its alert switch is on)."
+  mode: queued
+  triggers:
+    # From off, or from unavailable/unknown (a fault first seen as the Tab5 reconnects).
+    - trigger: state
+      entity_id: binary_sensor.main_thermostat_relay_fault
+      to: "on"
+      not_from: "on"
+    # Already on when HA starts (its notifications don't survive a restart).
+    - trigger: homeassistant
+      event: start
+  conditions:
+    - condition: state
+      entity_id: binary_sensor.main_thermostat_relay_fault
+      state: "on"
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_relay_fault
+      state: "on"
+    - condition: state
+      entity_id: input_boolean.chestnut_relay_fault_alerted
+      state: "off"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.chestnut_relay_fault_alerted
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_relay_fault_cleared
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_relay_fault
+        title: "Chestnut"
+        message: "Main Thermostat: relay unit not responding. Heating and cooling paused. Its power is being cycled, so a sensor fault may show too."
+    # Phone push through whatever `notify.notify` is set up to reach (HA's default notify group,
+    # empty until the Companion app is added). continue_on_error: no notify service yet is not a failure.
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat: relay unit not responding. Heating and cooling paused. Its power is being cycled, so a sensor fault may show too."
+
+- id: chestnut_alert_relay_fault_cleared
+  alias: "Chestnut: alert, relay fault cleared"
+  description: "Replaces the relay fault alert with a recovery notice."
+  mode: queued
+  triggers:
+    # From on, or from unavailable/unknown (the fault gone when the Tab5 comes back).
+    - trigger: state
+      entity_id: binary_sensor.main_thermostat_relay_fault
+      to: "off"
+      not_from: "off"
+  actions:
+    - action: persistent_notification.dismiss
+      data:
+        notification_id: chestnut_alert_relay_fault
+    # The notice only after an alert fired (not after a plain reconnect), and only while the switch is on.
+    - condition: state
+      entity_id: input_boolean.chestnut_relay_fault_alerted
+      state: "on"
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.chestnut_relay_fault_alerted
+    - condition: state
+      entity_id: input_boolean.chestnut_alert_relay_fault
+      state: "on"
+    - action: persistent_notification.create
+      data:
+        notification_id: chestnut_alert_relay_fault_cleared
+        title: "Chestnut"
+        message: "Main Thermostat: relay unit responding again."
+    - action: notify.notify
+      continue_on_error: true
+      data:
+        title: "Chestnut"
+        message: "Main Thermostat: relay unit responding again."
 
 - id: chestnut_alert_offline
   alias: "Chestnut: alert, offline"

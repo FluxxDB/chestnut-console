@@ -34,6 +34,7 @@ Dang is turning an **M5Stack Tab5** (ESP32-P4 + ESP32-C6 Wi-Fi, 5" 720×1280 tou
 ```
 docker-compose.yml           HA 2026.10.4 + ESPHome 2026.10.1 (host networking). `up -d` starts HA only; `esphome`, `esphome-host` and `preview` run when named
 tools/preview/               desktop preview rig + console tests (test_all.sh, test_device.sh)
+tools/bench/                 bench rig (milestone 4): relay-link unit test (test_unit.sh), bench test on the Tab5 (test_bench.sh)
 home-assistant/config/       HA config (runtime state gitignored)
   www/chestnut/              the Chestnut dashboard: custom element (one JS file per tab), self-hosted fonts
   dashboards/chestnut.yaml   the dashboard (replaces Overview); themes/axiom.yaml = the theme
@@ -46,6 +47,7 @@ tab5-thermostat/             ESPHome config dir (mounted at /config in the espho
   sim/                       the virtual house: virtual-house.yaml + house_model.h (contract ids, knobs, faults)
   tests/                     run.sh (unit | build | scenarios | all, Docker only), test entry, unit + scenario tests
   hardware/                  board support; display-*.yaml = one per Tab5 screen revision
+    bench-io.yaml            the real ENV III + Unit 4-Relay on Port A (milestone 4); relay_unit.h (relay byte, link state machine) + bench_io.h (I2C glue)
   ui/                        the console: fonts, theme, console (layout), console-logic (bindings)
     dev/contract-stub.yaml   DEV ONLY stand-in for milestone 2 (same entity ids, fake values); the preview's fixture
   preview/                   desktop preview entry point (host + SDL); shots/ is gitignored
@@ -60,6 +62,7 @@ docker compose run --rm esphome compile tab5-thermostat.yaml
 tab5-thermostat/tests/run.sh all     # milestone 2 tests
 home-assistant/tests/run.sh all      # HA dashboard tests (~7 min; needs ports 8124 and 6053 free)
 tools/preview/test_all.sh            # wall-screen tests in the desktop preview (needs secrets.yaml)
+tools/bench/test_unit.sh             # relay unit link (state machine) unit tests: seconds
 ```
 
 ## Hardware facts that bite

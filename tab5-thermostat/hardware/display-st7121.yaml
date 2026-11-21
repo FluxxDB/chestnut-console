@@ -13,5 +13,6 @@ display:
 
 touchscreen:
   - platform: st7123
+    i2c_id: bsp_bus
     id: touch
     interrupt_pin: GPIO23

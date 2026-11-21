@@ -475,6 +475,7 @@ class ChestnutDashboard extends HTMLElement {
       mode, action,
       sensorFault: a.on('sensor_fault') === true,
       interlockFault: a.on('interlock_fault') === true,
+      relayFault: a.on('relay_fault') === true,
       callHeat: a.on('call_heat') === true,
       callCool: a.on('call_cool') === true,
       callFan: a.on('call_fan') === true,
@@ -488,6 +489,7 @@ class ChestnutDashboard extends HTMLElement {
       ...s,
       sensorFaultRaw: a.on('sensor_fault'),
       interlockFaultRaw: a.on('interlock_fault'),
+      relayFaultRaw: a.on('relay_fault'),
       status: statusFor(s),
       display: mode === 'off' && this._taps.pending == null ? 'OFF' : targetText,
       level: a.str('comfort_level'),
@@ -573,11 +575,12 @@ class ChestnutDashboard extends HTMLElement {
 
   _renderStatus(v, haUp) {
     if (!v) {
-      for (const id of ['st-equip', 'st-lock', 'st-sensor']) this._text(id, DASH);
+      for (const id of ['st-equip', 'st-lock', 'st-sensor', 'st-relay']) this._text(id, DASH);
     } else {
       this._text('st-equip', v.callHeat ? 'furnace firing' : v.callCool ? 'ac running' : v.callFan ? 'fan on' : 'all off');
       this._text('st-lock', v.interlockFaultRaw == null ? DASH : v.interlockFault ? '⚠ tripped' : '✓ armed');
       this._text('st-sensor', v.sensorFaultRaw == null ? DASH : v.sensorFault ? '⚠ fault' : '✓ ok');
+      this._text('st-relay', v.relayFaultRaw == null ? DASH : v.relayFault ? '⚠ fault' : '✓ ok');
     }
     this._text('st-ha', haUp ? '● connected' : '○ reconnecting');
   }

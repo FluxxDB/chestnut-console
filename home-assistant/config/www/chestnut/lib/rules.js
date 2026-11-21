@@ -17,14 +17,18 @@ function minutesText(m) {
 export function statusFor(s) {
   const fan = !!s.callFan || s.action === 'fan';
   const running = () => `to ${s.targetText} · ${minutesText(s.minutesSoFar)}`;
-  if (s.sensorFault || s.interlockFault) {
-    return { word: 'PAUSED', mark: '⊘', color: PAUSED, sub: s.callHeat || s.callCool ? FINISHING : '' };
+  if (s.sensorFault || s.interlockFault || s.relayFault) {
+    // A sensor fault lets a running call finish its minimum run; an interlock or relay fault cuts both at once.
+    const finishing = !s.relayFault && (s.callHeat || s.callCool);
+    return { word: 'PAUSED', mark: '⊘', color: PAUSED, sub: finishing ? FINISHING : '' };
   }
-  if (s.action === 'heating') {
+  // Heating / cooling only while its relay is on: after a relay fault clears, the logic holds W and Y
+  // off for the minimum off time while the climate still reports the action (milestone 4).
+  if (s.action === 'heating' && s.callHeat) {
     const ok = s.mode === 'heat' || s.mode === 'heat_cool';
     return { word: 'HEATING', mark: '▲', color: HEAT, sub: ok ? running() : FINISHING };
   }
-  if (s.action === 'cooling') {
+  if (s.action === 'cooling' && s.callCool) {
     const ok = s.mode === 'cool' || s.mode === 'heat_cool';
     return { word: 'COOLING', mark: '▼', color: COOL, sub: ok ? running() : FINISHING };
   }
@@ -104,6 +108,7 @@ const EVENTS = {
   call_cool: { on: ['ac on', 'cool'], off: ['ac off', 'cool'] },
   sensor_fault: { on: ['temperature sensor problem · heating and cooling paused', 'fault'], off: ['temperature sensor ok again', ''] },
   interlock_fault: { on: ['interlock tripped · heating and cooling paused', 'fault'], off: ['interlock cleared', ''] },
+  relay_fault: { on: ['relay unit not responding · heating and cooling paused', 'fault'], off: ['relay unit ok again', ''] },
   schedule_hold: { on: ['hold started', ''], off: ['hold ended · following the schedule', ''] },
 };
 export function eventText(objId, state) {
