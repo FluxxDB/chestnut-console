@@ -21,7 +21,7 @@ Dang is turning an **M5Stack Tab5** (ESP32-P4 + ESP32-C6 Wi-Fi, 5" 720×1280 tou
 - **Safety requirements:** compressor/furnace min run/off times, `startup_delay: true`, a heat/cool interlock (never both on), sensor sanity checks (bad reading → stop calling + alert), and a mechanical freeze backup thermostat at install time.
 - **Temperature sensing:** the Tab5 has no temperature sensor and runs warm, so it uses an external sensor on a cable, away from the screen: the M5Stack ENV III (SHT30), since the ENV IV (SHT40) is discontinued.
 - **Open: power at the wall.** There's no C wire at the middle floor. A spare conductor in the cable (checked at the furnace) keeps the all-in-one design. Without one, the likely answer is the split design: relays and logic on a small board at the furnace, the Tab5 as display and sensor, powered over two of the existing wires. That changes milestone 4/5 hardware, so it gets a brainstorm with Dang first. Nothing in milestones 1–3 depends on it.
-- **Bench hardware arrived 2026-11-18:** the ENV III, Unit 4-Relay and Grove Hub ([shopping list](tab5-thermostat/docs/shopping-list.md)). Milestone 4 starts with a brainstorm with Dang; until it's built, the Tab5 keeps running the virtual house.
+- **Bench rig done (milestone 4, 2026-11-21):** the ENV III, Unit 4-Relay and Grove Hub (arrived 2026-11-18; [shopping list](tab5-thermostat/docs/shopping-list.md)) are on Port A, and the Tab5 runs the real sensor and relays through `hardware/bench-io.yaml`. The virtual house stays as a build option (one `io:` line in `tab5-thermostat.yaml`). Design: [the bench rig spec](docs/superpowers/specs/2026-11-18-bench-rig-design.md).
 
 ## Anti-goals
 
@@ -71,7 +71,7 @@ tools/bench/test_unit.sh             # relay unit link (state machine) unit test
 - For ST7123/ST7121, **don't set a touch reset pin**: the LCD reset enables touch, and toggling the touch reset line can knock the controller offline.
 - Wi-Fi is 2.4 GHz only (ESP32-C6 via `esp32_hosted`).
 - CPU at 360 MHz: ESPHome's 400 MHz default for the P4 is flagged as possibly unbootable.
-- Port A (HY2.0-4P, I2C on G53/G54) is where the ENV III and the Unit 4-Relay (I2C 0x26) will go, through a Grove hub.
+- Port A (HY2.0-4P, I2C on G53/G54) carries the ENV III (0x44) and the Unit 4-Relay (0x26) through a Grove hub. Its 5 V comes from the IO expander (`external_5v_power`). Never touch its bus while it's unpowered: the units hold the lines low and every transfer stalls the loop until the watchdog reboots the Tab5.
 - RS485 power input accepts 6–24 V DC, never raw rectified 24 VAC.
 
 ## Milestones
@@ -79,7 +79,7 @@ tools/bench/test_unit.sh             # relay unit link (state machine) unit test
 1. **Bring-up** (PC, needs the Tab5 on USB): hello screen, touch, Wi-Fi, HA connection, web page, identify the screen revision. *Done (merged).*
 2. **Thermostat logic, simulated.** ESPHome `thermostat` climate driven by a simulated room (a "virtual house" whose temperature drifts toward outdoor and responds to virtual heat/cool/fan relays), plus all the safety requirements above. Develop it on ESPHome's **`host` platform**, which runs natively on Linux/macOS with no hardware, then run the same packages on the Tab5. *Done (merged 2026-10-29).*
 3. **Thermostat UI** in LVGL. Dang's call (2026-10-28): **functional first, polish later**. A clean, simple screen (big temperature, setpoint, mode, fan, humidity) built on the milestone 2 climate entity, tuned on the wall with Dang. *Done (merged).* **Dang likes it as it is (2026-10-29): no restyle, and no Axiom design pass for the wall screen.** Axiom is for the HA dashboard only. Wall-screen changes are bug fixes and behaviour unless Dang asks. The Tab5 can't show HA's own dashboard (it has no browser). The UI lives in `ui/` packages, separate from the logic.
-4. **Bench rig** (the sensor, relays and hub arrived 2026-11-18; brainstorm first): real ENV III + Unit 4-Relay + 24 VAC lamps, then 24 VAC → DC power. Until then the Tab5 runs the logic against the virtual house.
+4. **Bench rig:** the real ENV III and Unit 4-Relay on Port A, a relay-fault check that cuts Port A's power when the unit stops answering, a temperature offset set from HA, and a relay-fault alert. *Done on the bench (merged 2026-11-21).* The relays switch nothing yet (watch their LEDs); 24 VAC lamps and 24 VAC → DC power wait for the power decision (milestone 5).
 5. **House:** site survey (the middle-floor wiring 2026-10-30 and the furnace's outside 2026-11-18 are done; next the furnace's terminals and the cable's conductor count, which decide power, and the top floor), then install.
 
 ### Package contract (milestones 2–5)

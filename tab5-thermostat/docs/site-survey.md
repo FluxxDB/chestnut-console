@@ -25,7 +25,7 @@ The wall plate's terminals, and the old thermostat's circuit board, with the fac
 
 | What | Found | What it means |
 |---|---|---|
-| The furnace | **Trane** gas furnace, **electronic ignition** (no standing pilot); the installer's guide beside it covers upflow/downflow "fan assisted combustion" gas furnaces (American Standard, Trane's parent) | Confirms the gas furnace the GAS jumper pointed to. A furnace like this has a control board with its own 24 V transformer, almost always with a C terminal. The model number isn't in the photos yet (it's on a sticker inside a front door). |
+| The furnace | **Trane** gas furnace, **electronic ignition** (no standing pilot); the installer's guide beside it covers upflow/downflow "fan assisted combustion" gas furnaces (American Standard, a sister brand under Trane Technologies) | Confirms the gas furnace the GAS jumper pointed to. A furnace like this has a control board with its own 24 V transformer, almost always with a C terminal. The model number isn't in the photos yet (it's on a sticker inside a front door). |
 | Its power | a light switch on the stud next to it is the furnace's service switch, wired into its left side | The switch to turn off before opening any panel. |
 | Low-voltage cables | **two brown cables** come down from above and enter low on the left side | Most likely the thermostat cable and the outdoor AC's control cable. If one is the AC's, C is already in use on the board (the AC contactor's coil returns to C), so C is there for a fifth wire. |
 | Zone panel | none visible in these photos | Not settled; asked below. |
