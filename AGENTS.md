@@ -23,6 +23,8 @@ Dang is turning an **M5Stack Tab5** (ESP32-P4 + ESP32-C6 Wi-Fi, 5" 720×1280 tou
 - **Open: power at the wall.** There's no C wire at the middle floor. A spare conductor in the cable (checked at the furnace) keeps the all-in-one design. Without one, the likely answer is the split design: relays and logic on a small board at the furnace, the Tab5 as display and sensor, powered over two of the existing wires. That changes milestone 4/5 hardware, so it gets a brainstorm with Dang first. Nothing in milestones 1–3 depends on it.
 - **Bench rig done (milestone 4, 2026-11-21):** the ENV III, Unit 4-Relay and Grove Hub (arrived 2026-11-18; [shopping list](tab5-thermostat/docs/shopping-list.md)) are on Port A, and the Tab5 runs the real sensor and relays through `hardware/bench-io.yaml`. The virtual house stays as a build option (one `io:` line in `tab5-thermostat.yaml`). Design: [the bench rig spec](docs/superpowers/specs/2026-11-18-bench-rig-design.md).
 
+- **Outside reading: Open-Meteo, polled by the Tab5 (Dang, 2026-11-21).** Met.no through HA averaged 4–4.6 °F off against the nearest airport stations over a week; NOAA's HRRR model through Open-Meteo averaged 1.3–1.5 °F. The Tab5 fetches it over Wi-Fi in its own task (`weather/open-meteo.yaml`) every 30 min and sends it to HA, so the wall and the dashboard show the same reading. A failed poll shows "—". The place is `house_latitude` / `house_longitude` in `secrets.yaml`.
+
 ## Anti-goals
 
 - The house gets too hot or cold because something crashed or lost the network.
@@ -48,6 +50,7 @@ tab5-thermostat/             ESPHome config dir (mounted at /config in the espho
   tests/                     run.sh (unit | build | scenarios | all, Docker only), test entry, unit + scenario tests
   hardware/                  board support; display-*.yaml = one per Tab5 screen revision
     bench-io.yaml            the real ENV III + Unit 4-Relay on Port A (milestone 4); relay_unit.h (relay byte, link state machine) + bench_io.h (I2C glue)
+  weather/                   the outside reading: open-meteo.yaml (polls Open-Meteo), weather.h (the reply, words, icons, timing), fetch_idf.h (the HTTPS task)
   ui/                        the console: fonts, theme, console (layout), console-logic (bindings)
     dev/contract-stub.yaml   DEV ONLY stand-in for milestone 2 (same entity ids, fake values); the preview's fixture
   preview/                   desktop preview entry point (host + SDL); shots/ is gitignored

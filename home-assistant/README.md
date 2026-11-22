@@ -10,7 +10,7 @@ docker compose up -d homeassistant
 
 Then open http://localhost:8123. HA keeps running in the background and starts again with Docker; `docker compose stop homeassistant` stops it. The first time on a machine:
 
-1. Go through onboarding. Set the location to the house so the time zone and weather are right.
+1. Go through onboarding. Set the location to the house so the time zone is right. (The outside reading comes from the Tab5, not HA's weather.)
 2. Open **Settings → Dashboards → Chestnut** and choose **Set as default**. You only need to do this once per HA install (see [Applying it to a running HA](#applying-it-to-a-running-ha)).
 3. Add the thermostat: Settings → Devices & services → Add integration → ESPHome, with the Tab5's IP ([details](../tab5-thermostat/README.md#connecting-to-home-assistant)), or the host sim on port 6053.
 

@@ -13,7 +13,7 @@ The Tab5 can't render Home Assistant's own dashboard (it has no browser). Phones
 - At a glance: room temperature, target, what the system is doing right now, humidity, outdoor temperature, time.
 - Change the target with big − / + buttons. Change mode, fan and Comfort/Eco with one tap. See the schedule state, see when a manual change is holding, and resume the schedule.
 - Readable in light and dark, with a theme toggle that also follows sunset and sunrise.
-- Works fully when Home Assistant or Wi-Fi is down (only the outdoor reading goes blank).
+- Works fully when Home Assistant or Wi-Fi is down (only the outdoor reading goes blank: it needs Wi-Fi and the internet, but since 2026-11-21 not Home Assistant).
 
 ## Non-goals (for this version)
 
@@ -128,9 +128,12 @@ All fonts render with **4-bit anti-aliasing** (`bpp: 4`). At ESPHome's default 1
 - **Off mode:** the card shows "Off" and the − / + buttons are hidden.
 - The number updates instantly. The new setpoint goes to the climate entity once there's been no tap for ~1.5 s, so a run of taps is one change *(my call)*.
 
-**Outside card**
-- Temperature and condition from a Home Assistant weather entity (the builder picks the onboarding default, likely `weather.forecast_home`).
-- Shows "—" (and a blank condition) whenever no Home Assistant API client is connected, rather than a stale value. HA only resends an attribute when it changes, so a time-based staleness rule would blank valid readings.
+**Outside card** *(changed 2026-11-21, Dang: the Tab5 polls the weather itself. It was HA's Met.no weather entity, which averaged about 4 °F off against the nearest airport stations over a week; NOAA's HRRR model through Open-Meteo averaged under 1.5 °F.)*
+- Temperature and condition from Open-Meteo's current weather (its default model in the US is NOAA's HRRR), polled by the Tab5 over Wi-Fi (`weather/open-meteo.yaml`): as soon as Wi-Fi is up, then every 30 min; after a failed poll, again in 5 min *(my call)*, or as soon as the network is back. The place is `house_latitude` / `house_longitude` from `secrets.yaml`, as for the sunset theme switch.
+- A failed poll (no network, no reply, a bad reply) shows "—" and no condition at once *(Dang)*. The card no longer depends on Home Assistant being connected.
+- The fetch runs in its own task, so it never pauses the screen or the thermostat *(my call)*.
+- The icon follows the weather *(my call)*: sun or moon, partly cloudy by day or night, cloud, fog, rain, heavy rain, sleet, snow, heavy snow, storm, hail. The cloud when there's no reading or the weather code is unknown.
+- The conditions in words are short enough for the card (`tools/preview/test_wall.sh` measures them all).
 
 **Humidity card**
 - `room_humidity` in %.
@@ -173,7 +176,7 @@ All fonts render with **4-bit anti-aliasing** (`bpp: 4`). At ESPHome's default 1
 - A Signal Yellow `#f8e645` banner with ink text replaces the temperature line: "Temperature sensor problem. Heating and cooling are paused." The docs reserve Signal Yellow for a single high-attention grouping *(my call)*.
 - The banner clears by itself when milestone 2 resumes.
 
-**Offline:** everything above works without Home Assistant or Wi-Fi, except the outside card.
+**Offline:** everything above works without Home Assistant or Wi-Fi, except the outside card, which needs Wi-Fi and the internet (not Home Assistant).
 
 ## Entity bindings
 
@@ -192,7 +195,7 @@ From the milestone 2 spec (`mac/thermostat-logic` @ cbeebb8, "Entities the scree
 | Schedule status (top bar) | `schedule_status` (the ready-made text, used as is); `schedule_hold` controls the Resume pill; `schedule_enabled` off: "Schedule off" with no pill | `resume_schedule` |
 | Temperature line | samples of `checked_temperature`; the dashed line is `effective_target` (the band centre in Auto) | |
 | Humidity | `room_humidity`; "—" when unknown | |
-| Outside | HA weather entity `weather.forecast_home`, imported; "—" when no HA client is connected | |
+| Outside | `outside_temperature` (°F; "—" when there's none), `outside_condition` (words), `outside_icon` (a Material Design Icons glyph; the cloud when empty), from `weather/open-meteo.yaml` (the stub's stand-ins in the preview) | |
 | Sensor fault banner | `sensor_fault` | |
 | Interlock fault banner | `interlock_fault` | none on the wall *(my call: it's a latched safety fault; clear it from HA or the web page with `clear_interlock_fault`)* |
 
