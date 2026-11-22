@@ -48,7 +48,7 @@ run_unit() {
     if [ ${#tests[@]} -eq 0 ]; then echo "no unit tests found" >&2; exit 1; fi
     for src in "${tests[@]}"; do
       name="$(basename "$src" .cpp)"
-      g++ -std=c++17 -Wall -Werror -I thermostat -I sim "$src" -o "$out/$name"
+      g++ -std=c++17 -Wall -Werror -I thermostat -I sim -I weather "$src" -o "$out/$name"
       "$out/$name"
     done
   '
