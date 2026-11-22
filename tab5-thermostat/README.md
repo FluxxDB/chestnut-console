@@ -80,6 +80,11 @@ The screen is the Main Thermostat console from `docs/superpowers/specs/2026-10-2
 
 Add `house_latitude` / `house_longitude` (city-level) to `secrets.yaml` for the sunset/sunrise theme switch.
 
+**Which way up:**
+- The screen follows the Tab5's own tilt sensor (the BMI270 IMU, `hardware/screen-flip.yaml`). It flips between the two landscape ways round (camera on the right or on the left) about a second after you turn the Tab5. In portrait or lying flat it stays as it is.
+- In HA, the **Screen Rotation** setting (Auto / Camera right / Camera left) pins it one way instead.
+- `imu_camera_right` in that file depends on how the IMU sits on the board, so it's measured once: stand the Tab5 camera-right and read the log's `IMU orientation` line.
+
 ## Thermostat logic (milestone 2)
 
 The Tab5 runs the thermostat itself (ESPHome `thermostat` climate `main_thermostat`, with the safety timers, sensor checks, heat/cool interlock, Comfort/Eco and the weekly schedule), so heating and cooling keep working when HA or Wi-Fi is down.

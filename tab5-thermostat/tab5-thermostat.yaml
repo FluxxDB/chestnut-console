@@ -5,7 +5,8 @@
 substitutions:
   name: tab5-thermostat
   friendly_name: Main Thermostat
-  # Landscape. Use 90° instead if the screen comes out upside down.
+  # Landscape, camera on the right, at boot. The IMU then flips it if the Tab5 is the other way
+  # round (hardware/screen-flip.yaml; HA's "Screen Rotation" select can pin it instead).
   display_rotation: 270°
   # Sunset/sunrise theme switching (house location stays in secrets.yaml, not git).
   house_latitude: !secret house_latitude
@@ -25,6 +26,8 @@ packages:
   # display: !include hardware/display-ili9881c.yaml
   display: !include hardware/display-st7123.yaml
   # display: !include hardware/display-st7121.yaml
+  # The screen follows the Tab5's orientation (BMI270 IMU), either landscape way round.
+  screen_flip: !include hardware/screen-flip.yaml
   ui_fonts: !include ui/fonts.yaml
   ui_theme: !include ui/theme.yaml
   ui_console: !include ui/console.yaml

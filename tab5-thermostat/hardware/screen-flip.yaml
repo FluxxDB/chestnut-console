@@ -1,0 +1,71 @@
+# The screen follows the Tab5's orientation: the BMI270 IMU's gravity reading flips the picture
+# between the two landscape ways round, so the Tab5 can stand or hang either way (the wall
+# enclosure mounts it camera-left). Portrait and lying flat leave the screen as it is; a new pose
+# must hold 1 s first. HA's "Screen Rotation" select can pin it instead (Auto / Camera right /
+# Camera left). Spec: docs/superpowers/specs/2026-11-21-screen-auto-flip-design.md.
+
+substitutions:
+  # The orientation reading (0, 90, 180 or 270) while the Tab5 stands camera-right, which depends on
+  # how the IMU sits on the board. Measured on the bench 2026-11-22 (camera right 0, camera left 180),
+  # from the log's "IMU orientation" line.
+  imu_camera_right: "0"
+
+esphome:
+  includes:
+    # Resolved next to this file. A list, so it merges with the other packages' includes.
+    - screen_flip.h
+
+motion:
+  # Bosch BMI270 on the internal bus (address 0x68), read every 250 ms.
+  - platform: bmi270
+    id: imu
+    i2c_id: bsp_bus
+
+sensor:
+  # Which way gravity points in the screen's plane: 0/90/180/270, or NAN within 30° of flat.
+  # Internal: it reads 4 times a second, which HA doesn't need.
+  - platform: motion
+    motion_id: imu
+    type: orientation
+    id: imu_orientation
+    internal: true
+    on_value:
+      - lambda: |-
+          static float last = -1.0f;
+          if (!(std::isnan(x) && std::isnan(last)) && x != last) {
+            if (std::isnan(x)) ESP_LOGI("screen_flip", "IMU orientation: flat");
+            else ESP_LOGI("screen_flip", "IMU orientation: %.0f°", x);
+            last = x;
+          }
+          chestnut_hw::screen_flip(${imu_camera_right}).step(x, millis());
+          id(screen_apply).execute();
+
+select:
+  - platform: template
+    id: screen_lock
+    name: "Screen Rotation"
+    icon: mdi:screen-rotation
+    entity_category: config
+    options:
+      - "Auto"
+      - "Camera right"
+      - "Camera left"
+    initial_option: "Auto"
+    optimistic: true
+    restore_value: true
+    on_value:
+      - script.execute: screen_apply
+
+script:
+  # Show what the lock asks for: the auto-flip's choice, or the pinned way round. Set before LVGL
+  # starts (a restored lock at boot), the rotation is picked up when LVGL sets up.
+  - id: screen_apply
+    then:
+      - lambda: |-
+          const auto index = id(screen_lock).active_index();
+          const int want = chestnut_hw::screen_rotation_for(index.has_value() ? (int) *index : 0,
+                                                            chestnut_hw::screen_flip(${imu_camera_right}).rotation());
+          if (want != (int) id(lvgl_main)->get_rotation()) {
+            ESP_LOGI("screen_flip", "screen rotation %d°", want);
+            id(lvgl_main)->set_rotation(want);
+          }
