@@ -2,6 +2,7 @@ import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   statusFor, targetLabel, holdKind, levelShouldSend, countdown, dayBar, toF, fromF, Debouncer, TargetTaps, safetyRows, eventText,
+  outdoorFor,
 } from '../../config/www/chestnut/lib/rules.js';
 
 const eq = assert.equal;
@@ -402,4 +403,28 @@ test('event_text_plain_wording', () => {
   eq(eventText('call_cool', 'unavailable'), null); // one offline line, not six
   eq(eventText('schedule_period', 'unknown'), null);
   eq(eventText('nope', 'on'), null);
+});
+
+// The room view's outdoor column: the virtual house's outdoor while it exists, else the Tab5's own
+// reading (Outside Temperature / Outside Condition, polled from Open-Meteo). No Met.no fallback.
+const OUT = { simPresent: false, simOutdoorF: null, simWeather: null, clockValid: true, outsideF: null, outsideCondition: null };
+test('outdoor_from_the_tab5', () => {
+  assert.deepEqual(outdoorFor({ ...OUT, outsideF: 48.4, outsideCondition: 'Partly cloudy' }), { f: 48.4, sub: 'partly cloudy', sim: false });
+});
+test('outdoor_none_after_a_failed_poll', () => {
+  assert.deepEqual(outdoorFor({ ...OUT, outsideF: null, outsideCondition: '' }), { f: null, sub: '', sim: false });
+  assert.deepEqual(outdoorFor({ ...OUT, outsideF: NaN, outsideCondition: 'unknown' }), { f: null, sub: '', sim: false });
+});
+test('outdoor_unknown_code_keeps_the_temperature', () => {
+  assert.deepEqual(outdoorFor({ ...OUT, outsideF: 50, outsideCondition: '' }), { f: 50, sub: '', sim: false });
+  assert.deepEqual(outdoorFor({ ...OUT, outsideF: 50, outsideCondition: 'unavailable' }), { f: 50, sub: '', sim: false });
+});
+test('outdoor_sim_wins_while_it_exists', () => {
+  const r = outdoorFor({ ...OUT, simPresent: true, simOutdoorF: 31.5, simWeather: 'Winter day', outsideF: 48.4, outsideCondition: 'Cloudy' });
+  assert.deepEqual(r, { f: 31.5, sub: 'winter day', sim: true });
+});
+test('outdoor_sim_day_curve_without_clock', () => {
+  eq(outdoorFor({ ...OUT, simPresent: true, simOutdoorF: 40, simWeather: 'Summer day', clockValid: false }).sub, 'fixed · clock not set');
+  eq(outdoorFor({ ...OUT, simPresent: true, simOutdoorF: 40, simWeather: 'Fixed', clockValid: false }).sub, 'fixed');
+  assert.deepEqual(outdoorFor({ ...OUT, simPresent: true, simOutdoorF: null, simWeather: 'unavailable' }), { f: null, sub: '', sim: true });
 });

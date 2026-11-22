@@ -145,6 +145,24 @@ export function fromF(f, unit) {
   return unit === '°C' ? (f - 32) * 5 / 9 : f;
 }
 
+// The room view's outdoor column: { f (°F, or null), sub (caption), sim }. While the virtual house
+// exists, its sim_outdoor_now_f (the outdoor its physics uses now), captioned with its weather; a
+// day curve without the device's clock runs on the Fixed setting, so it says so. Otherwise the
+// Tab5's own reading (Outside Temperature / Outside Condition, polled from Open-Meteo), so the
+// dashboard always matches the wall. No reading (a failed poll, the Tab5 offline): f is null.
+const NO_STATE = new Set(['unknown', 'unavailable', '']);
+export function outdoorFor({ simPresent, simOutdoorF, simWeather, clockValid, outsideF, outsideCondition }) {
+  const fin = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const words = (v) => (v != null && !NO_STATE.has(v) ? String(v).toLowerCase() : '');
+  if (simPresent) {
+    let sub = words(simWeather);
+    if (sub && sub !== 'fixed' && clockValid === false) sub = 'fixed · clock not set';
+    return { f: fin(simOutdoorF), sub, sim: true };
+  }
+  const f = fin(outsideF);
+  return { f, sub: f == null ? '' : words(outsideCondition), sim: false };
+}
+
 export class Debouncer {
   constructor(ms, onFire) {
     this.ms = ms;

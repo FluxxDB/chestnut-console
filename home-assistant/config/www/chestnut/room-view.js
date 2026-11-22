@@ -11,7 +11,7 @@
 // (requestAnimationFrame callbacks, this instance) and `_loops` (live loops, whole window).
 import { styles } from './style.js';
 import { HeatField, heatColor, fieldInputs } from './lib/heat.js';
-import { statusFor, toF } from './lib/rules.js';
+import { statusFor, outdoorFor } from './lib/rules.js';
 
 const DASH = '—';
 const STEP_HZ = 30;
@@ -20,7 +20,6 @@ const MAX_STEPS = 6;        // per frame; a longer gap (a stall) drops the backl
 const CANVAS_W = 640;
 const CANVAS_H = 400;
 const BLUR_PX = 10;
-const WEATHER_ENTITY = 'weather.forecast_home';
 const EMBER = '#da5c2c';
 const COOL = '#2a7fff';
 const live = { loops: 0 };
@@ -288,23 +287,18 @@ class ChestnutRoomView extends HTMLElement {
     return (sec + (at != null ? Math.max(0, Date.now() - at) / 1000 : 0)) / 60;
   }
 
-  // Outdoor: the sim's sim_outdoor_now_f (what its physics uses now), else HA's weather entity.
-  // A day curve needs the device's clock: without it the sim uses the Fixed setting, so say so.
+  // Outdoor: the virtual house's while it exists, else the Tab5's own reading (rules.js, outdoorFor).
   _outdoor() {
     const a = this._adapter;
     if (!a) return { f: null, sub: '', sim: false };
-    if ((a.entries || []).some((e) => e.objectId === 'sim_outdoor_now_f')) {
-      const weather = a.str('sim_weather');
-      let sub = weather && !['unknown', 'unavailable'].includes(weather) ? weather.toLowerCase() : '';
-      if (sub && sub !== 'fixed' && a.on('clock_valid') === false) sub = 'fixed · clock not set';
-      return { f: a.num('sim_outdoor_now_f'), sub, sim: true };
-    }
-    const w = a.hass && a.hass.states ? a.hass.states[WEATHER_ENTITY] : null;
-    const t = w && w.attributes ? Number(w.attributes.temperature) : NaN;
-    if (w && !['unknown', 'unavailable'].includes(w.state) && Number.isFinite(t)) {
-      return { f: toF(t, w.attributes.temperature_unit), sub: String(w.state).replace(/-/g, ' '), sim: false };
-    }
-    return { f: null, sub: '', sim: false };
+    return outdoorFor({
+      simPresent: (a.entries || []).some((e) => e.objectId === 'sim_outdoor_now_f'),
+      simOutdoorF: a.num('sim_outdoor_now_f'),
+      simWeather: a.str('sim_weather'),
+      clockValid: a.on('clock_valid'),
+      outsideF: a.num('outside_temperature'),
+      outsideCondition: a.str('outside_condition'),
+    });
   }
 
   _inputs() {
