@@ -193,14 +193,24 @@ static void first_poll_when_the_network_is_up() {
 // and at once when the network comes up.
 static void no_network_is_a_failure() {
   Poller p;
-  CHECK(p.step(1000, false) == Step::Fail);
+  CHECK(p.step(0, true) == Step::Fetch);
+  p.done(true, 1000);
+  CHECK(p.step(1000 + 30 * MIN, false) == Step::Fail);
   CHECK(!p.in_flight());
-  CHECK(p.step(2000, false) == Step::Wait);
-  CHECK(p.step(3000, true) == Step::Fetch);  // network up: at once
-  Poller q;
-  CHECK(q.step(1000, false) == Step::Fail);
-  CHECK(q.step(1000 + 5 * MIN - 1, false) == Step::Wait);
-  CHECK(q.step(1000 + 5 * MIN, false) == Step::Fail);
+  CHECK(p.step(1000 + 30 * MIN + 1000, false) == Step::Wait);
+  CHECK(p.step(1000 + 35 * MIN - 1, false) == Step::Wait);
+  CHECK(p.step(1000 + 35 * MIN, false) == Step::Fail);
+  CHECK(p.step(1000 + 35 * MIN + 1000, true) == Step::Fetch);  // network up: at once
+}
+
+// Before Wi-Fi has come up once since boot there's nothing to fail (the card is blank anyway), so
+// a boot doesn't log a failed poll; the first poll goes out as soon as it's up.
+static void boot_waits_quietly_for_the_network() {
+  Poller p;
+  CHECK(p.step(1000, false) == Step::Wait);
+  CHECK(p.step(60 * 1000, false) == Step::Wait);
+  CHECK(p.step(10 * MIN, false) == Step::Wait);
+  CHECK(p.step(10 * MIN + 1, true) == Step::Fetch);
 }
 
 static void success_waits_30_minutes() {
@@ -365,6 +375,7 @@ int main() {
   icons_are_all_listed();
   first_poll_when_the_network_is_up();
   no_network_is_a_failure();
+  boot_waits_quietly_for_the_network();
   success_waits_30_minutes();
   failure_retries_in_5_minutes();
   network_return_polls_only_after_a_failure();

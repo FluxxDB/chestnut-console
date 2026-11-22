@@ -246,8 +246,8 @@ enum class Step {
 };
 
 // Call step() about once a second with whether the network is up. The first poll goes out as soon
-// as the network is up; a poll due with no network fails at once; after a failure the network
-// coming back polls at once. millis() wrap is fine (signed differences).
+// as the network is up; after that, a poll due with no network fails at once, and after a failure
+// the network coming back polls at once. millis() wrap is fine (signed differences).
 class Poller {
  public:
   explicit Poller(PollTimes t = {}) : t_(t) {}
@@ -255,11 +255,15 @@ class Poller {
   Step step(uint32_t now_ms, bool network_up) {
     const bool came_up = network_up && !net_was_up_;
     net_was_up_ = network_up;
+    ever_up_ = ever_up_ || network_up;
     if (showing_ && (int32_t) (now_ms - ok_at_ms_) > (int32_t) t_.stale_ms) {
       showing_ = false;
       return Step::Expire;
     }
     if (in_flight_) return Step::Wait;
+    // Before the network has been up once since boot there's nothing to fail: the card is blank
+    // anyway, and a boot shouldn't log a failed poll.
+    if (!ever_up_) return Step::Wait;
     bool due = !scheduled_ || (int32_t) (now_ms - next_ms_) >= 0;
     if (!due && came_up && !last_ok_) due = true;
     if (!due) return Step::Wait;
@@ -294,6 +298,7 @@ class Poller {
   bool in_flight_ = false;
   bool last_ok_ = false;
   bool net_was_up_ = false;
+  bool ever_up_ = false;
   bool showing_ = false;  // a good reading is on show
   uint32_t next_ms_ = 0;
   uint32_t ok_at_ms_ = 0;  // when it arrived

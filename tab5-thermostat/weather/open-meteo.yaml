@@ -67,8 +67,8 @@ interval:
               ESP_LOGD("weather", "outside %.1f °F, code %d (%s), task stack %u bytes free", r.temp_f, r.code,
                        r.is_day ? "day" : "night", (unsigned) stack_free);
             } else {
-              ESP_LOGW("weather", "poll failed: HTTP %d, %u bytes%s; retrying in 5 min", status, (unsigned) body.size(),
-                       overflow ? " (too big)" : "");
+              ESP_LOGW("weather", "poll failed: HTTP %d, %u bytes%s, task stack %u bytes free; retrying in 5 min",
+                       status, (unsigned) body.size(), overflow ? " (too big)" : "", (unsigned) stack_free);
             }
             publish(r);
             poller.done(r.ok, millis());
