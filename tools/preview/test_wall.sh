@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Wall readability (Dang, on the Tab5): text is anti-aliased (4-bit glyphs) and larger,
 # and the bigger text still fits: no top-bar overlap, the subline clear of the big number,
-# the long fault banner inside its box, all pills inside the strip.
+# the long fault banner inside its box, all pills inside the strip, every outside condition's words
+# inside the Outside card; and the icon font carries every weather icon.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 dc="docker compose --profile dev run --rm"
@@ -11,6 +12,7 @@ $dc preview preview/console-preview.yaml /config/preview/shots/wall "Heating" "H
 c="python3 tools/preview/check_snapshot.py $sh/wall"
 # Grey text (schedule line, history labels): 4-bit glyphs, line height >= 32 px (was 26 at 1-bit).
 $c heating light f_sched_bpp=4 f_hist_bpp=4 f_status_bpp=4 f_title_bpp=4 "f_sched_h=~^(3[2-9]|4[0-9])$" "f_hist_h=~^(3[2-9]|4[0-9])$" "f_status_h=~^(3[6-9]|4[0-9])$" "strip_slack=~^[1-9][0-9]*$"
+$c heating light out_icons_in_font=1 out_cond_all_fit=1
 $c hold light "topbar_gap=~^[1-9][0-9]*$" resume_visible=1
 $c waiting light sub_room_overlap=0
 $c interlock-fault light banner_visible=1 banner_fits=1

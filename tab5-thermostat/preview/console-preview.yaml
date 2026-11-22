@@ -186,6 +186,48 @@ text_sensor:
         add("out_temp_offline", temp_offline);
         add("out_cond_offline", cond_offline);
       }
+      // The Outside card's icon by name; whether the icon font has every weather icon (else the
+      // missing codepoints); whether every condition's words fit the card (else which, and their width) (test_wall.sh).
+      {
+        using namespace chestnut_weather;
+        const std::string ic = txt(id(lbl_out_icon));
+        const std::pair<const char *, const char *> names[] = {
+            {ICON_SUNNY, "sunny"}, {ICON_NIGHT, "night"}, {ICON_PARTLY, "partly"}, {ICON_NIGHT_PARTLY, "night-partly"},
+            {ICON_CLOUDY, "cloudy"}, {ICON_FOG, "fog"}, {ICON_RAIN, "rain"}, {ICON_POURING, "pouring"},
+            {ICON_SLEET, "sleet"}, {ICON_SNOW, "snow"}, {ICON_HEAVY_SNOW, "heavy-snow"}, {ICON_STORM, "storm"},
+            {ICON_HAIL, "hail"}};
+        std::string name = ic.empty() ? "none" : "?";
+        for (const auto &n : names)
+          if (ic == n.first) name = n.second;
+        add("out_icon", name);
+        const lv_font_t *icf = lv_obj_get_style_text_font(id(lbl_out_icon), LV_PART_MAIN);
+        std::string missing;
+        for (const char *g : ALL_ICONS) {
+          const unsigned char *u = (const unsigned char *) g;
+          const uint32_t cp = ((u[0] & 0x07u) << 18) | ((u[1] & 0x3Fu) << 12) | ((u[2] & 0x3Fu) << 6) | (u[3] & 0x3Fu);
+          lv_font_glyph_dsc_t gd;
+          if (!lv_font_get_glyph_dsc(icf, &gd, cp, 0)) {
+            char h[10];
+            snprintf(h, sizeof(h), "%X ", (unsigned) cp);
+            missing += h;
+          }
+        }
+        add("out_icons_in_font", missing.empty() ? "1" : missing);
+        lv_area_t card, lab;
+        lv_obj_get_coords(id(card_out), &card);
+        lv_obj_get_coords(id(lbl_out_cond), &lab);
+        const lv_font_t *cf = lv_obj_get_style_text_font(id(lbl_out_cond), LV_PART_MAIN);
+        const int room_px = (int) (card.x2 - lab.x1) - 22;  // the card's inset on the left, kept on the right
+        std::string too_wide;
+        for (int code = 0; code <= 99; code++) {
+          const char *t = condition_text(code);
+          lv_point_t sz;
+          lv_text_get_size(&sz, t, cf, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+          if (sz.x > room_px && too_wide.find(t) == std::string::npos)
+            too_wide += std::string(t) + " (" + std::to_string((int) sz.x) + "/" + std::to_string(room_px) + " px); ";
+        }
+        add("out_cond_all_fit", too_wide.empty() ? "1" : too_wide);
+      }
       add("hum", txt(id(lbl_hum)));
       add("hum_cap", txt(id(lbl_hum_desc)));
       add("mode_pills", child(id(btn_mode_off)) + "|" + child(id(btn_mode_heat)) + "|" + child(id(btn_mode_cool)) + "|" + child(id(btn_mode_auto)));

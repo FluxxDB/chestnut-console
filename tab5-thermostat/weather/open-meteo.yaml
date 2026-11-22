@@ -1,0 +1,87 @@
+# The outside reading (UI spec, "Outside card"): Open-Meteo's current weather for the house's place
+# (house_latitude / house_longitude, from secrets.yaml on the Tab5), polled by the Tab5 itself:
+# as soon as Wi-Fi is up, then every 30 min; after a failed poll, again in 5 min, or at once when
+# the network comes back. A failed poll blanks the reading at once (Dang, 2026-11-21). In the US
+# Open-Meteo's default model is NOAA's HRRR (3 km, hourly). Data: Open-Meteo.com, CC BY 4.0.
+#
+# Provides the console's outside ids: outside_temperature (°F; NaN = no reading), outside_condition
+# (words; "" = none) and outside_icon (an MDI glyph; "" = none; internal). The first two go to Home
+# Assistant, which keeps their history; its dashboard shows them.
+# Device builds only: fetch_idf.h runs the request in its own ESP-IDF task. The rules (the reply,
+# the words and icons, when to poll) are in weather.h, unit-tested in tests/unit/test_weather.cpp.
+
+substitutions:
+  weather_url: "https://api.open-meteo.com/v1/forecast"
+
+esphome:
+  includes:
+    # Resolved next to this file. A list, so it merges with the other packages' includes.
+    - weather.h
+    - fetch_idf.h
+
+# Declared so ESPHome links ESP-IDF's HTTP client and its certificate bundle (left out of builds
+# otherwise). Its actions aren't used: they run on the main loop (see fetch_idf.h).
+http_request:
+
+sensor:
+  - platform: template
+    id: outside_temperature
+    name: "Outside Temperature"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: never
+
+text_sensor:
+  - platform: template
+    id: outside_condition
+    name: "Outside Condition"
+    icon: mdi:weather-partly-cloudy
+    update_interval: never
+  - platform: template
+    id: outside_icon
+    internal: true
+    update_interval: never
+
+interval:
+  # Collect a finished fetch, then let the poller decide whether to start one.
+  - interval: 1s
+    then:
+      - lambda: |-
+          using namespace chestnut_weather;
+          static Poller poller;
+          auto publish = [](const Reading &r) {
+            id(outside_temperature).publish_state(r.ok ? r.temp_f : NAN);
+            id(outside_condition).publish_state(r.ok ? condition_text(r.code) : "");
+            id(outside_icon).publish_state(r.ok ? icon_for(r.code, r.is_day) : "");
+          };
+          int status = -1;
+          std::string body;
+          uint32_t stack_free = 0;
+          if (fetch().finished(&status, &body, &stack_free)) {
+            const Reading r = status == 200 ? parse_current(body) : Reading{};
+            if (r.ok) {
+              ESP_LOGD("weather", "outside %.1f °F, code %d (%s), task stack %u bytes free", r.temp_f, r.code,
+                       r.is_day ? "day" : "night", (unsigned) stack_free);
+            } else {
+              ESP_LOGW("weather", "poll failed: HTTP %d, %u bytes; retrying in 5 min", status, (unsigned) body.size());
+            }
+            publish(r);
+            poller.done(r.ok, millis());
+          }
+          switch (poller.step(millis(), network::is_connected())) {
+            case Step::Fetch:
+              if (!fetch().start(forecast_url("${weather_url}", "${house_latitude}", "${house_longitude}"))) {
+                ESP_LOGW("weather", "couldn't start a poll; retrying in 5 min");
+                publish(Reading{});
+                poller.done(false, millis());
+              }
+              break;
+            case Step::Fail:
+              ESP_LOGW("weather", "poll due with no network; retrying when it's back");
+              publish(Reading{});
+              break;
+            case Step::Wait:
+              break;
+          }

@@ -8,11 +8,12 @@ sh="tab5-thermostat/preview/shots"
 $dc --entrypoint rm preview -rf /config/preview/shots/bind /config/preview/shots/debounce /config/preview/shots/clamp >/dev/null 2>&1
 $dc preview preview/console-preview.yaml /config/preview/shots/bind --dump \
   "Heating" "Cooling" "Eco auto band" "Hold" "Schedule off" "Clock not set" "Waiting" \
-  "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" "Finishing" "Interlock while heating" "Sensor fault mid-run" "Eco hold in Auto" "Temperature hold in Auto" "Manual target" "Relay fault" "Relay and sensor fault" "Relay hold" >/dev/null
+  "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" "Finishing" "Interlock while heating" "Sensor fault mid-run" "Eco hold in Auto" "Temperature hold in Auto" "Manual target" "Relay fault" "Relay and sensor fault" "Relay hold" \
+  "Outside cloudy" "Outside clear night" "Outside unknown code" >/dev/null
 c="python3 tools/preview/check_snapshot.py $sh/bind"
 $c heating light room=71 status=Heating "sub=~^to 72° · ([0-9]+ min so far|just started)$" target=72° "tgt_label=Comfort target" tgt_comfort= \
   "sched=Comfort until 10:30 pm" resume_visible=0 mode_sel=0100 fan_sel=10 lvl_sel=10 hum=42% hum_cap=Comfortable \
-  banner_visible=0 hist_visible=1 out_temp=— pm_visible=1 marker=ff7b1b "clock=~^[0-9]{1,2}:[0-9]{2} (am|pm)$" "date=~^[A-Z][a-z]{2} [0-9]{1,2}$"
+  banner_visible=0 hist_visible=1 out_temp=— out_cond= out_icon=cloudy pm_visible=1 marker=ff7b1b "clock=~^[0-9]{1,2}:[0-9]{2} (am|pm)$" "date=~^[A-Z][a-z]{2} [0-9]{1,2}$"
 $c cooling light room=76 status=Cooling "sub=~^to 74° · ([0-9]+ min so far|just started)$" target=74° mode_sel=0010 marker=4098ff "sched=Comfort until 8:00 am"
 $c eco-auto-band light target=67–77° "tgt_label=Eco target" "tgt_comfort=Comfort 72°" status=Idle "sub=holding 67–77°" lvl_sel=01 mode_sel=0001 marker=8b8d90 "sched=Eco until 5:30 pm" "room_deg_gap=~^[0-9]+$"
 $c hold light target=69° status=Heating "sub=~^to 69° · ([0-9]+ min so far|just started)$" "sched=Holding 69° until 10:30 pm" resume_visible=1 "topbar_gap=~^[1-9][0-9]*$"
@@ -23,6 +24,12 @@ $c off-fan-on light status=Fan "sub=System is off · fan on" target=Off pm_visib
 $c sensor-fault light room=— status=Paused banner_visible=1 hist_visible=0 "banner=Temperature sensor problem. Heating and cooling are paused." marker=8b8d90
 $c interlock-fault light status=Paused banner_visible=1 hist_visible=0 "banner=Heating and cooling were both requested, so the system stopped. Clear it in Home Assistant once it's checked."
 $c unknowns light room=— target=— hum=— hum_cap= out_temp=— sched=
+# The Outside card shows the Tab5's own reading (weather/open-meteo.yaml; here the stub's stand-ins):
+# whole degrees, the weather in words, its icon. No reading (as in every other scenario): "—", the cloud.
+$c outside-cloudy light out_temp=48° out_cond=Cloudy out_icon=cloudy
+$c outside-clear-night light out_temp=32° out_cond=Clear out_icon=night
+# A weather code it doesn't know: the temperature still shows, with no words and the cloud.
+$c outside-unknown-code light out_temp=50° out_cond= out_icon=cloudy
 # Switched to Cool mid-heat: under M2 the furnace finishes its minimum run first (up to 3 min).
 $c finishing light status=Heating "sub=Finishing up · stops soon" marker=ff7b1b mode_sel=0010
 # M2: while interlock_fault is latched the climate can still report HEATING with the relays off

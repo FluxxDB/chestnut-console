@@ -22,14 +22,14 @@ run preview $y /config/preview/shots/review/marker --dump "Waiting" "Off fan on"
 check "2 marker next to Idle" python3 tools/preview/check_snapshot.py $sh/review/marker waiting light "marker_gap=~^1[0-4]$"
 check "2 marker next to Fan" python3 tools/preview/check_snapshot.py $sh/review/marker off-fan-on light "marker_gap=~^1[0-4]$"
 
-# 3: outside shows HA's value, and "—" once Home Assistant (the API client) is gone.
-run preview $y /config/preview/shots/review/outside --dump "Heating" --disconnect 2 \
-  --ha-state "weather.forecast_home:temperature=48" --ha-state "weather.forecast_home:=cloudy"
-check "3 outside from HA" python3 tools/preview/check_snapshot.py $sh/review/outside heating light out_temp=48° out_cond=Cloudy
-check "3 outside blank without HA" python3 -c "
-import json,sys; d=json.load(open('$sh/review/outside/heating-light-reconnect.json'))
+# 3: the outside reading is the Tab5's own (weather/open-meteo.yaml), so it stays while Home
+# Assistant (the API client) is gone.
+run preview $y /config/preview/shots/review/outside --dump "Outside cloudy" --disconnect 2
+check "3 outside shown" python3 tools/preview/check_snapshot.py $sh/review/outside outside-cloudy light out_temp=48° out_cond=Cloudy
+check "3 outside kept without HA" python3 -c "
+import json,sys; d=json.load(open('$sh/review/outside/outside-cloudy-light-reconnect.json'))
 t,c=d.get('out_temp_offline'),d.get('out_cond_offline')
-print('  while disconnected:', t, repr(c)); sys.exit(0 if t=='—' and c=='' else 1)"
+print('  while disconnected:', t, repr(c)); sys.exit(0 if t=='48°' and c=='Cloudy' else 1)"
 
 # 4: minutes running are timed on the screen (preview: 1 s per 'minute'), not from the float epoch.
 run preview $y /config/preview/shots/review/minutes --dump --pre-wait 3 "Heating"

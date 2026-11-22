@@ -7,7 +7,8 @@ substitutions:
   friendly_name: Main Thermostat
   # Landscape. Use 90° instead if the screen comes out upside down.
   display_rotation: 270°
-  # Sunset/sunrise theme switching (house location stays in secrets.yaml, not git).
+  # Sunset/sunrise theme switching and the outside weather (house location stays in secrets.yaml,
+  # not git; city-level is enough).
   house_latitude: !secret house_latitude
   house_longitude: !secret house_longitude
   # The schedule's and the virtual house's clock: SNTP, seeded from the RTC at boot.
@@ -29,6 +30,8 @@ packages:
   ui_theme: !include ui/theme.yaml
   ui_console: !include ui/console.yaml
   ui_logic: !include ui/console-logic.yaml
+  # The Outside card's reading: Open-Meteo's current weather, polled over Wi-Fi.
+  weather: !include weather/open-meteo.yaml
   # The thermostat logic (milestone 2).
   logic: !include thermostat/logic.yaml
   # The room sensor and relays. Exactly one must be active: the real ENV III and Unit 4-Relay on

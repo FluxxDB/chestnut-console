@@ -140,17 +140,6 @@ sensor:
     accuracy_decimals: 0
     update_interval: 5s
     lambda: "return lv_display_get_inactive_time(nullptr) / 1000.0f;"
-  - platform: homeassistant
-    id: out_temp
-    entity_id: weather.forecast_home
-    attribute: temperature
-    internal: true
-
-text_sensor:
-  - platform: homeassistant
-    id: out_cond
-    entity_id: weather.forecast_home
-    internal: true
 
 interval:
   - interval: 250ms
@@ -401,21 +390,14 @@ script:
           show(id(btn_plus), !off);
 
           // ── outside and humidity ──
-          // No Home Assistant client means no fresh weather: show "—", not a stale value.
-          const bool ha = api::global_api_server != nullptr && api::global_api_server->is_connected();
-          set_text(id(lbl_out_temp), ha ? deg(id(out_temp).state) : std::string("—"));
+          // The outside reading is the Tab5's own (weather/open-meteo.yaml, or the preview's stand-ins):
+          // "—" and no words when there's none (a failed poll), and then the cloud icon (weather.h's
+          // ICON_DEFAULT). It no longer depends on Home Assistant being connected.
+          set_text(id(lbl_out_temp), deg(id(outside_temperature).state));
+          set_text(id(lbl_out_cond), id(outside_condition).state);
           {
-            std::string c = ha ? id(out_cond).state : std::string("");
-            static const std::map<std::string, std::string> names = {
-                {"clear-night", "Clear"}, {"sunny", "Sunny"}, {"partlycloudy", "Partly cloudy"},
-                {"cloudy", "Cloudy"}, {"fog", "Fog"}, {"rainy", "Rain"}, {"pouring", "Heavy rain"},
-                {"snowy", "Snow"}, {"snowy-rainy", "Sleet"}, {"hail", "Hail"}, {"lightning", "Thunder"},
-                {"lightning-rainy", "Storms"}, {"windy", "Windy"}, {"windy-variant", "Windy"},
-                {"exceptional", "Unusual"}, {"unavailable", ""}, {"unknown", ""}};
-            auto it = names.find(c);
-            if (it != names.end()) c = it->second;
-            else if (!c.empty()) { std::replace(c.begin(), c.end(), '-', ' '); c[0] = (char) toupper((unsigned char) c[0]); }
-            set_text(id(lbl_out_cond), c);
+            const std::string &ic = id(outside_icon).state;
+            set_text(id(lbl_out_icon), ic.empty() ? std::string("\U000F0590") : ic);
           }
           const float hum = id(room_humidity).state;
           set_text(id(lbl_hum), std::isnan(hum) ? std::string("—") : num(hum) + "%");

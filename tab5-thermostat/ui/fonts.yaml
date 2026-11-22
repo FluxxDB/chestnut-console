@@ -53,11 +53,27 @@ font:
     size: 104
     bpp: 4
     glyphs: "°"
-  # Material Design Icons: moon, sun, cloud, water drop.
+  # Material Design Icons: the theme button's moon and sun, the humidity drop, and the Outside
+  # card's weather (every icon in weather/weather.h's ALL_ICONS; the preview tests check).
   - file:
       type: web
       url: ${mdi_font_url}
     id: f_icon
     size: 34
     bpp: 4
-    glyphs: ["\U000F0594", "\U000F05A8", "\U000F0590", "\U000F058C"]
+    glyphs:
+      - "\U000F0594"  # weather-night (also the theme button's moon)
+      - "\U000F05A8"  # white-balance-sunny (the theme button's sun)
+      - "\U000F058C"  # water (humidity)
+      - "\U000F0599"  # weather-sunny
+      - "\U000F0595"  # weather-partly-cloudy
+      - "\U000F0F31"  # weather-night-partly-cloudy
+      - "\U000F0590"  # weather-cloudy
+      - "\U000F0591"  # weather-fog
+      - "\U000F0597"  # weather-rainy
+      - "\U000F0596"  # weather-pouring
+      - "\U000F067F"  # weather-snowy-rainy
+      - "\U000F0598"  # weather-snowy
+      - "\U000F0F36"  # weather-snowy-heavy
+      - "\U000F067E"  # weather-lightning-rainy
+      - "\U000F0592"  # weather-hail

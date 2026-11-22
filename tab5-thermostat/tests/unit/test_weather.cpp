@@ -126,7 +126,7 @@ static void conditions_in_words() {
   CHECK(std::strcmp(condition_text(45), "Fog") == 0);
   CHECK(std::strcmp(condition_text(48), "Fog") == 0);
   CHECK(std::strcmp(condition_text(53), "Drizzle") == 0);
-  CHECK(std::strcmp(condition_text(57), "Freezing drizzle") == 0);
+  CHECK(std::strcmp(condition_text(57), "Icy drizzle") == 0);
   CHECK(std::strcmp(condition_text(61), "Light rain") == 0);
   CHECK(std::strcmp(condition_text(63), "Rain") == 0);
   CHECK(std::strcmp(condition_text(65), "Heavy rain") == 0);
@@ -139,7 +139,7 @@ static void conditions_in_words() {
   CHECK(std::strcmp(condition_text(82), "Heavy showers") == 0);
   CHECK(std::strcmp(condition_text(85), "Snow showers") == 0);
   CHECK(std::strcmp(condition_text(95), "Thunderstorms") == 0);
-  CHECK(std::strcmp(condition_text(99), "Storms with hail") == 0);
+  CHECK(std::strcmp(condition_text(99), "Hailstorms") == 0);
   CHECK(std::strcmp(condition_text(-1), "") == 0);
   CHECK(std::strcmp(condition_text(100), "") == 0);
 }

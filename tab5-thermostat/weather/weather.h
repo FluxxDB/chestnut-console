@@ -32,7 +32,8 @@ inline constexpr const char *ALL_ICONS[] = {ICON_SUNNY, ICON_NIGHT, ICON_PARTLY,
                                             ICON_HEAVY_SNOW, ICON_STORM, ICON_HAIL};
 
 // ── WMO weather codes (Open-Meteo's weather_code) ──
-// In words, short enough for the card. "" for a code that isn't in the WMO list Open-Meteo uses.
+// In words, short enough for the card (test_wall.sh measures them all). "" for a code that isn't in
+// the WMO list Open-Meteo uses.
 inline const char *condition_text(int code) {
   switch (code) {
     case 0: return "Clear";
@@ -41,7 +42,7 @@ inline const char *condition_text(int code) {
     case 3: return "Cloudy";
     case 45: case 48: return "Fog";
     case 51: case 53: case 55: return "Drizzle";
-    case 56: case 57: return "Freezing drizzle";
+    case 56: case 57: return "Icy drizzle";
     case 61: return "Light rain";
     case 63: return "Rain";
     case 65: return "Heavy rain";
@@ -54,7 +55,7 @@ inline const char *condition_text(int code) {
     case 82: return "Heavy showers";
     case 85: case 86: return "Snow showers";
     case 95: return "Thunderstorms";
-    case 96: case 99: return "Storms with hail";
+    case 96: case 99: return "Hailstorms";
     default: return "";
   }
 }
