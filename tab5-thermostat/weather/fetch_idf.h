@@ -17,7 +17,7 @@ namespace chestnut_weather {
 
 class Fetch {
  public:
-  static constexpr size_t MAX_BODY = 4096;   // the reply is ~400 bytes; more is cut (and won't parse)
+  static constexpr size_t MAX_BODY = 4096;   // the reply is ~400 bytes; past this the poll fails
   static constexpr int TIMEOUT_MS = 10000;   // esp_http_client's, per connect / read
   static constexpr uint32_t STACK = 10240;   // TLS handshake; the high-water mark is logged
 
@@ -27,6 +27,7 @@ class Fetch {
     url_ = url;
     body_.clear();
     status_ = -1;
+    overflow_ = false;
     state_.store(RUNNING);
     if (xTaskCreate(&Fetch::task_, "weather", STACK, this, tskIDLE_PRIORITY + 1, nullptr) != pdPASS) {
       state_.store(IDLE);
@@ -35,11 +36,13 @@ class Fetch {
     return true;
   }
 
-  // Once the fetch has finished: true, with the HTTP status (-1: no reply) and the body.
-  bool finished(int *status, std::string *body, uint32_t *stack_free = nullptr) {
+  // Once the fetch has finished: true, with the HTTP status (-1: no reply), the body, and whether it
+  // overflowed MAX_BODY (then parts were dropped: chestnut_weather::reading_from refuses it).
+  bool finished(int *status, std::string *body, bool *overflow, uint32_t *stack_free = nullptr) {
     if (state_.load() != DONE) return false;
     *status = status_;
     *body = std::move(body_);
+    *overflow = overflow_;
     if (stack_free) *stack_free = stack_free_;
     state_.store(IDLE);
     return true;
@@ -50,8 +53,10 @@ class Fetch {
 
   static esp_err_t on_event_(esp_http_client_event_t *e) {
     auto *f = static_cast<Fetch *>(e->user_data);
-    if (e->event_id == HTTP_EVENT_ON_DATA && e->data_len > 0 && f->body_.size() + e->data_len <= MAX_BODY)
-      f->body_.append(static_cast<const char *>(e->data), e->data_len);
+    if (e->event_id != HTTP_EVENT_ON_DATA || e->data_len <= 0 || f->overflow_) return ESP_OK;
+    // Once a piece is dropped, every later one is too: the body never has a hole in the middle.
+    if (f->body_.size() + e->data_len > MAX_BODY) f->overflow_ = true;
+    else f->body_.append(static_cast<const char *>(e->data), e->data_len);
     return ESP_OK;
   }
 
@@ -78,6 +83,7 @@ class Fetch {
   std::string url_;
   std::string body_;
   int status_ = -1;
+  bool overflow_ = false;
   uint32_t stack_free_ = 0;
 };
 

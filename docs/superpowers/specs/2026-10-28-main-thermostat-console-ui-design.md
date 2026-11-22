@@ -13,7 +13,7 @@ The Tab5 can't render Home Assistant's own dashboard (it has no browser). Phones
 - At a glance: room temperature, target, what the system is doing right now, humidity, outdoor temperature, time.
 - Change the target with big − / + buttons. Change mode, fan and Comfort/Eco with one tap. See the schedule state, see when a manual change is holding, and resume the schedule.
 - Readable in light and dark, with a theme toggle that also follows sunset and sunrise.
-- Works fully when Home Assistant or Wi-Fi is down (only the outdoor reading goes blank: it needs Wi-Fi and the internet, but since 2026-11-21 not Home Assistant).
+- Works fully when Home Assistant or Wi-Fi is down (only the outdoor reading goes blank, at the next poll, within 30 minutes: it needs Wi-Fi and the internet, but since 2026-11-21 not Home Assistant).
 
 ## Non-goals (for this version)
 
@@ -130,7 +130,7 @@ All fonts render with **4-bit anti-aliasing** (`bpp: 4`). At ESPHome's default 1
 
 **Outside card** *(changed 2026-11-21, Dang: the Tab5 polls the weather itself. It was HA's Met.no weather entity, which averaged about 4 °F off against the nearest airport stations over a week; NOAA's HRRR model through Open-Meteo averaged under 1.5 °F.)*
 - Temperature and condition from Open-Meteo's current weather (its default model in the US is NOAA's HRRR), polled by the Tab5 over Wi-Fi (`weather/open-meteo.yaml`): as soon as Wi-Fi is up, then every 30 min; after a failed poll, again in 5 min *(my call)*, or as soon as the network is back. The place is `house_latitude` / `house_longitude` from `secrets.yaml`, as for the sunset theme switch.
-- A failed poll (no network, no reply, a bad reply) shows "—" and no condition at once *(Dang)*. The card no longer depends on Home Assistant being connected.
+- A failed poll (no network, no reply, a bad reply) shows "—" and no condition at once *(Dang)*; so does a reading 40 minutes old, should a fetch ever get stuck *(my call)*. The card no longer depends on Home Assistant being connected.
 - The fetch runs in its own task, so it never pauses the screen or the thermostat *(my call)*.
 - The icon follows the weather *(my call)*: sun or moon, partly cloudy by day or night, cloud, fog, rain, heavy rain, sleet, snow, heavy snow, storm, hail. The cloud when there's no reading or the weather code is unknown.
 - The conditions in words are short enough for the card (`tools/preview/test_wall.sh` measures them all).

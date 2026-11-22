@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# The preview's stand-in (ui/dev/contract-stub.yaml) can't drift from milestone 2's contract: every
-# entity the console uses exists in both with the same type, and the stub defines nothing M2 lacks
-# (mac-chestnut-console's ask, when the stub became a preview-only fixture).
+# The preview's stand-in (ui/dev/contract-stub.yaml) can't drift from the real packages' contract
+# (milestone 2's logic and virtual house, and the weather package): every entity the console uses
+# exists in both with the same type, and the stub defines nothing they lack (mac-chestnut-console's
+# ask, when the stub became a preview-only fixture).
 # M2's packages come from this tree once merged, else from origin/mac/thermostat-logic.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 t=tab5-thermostat
-m2=("$t/thermostat/logic.yaml" "$t/sim/virtual-house.yaml")
+m2=("$t/thermostat/logic.yaml" "$t/sim/virtual-house.yaml" "$t/weather/open-meteo.yaml")
 if [ ! -f "${m2[0]}" ]; then
   tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
   git fetch -q origin mac/thermostat-logic

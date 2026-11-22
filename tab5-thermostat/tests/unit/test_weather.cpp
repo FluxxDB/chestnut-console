@@ -254,6 +254,95 @@ static void survives_millis_wrap() {
   CHECK(p.step(t0 + 35 * MIN, true) == Step::Fetch);
 }
 
+// Odd but valid layouts around the reading: nested values, escaped quotes, a repeated key (the first
+// counts), some nesting before "current".
+static void reads_past_odd_values() {
+  std::string body = "{\"note\":\"a \\\"quoted\\\" } { string\",\"deep\":{\"a\":[1,{\"b\":[[2],[3]]},\"x\"]},"
+                     "\"current_units\":{\"temperature_2m\":\"°F\"},"
+                     "\"current\":{\"temperature_2m\":40.5,\"weather_code\":1,\"is_day\":1},"
+                     "\"current\":{\"temperature_2m\":99.0,\"weather_code\":3,\"is_day\":1}}";
+  Reading r = parse_current(body);
+  CHECK(r.ok);
+  CHECK_NEAR(r.temp_f, 40.5, 0.001);
+  CHECK(r.code == 1);
+  std::string nested = "{\"n\":";
+  for (int i = 0; i < 10; i++) nested += "[";
+  for (int i = 0; i < 10; i++) nested += "]";
+  nested += ",\"current_units\":{\"temperature_2m\":\"°F\"},\"current\":{\"temperature_2m\":40.5}}";
+  CHECK(parse_current(nested).ok);
+}
+
+// Thousands of nested brackets (a broken or hostile reply) are refused, not followed: the reader
+// runs on the main loop's small stack.
+static void refuses_deep_nesting() {
+  for (const char *open : {"[", "{\"a\":"}) {
+    std::string body = "{\"x\":";
+    for (int i = 0; i < 4000; i++) body += open;
+    body += "1";
+    for (int i = 0; i < 4000; i++) body += open[0] == '[' ? "]" : "}";
+    body += ",\"current_units\":{\"temperature_2m\":\"°F\"},\"current\":{\"temperature_2m\":40.5}}";
+    CHECK(!parse_current(body).ok);
+  }
+}
+
+// A number too big for a float is refused before it's converted.
+static void refuses_huge_numbers() {
+  CHECK(!parse_current(reply("\"temperature_2m\":1e300,\"weather_code\":3,\"is_day\":0")).ok);
+  CHECK(!parse_current(reply("\"temperature_2m\":-1e300,\"weather_code\":3,\"is_day\":0")).ok);
+  // A weather code out of range is unknown; the temperature still counts.
+  Reading r = parse_current(reply("\"temperature_2m\":50,\"weather_code\":1e300,\"is_day\":0"));
+  CHECK(r.ok && r.code == -1);
+}
+
+// What a finished fetch gives: a reading only from a complete 200 reply.
+static void reading_only_from_a_whole_200_reply() {
+  const std::string good = reply(NORMAL);
+  CHECK(reading_from(200, good, false).ok);
+  CHECK(!reading_from(404, good, false).ok);
+  CHECK(!reading_from(500, good, false).ok);
+  CHECK(!reading_from(-1, "", false).ok);  // no reply
+  CHECK(!reading_from(200, good, true).ok);  // the body overflowed: parts were dropped
+  CHECK(!reading_from(200, "", false).ok);
+}
+
+// A reading older than 40 minutes (a fetch stuck past its own timeouts, say) is blanked once,
+// even with a fetch still in flight; a reading that keeps being renewed never is.
+static void a_stuck_reading_expires() {
+  Poller p;
+  CHECK(p.step(0, true) == Step::Fetch);
+  p.done(true, 0);
+  CHECK(p.step(30 * MIN, true) == Step::Fetch);  // this fetch never reports back
+  CHECK(p.step(40 * MIN, true) == Step::Wait);
+  CHECK(p.step(40 * MIN + 1, true) == Step::Expire);
+  CHECK(p.step(40 * MIN + 2, true) == Step::Wait);  // once
+  CHECK(p.step(90 * MIN, true) == Step::Wait);
+  Poller q;
+  CHECK(q.step(0, true) == Step::Fetch);
+  q.done(true, 0);
+  bool expired = false;
+  for (uint32_t t = 1000; t < 5u * 60u * MIN; t += 1000) {
+    const Step s = q.step(t, true);
+    expired |= s == Step::Expire;
+    if (s == Step::Fetch) q.done(true, t);
+  }
+  CHECK(!expired);
+}
+
+// After a failed poll there's nothing on show to expire.
+static void no_expiry_after_a_failure() {
+  Poller p;
+  CHECK(p.step(0, true) == Step::Fetch);
+  p.done(true, 0);
+  CHECK(p.step(30 * MIN, true) == Step::Fetch);
+  p.done(false, 30 * MIN + 500);
+  bool expired = false;
+  for (uint32_t t = 30 * MIN + 1000; t < 120 * MIN; t += 1000) {
+    const Step s = p.step(t, false);
+    expired |= s == Step::Expire;
+  }
+  CHECK(!expired);
+}
+
 static void url_carries_the_place_and_units() {
   std::string u = forecast_url("https://api.open-meteo.com/v1/forecast", "52.52", "13.41");
   CHECK(u == "https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41"
@@ -282,5 +371,11 @@ int main() {
   waits_for_the_fetch_in_flight();
   survives_millis_wrap();
   url_carries_the_place_and_units();
+  reads_past_odd_values();
+  refuses_deep_nesting();
+  refuses_huge_numbers();
+  reading_only_from_a_whole_200_reply();
+  a_stuck_reading_expires();
+  no_expiry_after_a_failure();
   return CHECK_SUMMARY("test_weather");
 }

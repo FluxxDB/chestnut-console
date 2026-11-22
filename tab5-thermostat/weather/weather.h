@@ -83,8 +83,9 @@ inline std::string forecast_url(const std::string &base, const std::string &lat,
          "&current=temperature_2m,weather_code,is_day&temperature_unit=fahrenheit&timezone=GMT&forecast_days=1";
 }
 
-// Outside air anywhere people live; a value past this is a broken reply, not weather.
-inline bool plausible_f(float t) { return std::isfinite(t) && t >= -80.0f && t <= 140.0f; }
+// Outside air anywhere people live; a value past this is a broken reply, not weather. A double, so
+// a huge number in a reply is refused before it's converted to a float.
+inline bool plausible_f(double t) { return std::isfinite(t) && t >= -80.0 && t <= 140.0; }
 
 struct Reading {
   bool ok = false;     // a usable reading: temp_f is valid
@@ -98,6 +99,9 @@ namespace detail {
 // doesn't need. Not a general parser: it checks only what the reading depends on. Every function
 // returns std::string::npos on anything malformed or cut off.
 constexpr size_t NPOS = std::string::npos;
+// Open-Meteo's reply nests two deep. The reader recurses on the main loop's small stack, so deeper
+// replies (broken or hostile) are refused rather than followed.
+constexpr int MAX_DEPTH = 16;
 
 inline size_t ws(const std::string &s, size_t i) {
   while (i < s.size() && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t')) i++;
@@ -114,7 +118,8 @@ inline size_t skip_string(const std::string &s, size_t i) {
 }
 
 // Any JSON value starting at s[i] (after whitespace); returns the index after it.
-inline size_t skip_value(const std::string &s, size_t i) {
+inline size_t skip_value(const std::string &s, size_t i, int depth = 0) {
+  if (depth > MAX_DEPTH) return NPOS;
   i = ws(s, i);
   if (i >= s.size()) return NPOS;
   const char c = s[i];
@@ -130,7 +135,7 @@ inline size_t skip_value(const std::string &s, size_t i) {
         if (i == NPOS || i >= s.size() || s[i] != ':') return NPOS;
         i++;
       }
-      i = skip_value(s, i);
+      i = skip_value(s, i, depth + 1);
       if (i == NPOS) return NPOS;
       i = ws(s, i);
       if (i >= s.size()) return NPOS;
@@ -208,7 +213,7 @@ inline Reading parse_current(const std::string &body) {
   const size_t cur = member(body, root, "current");
   if (cur == NPOS || body[cur] != '{' || skip_value(body, cur) == NPOS) return r;
   double v;
-  if (!number_at(body, member(body, cur, "temperature_2m"), &v) || !plausible_f((float) v)) return r;
+  if (!number_at(body, member(body, cur, "temperature_2m"), &v) || !plausible_f(v)) return r;
   r.temp_f = (float) v;
   if (number_at(body, member(body, cur, "weather_code"), &v) && v >= 0 && v <= 99 && v == std::floor(v))
     r.code = (int) v;
@@ -217,16 +222,27 @@ inline Reading parse_current(const std::string &body) {
   return r;
 }
 
+// What a finished fetch gives: a reading only from a whole 200 reply. overflow: the body was too
+// big and parts of it were dropped, so whatever parses from it can't be trusted.
+inline Reading reading_from(int status, const std::string &body, bool overflow) {
+  if (status != 200 || overflow) return Reading{};
+  return parse_current(body);
+}
+
 // ── When to poll ──
 struct PollTimes {
   uint32_t ok_ms = 30u * 60u * 1000u;    // after a good reading
   uint32_t retry_ms = 5u * 60u * 1000u;  // after a failed poll
+  // A good reading older than this is blanked, whatever else is going on (a fetch stuck past its
+  // own timeouts): the poll interval plus room for a slow fetch.
+  uint32_t stale_ms = 40u * 60u * 1000u;
 };
 
 enum class Step {
   Wait,   // nothing to do now
   Fetch,  // start a fetch; report back with done()
   Fail,   // a poll fell due with no network: a failed poll (blank the card)
+  Expire, // the reading on show is older than stale_ms: blank the card (once)
 };
 
 // Call step() about once a second with whether the network is up. The first poll goes out as soon
@@ -239,11 +255,16 @@ class Poller {
   Step step(uint32_t now_ms, bool network_up) {
     const bool came_up = network_up && !net_was_up_;
     net_was_up_ = network_up;
+    if (showing_ && (int32_t) (now_ms - ok_at_ms_) > (int32_t) t_.stale_ms) {
+      showing_ = false;
+      return Step::Expire;
+    }
     if (in_flight_) return Step::Wait;
     bool due = !scheduled_ || (int32_t) (now_ms - next_ms_) >= 0;
     if (!due && came_up && !last_ok_) due = true;
     if (!due) return Step::Wait;
     if (!network_up) {
+      showing_ = false;
       schedule_(false, now_ms);
       return Step::Fail;
     }
@@ -254,6 +275,8 @@ class Poller {
   // The fetch that step() started has finished: ok = a usable reading.
   void done(bool ok, uint32_t now_ms) {
     in_flight_ = false;
+    showing_ = ok;
+    if (ok) ok_at_ms_ = now_ms;
     schedule_(ok, now_ms);
   }
 
@@ -271,7 +294,9 @@ class Poller {
   bool in_flight_ = false;
   bool last_ok_ = false;
   bool net_was_up_ = false;
+  bool showing_ = false;  // a good reading is on show
   uint32_t next_ms_ = 0;
+  uint32_t ok_at_ms_ = 0;  // when it arrived
 };
 
 }  // namespace chestnut_weather

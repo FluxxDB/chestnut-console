@@ -52,7 +52,7 @@ tab5-thermostat/             ESPHome config dir (mounted at /config in the espho
     bench-io.yaml            the real ENV III + Unit 4-Relay on Port A (milestone 4); relay_unit.h (relay byte, link state machine) + bench_io.h (I2C glue)
   weather/                   the outside reading: open-meteo.yaml (polls Open-Meteo), weather.h (the reply, words, icons, timing), fetch_idf.h (the HTTPS task)
   ui/                        the console: fonts, theme, console (layout), console-logic (bindings)
-    dev/contract-stub.yaml   DEV ONLY stand-in for milestone 2 (same entity ids, fake values); the preview's fixture
+    dev/contract-stub.yaml   DEV ONLY stand-in for milestone 2 and the weather package (same entity ids, fake values); the preview's fixture
   preview/                   desktop preview entry point (host + SDL); shots/ is gitignored
   secrets.yaml.example       copy to secrets.yaml locally (never commit, never post on beacon)
   docs/                      research.md, shopping-list.md, site-survey.md (what's known about the house's HVAC)

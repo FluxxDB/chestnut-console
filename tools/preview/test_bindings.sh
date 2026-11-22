@@ -7,14 +7,14 @@ dc="docker compose --profile dev run --rm"
 sh="tab5-thermostat/preview/shots"
 $dc --entrypoint rm preview -rf /config/preview/shots/bind /config/preview/shots/debounce /config/preview/shots/clamp >/dev/null 2>&1
 $dc preview preview/console-preview.yaml /config/preview/shots/bind --dump \
-  "Heating" "Cooling" "Eco auto band" "Hold" "Schedule off" "Clock not set" "Waiting" \
-  "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" "Finishing" "Interlock while heating" "Sensor fault mid-run" "Eco hold in Auto" "Temperature hold in Auto" "Manual target" "Relay fault" "Relay and sensor fault" "Relay hold" \
-  "Outside cloudy" "Outside clear night" "Outside unknown code" >/dev/null
+  "Heating" "Outside cloudy" "Outside clear night" "Outside unknown code" "Cooling" "Eco auto band" "Hold" "Schedule off" "Clock not set" "Waiting" \
+  "Off fan on" "Sensor fault" "Interlock fault" "Unknowns" "Finishing" "Interlock while heating" "Sensor fault mid-run" "Eco hold in Auto" "Temperature hold in Auto" "Manual target" "Relay fault" "Relay and sensor fault" "Relay hold" >/dev/null
 c="python3 tools/preview/check_snapshot.py $sh/bind"
 $c heating light room=71 status=Heating "sub=~^to 72° · ([0-9]+ min so far|just started)$" target=72° "tgt_label=Comfort target" tgt_comfort= \
   "sched=Comfort until 10:30 pm" resume_visible=0 mode_sel=0100 fan_sel=10 lvl_sel=10 hum=42% hum_cap=Comfortable \
   banner_visible=0 hist_visible=1 out_temp=— out_cond= out_icon=cloudy pm_visible=1 marker=ff7b1b "clock=~^[0-9]{1,2}:[0-9]{2} (am|pm)$" "date=~^[A-Z][a-z]{2} [0-9]{1,2}$"
-$c cooling light room=76 status=Cooling "sub=~^to 74° · ([0-9]+ min so far|just started)$" target=74° mode_sel=0010 marker=4098ff "sched=Comfort until 8:00 am"
+# Cooling runs right after the outside scenarios: with no reading the card is back to "—" and the cloud.
+$c cooling light out_temp=— out_cond= out_icon=cloudy room=76 status=Cooling "sub=~^to 74° · ([0-9]+ min so far|just started)$" target=74° mode_sel=0010 marker=4098ff "sched=Comfort until 8:00 am"
 $c eco-auto-band light target=67–77° "tgt_label=Eco target" "tgt_comfort=Comfort 72°" status=Idle "sub=holding 67–77°" lvl_sel=01 mode_sel=0001 marker=8b8d90 "sched=Eco until 5:30 pm" "room_deg_gap=~^[0-9]+$"
 $c hold light target=69° status=Heating "sub=~^to 69° · ([0-9]+ min so far|just started)$" "sched=Holding 69° until 10:30 pm" resume_visible=1 "topbar_gap=~^[1-9][0-9]*$"
 $c schedule-off light "sched=Schedule off" resume_visible=0

@@ -76,7 +76,7 @@ The screen is the Main Thermostat console from `docs/superpowers/specs/2026-10-2
 | `ui/theme.yaml` | color styles, the light/dark switch (also flips at sunset/sunrise), and the house location from `secrets.yaml` |
 | `ui/console.yaml` | the layout: one LVGL page, 1280×720 |
 | `ui/console-logic.yaml` | the bindings: what each element reads and writes, the − / + debounce, idle dimming |
-| `ui/dev/contract-stub.yaml` | **dev only:** a stand-in for the milestone 2 thermostat logic, with the same entity ids and fake values (it switches nothing). The Tab5 now runs the real logic; the stub stays as the desktop preview's fixture. |
+| `ui/dev/contract-stub.yaml` | **dev only:** a stand-in for the milestone 2 thermostat logic and the weather package, with the same entity ids and fake values (it switches nothing). The Tab5 now runs the real logic; the stub stays as the desktop preview's fixture. |
 | `weather/open-meteo.yaml` + `weather.h`, `fetch_idf.h` | the Outside card's reading: Open-Meteo's current weather, polled by the Tab5 every 30 minutes (5 after a failed poll) in its own task, and sent to HA as **Outside Temperature** and **Outside Condition**. Weather data by [Open-Meteo.com](https://open-meteo.com/) (CC BY 4.0). |
 
 Add `house_latitude` / `house_longitude` (city-level) to `secrets.yaml` for the sunset/sunrise theme switch and the outside weather. The weather needs internet access; without it the Outside card shows "—".

@@ -1,8 +1,9 @@
 # The outside reading (UI spec, "Outside card"): Open-Meteo's current weather for the house's place
 # (house_latitude / house_longitude, from secrets.yaml on the Tab5), polled by the Tab5 itself:
 # as soon as Wi-Fi is up, then every 30 min; after a failed poll, again in 5 min, or at once when
-# the network comes back. A failed poll blanks the reading at once (Dang, 2026-11-21). In the US
-# Open-Meteo's default model is NOAA's HRRR (3 km, hourly). Data: Open-Meteo.com, CC BY 4.0.
+# the network comes back. A failed poll blanks the reading at once (Dang, 2026-11-21), and so does
+# a reading 40 min old (a fetch stuck past its timeouts), so the card never shows a stale one.
+# In the US Open-Meteo's default model is NOAA's HRRR (3 km, hourly). Data: Open-Meteo.com, CC BY 4.0.
 #
 # Provides the console's outside ids: outside_temperature (°F; NaN = no reading), outside_condition
 # (words; "" = none) and outside_icon (an MDI glyph; "" = none; internal). The first two go to Home
@@ -58,14 +59,16 @@ interval:
           };
           int status = -1;
           std::string body;
+          bool overflow = false;
           uint32_t stack_free = 0;
-          if (fetch().finished(&status, &body, &stack_free)) {
-            const Reading r = status == 200 ? parse_current(body) : Reading{};
+          if (fetch().finished(&status, &body, &overflow, &stack_free)) {
+            const Reading r = reading_from(status, body, overflow);
             if (r.ok) {
               ESP_LOGD("weather", "outside %.1f °F, code %d (%s), task stack %u bytes free", r.temp_f, r.code,
                        r.is_day ? "day" : "night", (unsigned) stack_free);
             } else {
-              ESP_LOGW("weather", "poll failed: HTTP %d, %u bytes; retrying in 5 min", status, (unsigned) body.size());
+              ESP_LOGW("weather", "poll failed: HTTP %d, %u bytes%s; retrying in 5 min", status, (unsigned) body.size(),
+                       overflow ? " (too big)" : "");
             }
             publish(r);
             poller.done(r.ok, millis());
@@ -80,6 +83,11 @@ interval:
               break;
             case Step::Fail:
               ESP_LOGW("weather", "poll due with no network; retrying when it's back");
+              publish(Reading{});
+              break;
+            case Step::Expire:
+              ESP_LOGW("weather", "no good reading for 40 min%s; blanking it",
+                       poller.in_flight() ? " (a fetch is stuck)" : "");
               publish(Reading{});
               break;
             case Step::Wait:
